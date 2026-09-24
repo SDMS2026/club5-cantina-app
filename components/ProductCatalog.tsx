@@ -3,7 +3,7 @@
 import React, { useState, useMemo } from 'react';
 import Image from 'next/image';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Plus, Check, X, ShoppingBag, Utensils, Coffee, Cookie, Sparkles } from 'lucide-react';
+import { Search, Plus, Minus, Check, X, ShoppingBag, Utensils, Coffee, Cookie, Sparkles } from 'lucide-react';
 import { Producto, ItemCarrito } from '@/types/pos';
 import { formatUSD, formatBs, calcularConversionBs } from '@/lib/utils';
 import { esUrlImagen, CATEGORIAS_PRODUCTOS_SISTEMA } from '@/lib/productEmojis';
@@ -14,6 +14,7 @@ interface ProductCatalogProps {
   itemsCarrito: ItemCarrito[];
   tasaBcv: number;
   onAgregarProducto: (producto: Producto) => void;
+  onDisminuirProducto?: (productoId: string) => void;
   cargando?: boolean;
 }
 
@@ -64,6 +65,7 @@ export function ProductCatalog({
   itemsCarrito,
   tasaBcv,
   onAgregarProducto,
+  onDisminuirProducto,
   cargando = false,
 }: ProductCatalogProps) {
   const [busqueda, setBusqueda] = useState('');
@@ -263,30 +265,59 @@ export function ProductCatalog({
                     </div>
 
                     <div className="mt-2.5 flex items-end justify-between gap-1 pt-2 border-t border-gray-100">
-                      <div>
-                        <div className="text-base font-bold tracking-tight text-gray-900">
+                      <div className="min-w-0 flex-1 pr-1">
+                        <div className="text-sm sm:text-base font-bold tracking-tight text-gray-900 truncate">
                           {formatUSD(producto.precio_usd)}
                         </div>
-                        <div className="text-[11px] font-medium text-gray-500 font-mono">
+                        <div className="text-[10px] sm:text-[11px] font-medium text-gray-500 font-mono truncate">
                           {formatBs(precioBs)}
                         </div>
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onAgregarProducto(producto);
-                        }}
-                        className={`flex h-9 w-9 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-xl transition-all active:scale-90 ${
-                          cantidad > 0
-                            ? 'bg-indigo-600 text-white shadow-xs hover:bg-indigo-700'
-                            : 'bg-gray-100 text-gray-700 hover:bg-gray-900 hover:text-white'
-                        }`}
-                        title="Agregar al carrito"
-                      >
-                        <Plus className="h-4 w-4" />
-                      </button>
+                      {/* Controles de Acción: Aumentar y Disminuir */}
+                      {cantidad > 0 ? (
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {onDisminuirProducto && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onDisminuirProducto(producto.id);
+                              }}
+                              className="flex h-8 w-8 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-xl border border-rose-200 bg-rose-50 text-rose-600 shadow-2xs hover:bg-rose-100 hover:border-rose-300 active:scale-90 transition-all"
+                              title="Disminuir 1 unidad"
+                              aria-label="Disminuir 1 unidad"
+                            >
+                              <Minus className="h-3.5 w-3.5 stroke-[2.5]" />
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onAgregarProducto(producto);
+                            }}
+                            className="flex h-8 w-8 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-2xs hover:bg-indigo-700 active:scale-90 transition-all"
+                            title="Aumentar 1 unidad"
+                            aria-label="Aumentar 1 unidad"
+                          >
+                            <Plus className="h-3.5 w-3.5 stroke-[2.5]" />
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onAgregarProducto(producto);
+                          }}
+                          className="flex h-9 w-9 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-xl bg-gray-100 text-gray-700 hover:bg-gray-900 hover:text-white active:scale-90 transition-all"
+                          title="Agregar al carrito"
+                          aria-label="Agregar al carrito"
+                        >
+                          <Plus className="h-4 w-4" />
+                        </button>
+                      )}
                     </div>
                   </div>
                 </motion.div>

@@ -69,7 +69,19 @@ export function LayoutContainer({ children }: { children: React.ReactNode }) {
             abierto ? 'md:pl-64' : 'pl-0'
           }`}
         >
-          <div className="flex-1 flex flex-col min-w-0 w-full max-w-full overflow-x-hidden">{children}</div>
+          <div className="flex-1 flex flex-col min-w-0 w-full max-w-full overflow-x-hidden">
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.div
+                key={pathname}
+                initial={{ opacity: 0.78, y: 3 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+                className="flex-1 flex flex-col min-w-0 w-full"
+              >
+                {children}
+              </motion.div>
+            </AnimatePresence>
+          </div>
           <Footer />
         </div>
       </div>

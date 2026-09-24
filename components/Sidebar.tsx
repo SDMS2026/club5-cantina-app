@@ -25,6 +25,7 @@ import { formatBs } from '@/lib/utils';
 import { supabase } from '@/lib/supabaseClient';
 import { useSidebar } from './SidebarContext';
 import { useSystemNotifications } from './NotificationsContext';
+import { iniciarTransicionRuta } from './PageTransitionLoader';
 
 interface NavItem {
   nombre: string;
@@ -123,6 +124,7 @@ export function Sidebar() {
   const handleCerrarSesion = async () => {
     try {
       setCerrandoSesion(true);
+      iniciarTransicionRuta();
       await supabase.auth.signOut();
       if (typeof window !== 'undefined' && window.innerWidth < 768) {
         setAbierto(false);

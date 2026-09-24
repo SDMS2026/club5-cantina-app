@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Mail, Lock, Eye, EyeOff, Loader2, AlertCircle, ArrowRight, ShieldCheck } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
+import { iniciarTransicionRuta } from '@/components/PageTransitionLoader';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -49,6 +50,7 @@ export default function LoginPage() {
 
       if (data?.session) {
         // Redirigir al POS y refrescar router para actualizar la sesión en Next.js
+        iniciarTransicionRuta();
         router.push('/');
         router.refresh();
       }

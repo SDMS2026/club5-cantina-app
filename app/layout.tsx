@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter, Fredoka } from "next/font/google";
 import { SidebarProvider } from "@/components/SidebarContext";
 import { LayoutContainer } from "@/components/LayoutContainer";
+import { PageTransitionLoader } from "@/components/PageTransitionLoader";
 import "./globals.css";
 
 const inter = Inter({
@@ -90,6 +91,7 @@ export default function RootLayout({
         className="min-h-full flex flex-col font-sans bg-[#FAFAFA] text-slate-900 antialiased selection:bg-amber-100 selection:text-amber-900 overflow-x-hidden"
         suppressHydrationWarning
       >
+        <PageTransitionLoader />
         <SidebarProvider>
           <LayoutContainer>{children}</LayoutContainer>
         </SidebarProvider>
