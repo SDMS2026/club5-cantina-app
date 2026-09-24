@@ -3,7 +3,11 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { usePathname } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Loader2 } from 'lucide-react';
+
+/**
+ * Duración exacta de la animación de carga (2 segundos)
+ */
+const DURACION_CARGA_MS = 2000;
 
 /**
  * Disparador para transiciones de ruta programáticas (router.push)
@@ -15,74 +19,64 @@ export function iniciarTransicionRuta() {
 }
 
 /**
- * Indicador y barra de progreso suave para cambios de página.
- * Se activa ÚNICAMENTE al navegar entre rutas diferentes.
+ * Pantalla de carga central con círculo giratorio y fondo difuminado (blur),
+ * activa ÚNICAMENTE al cambiar de página con una duración de 2 segundos.
  */
 export function PageTransitionLoader() {
   const pathname = usePathname();
   const [cargando, setCargando] = useState(false);
-  const [progreso, setProgreso] = useState(0);
 
+  const tiempoInicioRef = useRef<number | null>(null);
+  const timeoutCierreRef = useRef<NodeJS.Timeout | null>(null);
   const timeoutSeguridadRef = useRef<NodeJS.Timeout | null>(null);
-  const animIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const navegandoRef = useRef(false);
+  const navegandoRef = useRef<boolean>(false);
 
   const iniciarCarga = useCallback(() => {
     navegandoRef.current = true;
+    tiempoInicioRef.current = Date.now();
     setCargando(true);
-    setProgreso(18);
 
-    if (animIntervalRef.current) clearInterval(animIntervalRef.current);
+    if (timeoutCierreRef.current) clearTimeout(timeoutCierreRef.current);
     if (timeoutSeguridadRef.current) clearTimeout(timeoutSeguridadRef.current);
 
-    // Incremento suave y no-lineal mientras la página de destino carga
-    animIntervalRef.current = setInterval(() => {
-      setProgreso((prev) => {
-        if (prev >= 86) {
-          if (animIntervalRef.current) clearInterval(animIntervalRef.current);
-          return 86;
-        }
-        const delta = Math.max(0.8, (86 - prev) * 0.22);
-        return Math.min(86, prev + delta);
-      });
-    }, 120);
-
-    // Timeout de seguridad en caso de cancelación o red lenta
+    // Timeout de seguridad de 6s en caso de que la navegación se cancele o falle
     timeoutSeguridadRef.current = setTimeout(() => {
-      finalizarCarga();
-    }, 7000);
-  }, []);
-
-  const finalizarCarga = useCallback(() => {
-    navegandoRef.current = false;
-    if (animIntervalRef.current) clearInterval(animIntervalRef.current);
-    if (timeoutSeguridadRef.current) clearTimeout(timeoutSeguridadRef.current);
-
-    setProgreso(100);
-
-    // Breve pausa para apreciar el 100% y desvanecimiento suave
-    const fadeTimer = setTimeout(() => {
       setCargando(false);
-      const resetTimer = setTimeout(() => {
-        setProgreso(0);
-      }, 250);
-      return () => clearTimeout(resetTimer);
-    }, 180);
-
-    return () => clearTimeout(fadeTimer);
+      navegandoRef.current = false;
+      tiempoInicioRef.current = null;
+    }, 6000);
   }, []);
 
-  // Al cambiar el pathname de Next.js, se completa la carga
+  const finalizarConDuracion = useCallback(() => {
+    if (!tiempoInicioRef.current) {
+      setCargando(false);
+      navegandoRef.current = false;
+      return;
+    }
+
+    const tiempoTranscurrido = Date.now() - tiempoInicioRef.current;
+    // Asegurar que dure exactamente los 2 segundos solicitados
+    const tiempoRestante = Math.max(0, DURACION_CARGA_MS - tiempoTranscurrido);
+
+    if (timeoutCierreRef.current) clearTimeout(timeoutCierreRef.current);
+    timeoutCierreRef.current = setTimeout(() => {
+      setCargando(false);
+      navegandoRef.current = false;
+      tiempoInicioRef.current = null;
+    }, tiempoRestante);
+  }, []);
+
+  // Al cambiar el pathname de Next.js, programar el cierre al cumplir los 2 segundos
   useEffect(() => {
     if (navegandoRef.current || cargando) {
-      finalizarCarga();
+      finalizarConDuracion();
     }
-  }, [pathname, finalizarCarga, cargando]);
+  }, [pathname, finalizarConDuracion, cargando]);
 
   // Listener global de clics en enlaces (intercepta solo enlaces a rutas distintas)
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
-      // Ignorar clics con modificadores (abrir en nueva pestaña, etc.)
+      // Ignorar clics con modificadores (abrir en nueva pestaña, click derecho, etc.)
       if (
         e.defaultPrevented ||
         e.button !== 0 ||
@@ -137,47 +131,48 @@ export function PageTransitionLoader() {
     return () => {
       document.removeEventListener('click', handleClick, { capture: true });
       window.removeEventListener('club5:route-change-start', handleCustomRouteStart);
+      if (timeoutCierreRef.current) clearTimeout(timeoutCierreRef.current);
       if (timeoutSeguridadRef.current) clearTimeout(timeoutSeguridadRef.current);
-      if (animIntervalRef.current) clearInterval(animIntervalRef.current);
     };
   }, [iniciarCarga]);
 
   return (
-    <>
-      {/* 1. Barra superior luminosa con gradiente Club 5 */}
-      <AnimatePresence>
-        {cargando && (
-          <div className="fixed top-0 left-0 right-0 z-[99999] h-1 pointer-events-none overflow-hidden">
-            <motion.div
-              initial={{ width: '0%', opacity: 1 }}
-              animate={{ width: `${progreso}%`, opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ ease: 'easeOut', duration: 0.2 }}
-              className="h-full bg-gradient-to-r from-blue-600 via-indigo-600 to-amber-400 shadow-[0_0_14px_rgba(99,102,241,0.85),0_0_6px_rgba(250,204,21,0.9)]"
-            />
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* 2. Badge flotante suave y estilizado ("Cargando...") */}
-      <AnimatePresence>
-        {cargando && (
+    <AnimatePresence>
+      {cargando && (
+        <motion.div
+          key="page-loader-overlay"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.28, ease: 'easeInOut' }}
+          className="fixed inset-0 z-[99999] flex flex-col items-center justify-center bg-black/25 backdrop-blur-md select-none pointer-events-auto"
+          style={{ WebkitBackdropFilter: 'blur(12px)' }}
+          aria-live="assertive"
+          aria-busy="true"
+        >
+          {/* Tarjeta flotante centrada con efecto glassmorphism */}
           <motion.div
-            initial={{ opacity: 0, y: -20, scale: 0.94 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -16, scale: 0.94 }}
-            transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-            className="fixed top-3.5 left-1/2 -translate-x-1/2 z-[99999] pointer-events-none select-none"
+            initial={{ scale: 0.85, opacity: 0, y: 10 }}
+            animate={{ scale: 1, opacity: 1, y: 0 }}
+            exit={{ scale: 0.85, opacity: 0, y: 10 }}
+            transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+            className="flex flex-col items-center justify-center gap-3.5 rounded-3xl bg-white/90 p-7 shadow-2xl shadow-indigo-950/20 backdrop-blur-xl border border-white/70"
           >
-            <div className="flex items-center gap-2 rounded-full border border-indigo-100 bg-white/95 px-3.5 py-1.5 shadow-lg shadow-indigo-500/10 backdrop-blur-md">
-              <Loader2 className="h-3.5 w-3.5 animate-spin text-indigo-600" />
-              <span className="text-xs font-semibold text-gray-700 tracking-tight">
-                Cargando página...
-              </span>
+            {/* Círculo girando en el medio como efecto de carga */}
+            <div className="relative flex items-center justify-center w-14 h-14">
+              {/* Pista circular de base */}
+              <div className="w-14 h-14 rounded-full border-4 border-indigo-100" />
+              {/* Círculo giratorio Club 5 con animación continua */}
+              <div className="absolute inset-0 w-14 h-14 rounded-full border-4 border-transparent border-t-indigo-600 border-r-indigo-500 animate-spin" />
             </div>
+
+            {/* Texto de carga */}
+            <span className="text-xs font-bold text-gray-700 tracking-wider">
+              Cargando...
+            </span>
           </motion.div>
-        )}
-      </AnimatePresence>
-    </>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }
