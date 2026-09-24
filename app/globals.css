@@ -12,10 +12,39 @@
   --font-brand: var(--font-fredoka), cursive, sans-serif;
 }
 
+html {
+  overflow-x: hidden;
+  max-width: 100vw;
+  -webkit-text-size-adjust: 100%;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
+  overflow-x: hidden;
+  max-width: 100vw;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+/* 
+ * PREVENCIÓN DE AUTO-ZOOM EN iOS SAFARI (iPhone / iPad):
+ * WebKit amplía automáticamente el viewport si un input tiene font-size < 16px al recibir foco.
+ * Establecer 16px mínimo en móviles garantiza que la pantalla NUNCA se amplíe ni se desplace horizontalmente.
+ */
+@media screen and (max-width: 899px) {
+  input[type="text"],
+  input[type="number"],
+  input[type="email"],
+  input[type="tel"],
+  input[type="password"],
+  input[type="search"],
+  input:not([type]),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
 }
 
 /* Bloqueo y contención de scroll para diálogos y modales */
@@ -23,3 +52,8 @@ body {
   overscroll-behavior: contain;
 }
 
+/* Scrolling suave y acelerado por hardware para modales en iOS */
+.touch-scroll-ios {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+}

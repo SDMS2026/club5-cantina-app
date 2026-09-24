@@ -13,6 +13,23 @@ export function LayoutContainer({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { abierto, setAbierto } = useSidebar();
 
+  // Reseteo automático de desplazamiento en iOS Safari al cerrar teclados virtuales
+  React.useEffect(() => {
+    const handleFocusOut = (e: FocusEvent) => {
+      const target = e.target as HTMLElement;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT')) {
+        setTimeout(() => {
+          if (typeof window !== 'undefined') {
+            window.scrollTo({ left: 0, top: window.scrollY, behavior: 'instant' });
+          }
+        }, 60);
+      }
+    };
+
+    document.addEventListener('focusout', handleFocusOut);
+    return () => document.removeEventListener('focusout', handleFocusOut);
+  }, []);
+
   // En la pantalla de inicio de sesión no mostrar Sidebar, Toast ni Footer estándar
   if (pathname === '/login') {
     return (

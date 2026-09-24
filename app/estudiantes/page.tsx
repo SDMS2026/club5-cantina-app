@@ -1250,7 +1250,7 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
           <Dialog.Content
             style={dragScrollEstudiante.style}
             {...dragScrollEstudiante.dragProps}
-            className="fixed inset-x-0 bottom-0 z-50 max-h-[92vh] sm:max-h-[90vh] overflow-y-auto overscroll-contain rounded-t-3xl sm:rounded-3xl border-t sm:border border-gray-200/90 bg-white p-4 sm:p-6 shadow-2xl outline-none duration-300 animate-in slide-in-from-bottom sm:slide-in-from-bottom-0 sm:fade-in-0 sm:zoom-in-95 sm:inset-auto sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:w-[95vw] sm:max-w-lg cursor-grab active:cursor-grabbing touch-pan-y"
+            className="fixed inset-x-0 bottom-0 z-50 max-h-[88dvh] sm:max-h-[90vh] overflow-y-auto overscroll-contain touch-scroll-ios rounded-t-3xl sm:rounded-3xl border-t sm:border border-gray-200/90 bg-white p-4 sm:p-6 pb-32 sm:pb-6 shadow-2xl outline-none duration-300 animate-in slide-in-from-bottom sm:slide-in-from-bottom-0 sm:fade-in-0 sm:zoom-in-95 sm:inset-auto sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:w-[95vw] sm:max-w-lg cursor-grab active:cursor-grabbing"
           >
             {/* Manija táctil para deslizar hacia arriba y abajo en móviles */}
             <div
@@ -1298,7 +1298,7 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
                   <Popover.Trigger asChild>
                     <button
                       type="button"
-                      className="flex w-full items-center justify-between rounded-2xl border border-gray-200 bg-gray-50/70 px-4 py-2.5 text-left text-sm transition hover:border-gray-300 hover:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100 shadow-2xs"
+                      className="flex w-full items-center justify-between rounded-2xl border border-gray-200 bg-gray-50/70 px-4 py-3 sm:py-2.5 text-left text-base sm:text-sm transition hover:border-gray-300 hover:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100 shadow-2xs"
                     >
                       <div className="flex items-center gap-2.5 overflow-hidden">
                         <span className="text-base shrink-0">
@@ -1568,7 +1568,7 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
                       }))
                     }
                     placeholder="Escribe el nivel o rol personalizado"
-                    className="mt-2 w-full rounded-2xl border border-gray-200 bg-gray-50/50 py-2 px-3 text-xs text-gray-900 outline-none focus:border-indigo-500 focus:bg-white"
+                    className="mt-2 w-full rounded-2xl border border-gray-200 bg-gray-50/50 py-3 sm:py-2 px-3.5 text-base sm:text-xs text-gray-900 outline-none focus:border-indigo-500 focus:bg-white"
                     autoFocus
                   />
                 )}
@@ -1601,7 +1601,7 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
                         ? 'Ej. Roberto Mendoza'
                         : 'Ej. Sofía Martínez'
                     }
-                    className="w-full rounded-2xl border border-gray-200 bg-gray-50/50 py-2.5 pl-10 pr-4 text-sm text-gray-900 placeholder-gray-400 outline-none transition focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-100"
+                    className="w-full rounded-2xl border border-gray-200 bg-gray-50/50 py-3 sm:py-2.5 pl-10 pr-4 text-base sm:text-sm text-gray-900 placeholder-gray-400 outline-none transition focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-100"
                   />
                 </div>
                 <p className="mt-1 text-[11px] text-gray-400">
@@ -1630,7 +1630,7 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
                         ? 'Ej. Coordinador de Matemáticas'
                         : 'Ej. Carlos Martínez'
                     }
-                    className="w-full rounded-2xl border border-gray-200 bg-gray-50/50 py-2.5 px-4 text-sm text-gray-900 placeholder-gray-400 outline-none transition focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-100"
+                    className="w-full rounded-2xl border border-gray-200 bg-gray-50/50 py-3 sm:py-2.5 px-4 text-base sm:text-sm text-gray-900 placeholder-gray-400 outline-none transition focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-100"
                   />
                 </div>
               )}
@@ -1646,7 +1646,7 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
                     <Popover.Trigger asChild>
                       <button
                         type="button"
-                        className="flex items-center gap-1.5 rounded-2xl border border-gray-200 bg-gray-50/70 px-3 py-2.5 text-xs font-bold text-gray-800 hover:bg-white hover:border-gray-300 transition shrink-0 shadow-2xs"
+                        className="flex items-center gap-1.5 rounded-2xl border border-gray-200 bg-gray-50/70 px-3 py-3 sm:py-2.5 text-base sm:text-xs font-bold text-gray-800 hover:bg-white hover:border-gray-300 transition shrink-0 shadow-2xs"
                       >
                         <span className="text-sm">{prefijoSeleccionadoObj?.bandera || '🇻🇪'}</span>
                         <span className="font-mono">{modalForm.telefono_prefijo}</span>
@@ -1708,7 +1708,7 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
                         setModalForm((prev) => ({ ...prev, telefono_numero: soloNums }));
                       }}
                       placeholder="4125404830"
-                      className="w-full rounded-2xl border border-gray-200 bg-gray-50/50 py-2.5 pl-10 pr-12 text-sm text-gray-900 placeholder-gray-400 outline-none transition focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-100 font-mono"
+                      className="w-full rounded-2xl border border-gray-200 bg-gray-50/50 py-3 sm:py-2.5 pl-10 pr-12 text-base sm:text-sm text-gray-900 placeholder-gray-400 outline-none transition focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-100 font-mono"
                     />
                     <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-mono text-gray-400">
                       {modalForm.telefono_numero.length}/10
@@ -1812,7 +1812,7 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
           <Dialog.Content
             style={dragScrollEliminar.style}
             {...dragScrollEliminar.dragProps}
-            className="fixed inset-x-0 bottom-0 z-50 max-h-[92vh] sm:max-h-[90vh] overflow-y-auto overscroll-contain rounded-t-3xl sm:rounded-3xl border-t sm:border border-gray-200/90 bg-white p-4 sm:p-6 shadow-2xl outline-none duration-300 animate-in slide-in-from-bottom sm:slide-in-from-bottom-0 sm:fade-in-0 sm:zoom-in-95 sm:inset-auto sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:w-[95vw] sm:max-w-lg cursor-grab active:cursor-grabbing touch-pan-y"
+            className="fixed inset-x-0 bottom-0 z-50 max-h-[88dvh] sm:max-h-[90vh] overflow-y-auto overscroll-contain touch-scroll-ios rounded-t-3xl sm:rounded-3xl border-t sm:border border-gray-200/90 bg-white p-4 sm:p-6 pb-28 sm:pb-6 shadow-2xl outline-none duration-300 animate-in slide-in-from-bottom sm:slide-in-from-bottom-0 sm:fade-in-0 sm:zoom-in-95 sm:inset-auto sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:w-[95vw] sm:max-w-lg cursor-grab active:cursor-grabbing"
           >
             {/* Manija táctil para deslizar hacia arriba y abajo en móviles */}
             <div
