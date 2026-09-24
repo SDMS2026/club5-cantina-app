@@ -22,6 +22,7 @@ export function WelcomeSessionToast() {
   const [infoNotificacion, setInfoNotificacion] = useState<{
     tipo: 'critico' | 'proximo' | 'pendiente' | 'solvente';
     titulo: string;
+    resumenCorto: string;
     mensaje: string;
     subMensaje?: string;
     enlace: string;
@@ -45,6 +46,7 @@ export function WelcomeSessionToast() {
           titulo: `${data.proveedores.vencidas} ${
             data.proveedores.vencidas === 1 ? 'Factura Vencida' : 'Facturas Vencidas'
           }`,
+          resumenCorto: `${formatUSD(data.proveedores.totalPendienteUsd)} vencidos por liquidar`,
           mensaje: `Tienes ${data.proveedores.vencidas} factura(s) de proveedores con plazo vencido por liquidar (${formatUSD(
             data.proveedores.totalPendienteUsd
           )} / ${formatBs(data.proveedores.totalPendienteBs)}).`,
@@ -59,8 +61,9 @@ export function WelcomeSessionToast() {
         notif = {
           tipo: 'proximo',
           titulo: `${data.proveedores.proximas} ${
-            data.proveedores.proximas === 1 ? 'Pago Próximo a Vencer' : 'Pagos Próximos a Vencer'
+            data.proveedores.proximas === 1 ? 'Pago Próximo' : 'Pagos Próximos'
           }`,
+          resumenCorto: `Vencimiento en ≤ 3 días (${formatUSD(data.proveedores.totalPendienteUsd)})`,
           mensaje: `Tienes ${data.proveedores.proximas} factura(s) con vencimiento en ≤ 3 días. Total pendiente: ${formatUSD(
             data.proveedores.totalPendienteUsd
           )}.`,
@@ -69,12 +72,13 @@ export function WelcomeSessionToast() {
               ? `Hay ${data.deudas.clientesConDeuda} estudiantes/profesores con cuentas por cobrar.`
               : undefined,
           enlace: '/proveedores',
-          textoEnlace: 'Ver Calendario de Pagos',
+          textoEnlace: 'Ver Calendario',
         };
       } else if (data.proveedores.pendientes > 0) {
         notif = {
           tipo: 'pendiente',
-          titulo: `${data.proveedores.pendientes} Cuentas por Pagar Activas`,
+          titulo: `${data.proveedores.pendientes} Cuentas Activas`,
+          resumenCorto: `${formatUSD(data.proveedores.totalPendienteUsd)} dentro de plazo acordado`,
           mensaje: `Tienes ${data.proveedores.pendientes} pagos pendientes a proveedores dentro de plazo acordado (${formatUSD(
             data.proveedores.totalPendienteUsd
           )}).`,
@@ -89,6 +93,7 @@ export function WelcomeSessionToast() {
         notif = {
           tipo: 'solvente',
           titulo: '¡Cuentas al Día!',
+          resumenCorto: 'Todas las facturas a proveedores liquidadas',
           mensaje:
             data.deudas.clientesConDeuda > 0
               ? `No tienes facturas vencidas a proveedores. Hay ${data.deudas.clientesConDeuda} clientes en cuentas por cobrar.`
@@ -130,24 +135,88 @@ export function WelcomeSessionToast() {
     <AnimatePresence>
       {visible && (
         <motion.div
-          initial={{ opacity: 0, y: -24, scale: 0.95, filter: 'blur(4px)' }}
-          animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
-          exit={{ opacity: 0, y: -20, scale: 0.95, filter: 'blur(4px)' }}
-          transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-          className="fixed top-4 right-4 z-50 w-full max-w-sm"
+          initial={{ opacity: 0, y: -20, scale: 0.96 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: -16, scale: 0.96 }}
+          transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+          className="fixed top-2.5 inset-x-2.5 sm:inset-x-auto sm:top-4 sm:right-4 z-50 sm:w-full sm:max-w-sm pointer-events-auto"
         >
           <div
-            className={`rounded-3xl border p-4 shadow-2xl backdrop-blur-xl transition-all ${
+            className={`rounded-2xl sm:rounded-3xl border p-2.5 sm:p-4 shadow-xl backdrop-blur-md transition-all ${
               esCritico
-                ? 'border-rose-300/90 bg-rose-50/95 text-rose-950 shadow-rose-500/10'
+                ? 'border-rose-300/90 bg-rose-50/98 text-rose-950 shadow-rose-500/10'
                 : esProximo
-                ? 'border-amber-300/90 bg-amber-50/95 text-amber-950 shadow-amber-500/10'
+                ? 'border-amber-300/90 bg-amber-50/98 text-amber-950 shadow-amber-500/10'
                 : esSolvente
-                ? 'border-emerald-300/90 bg-emerald-50/95 text-emerald-950 shadow-emerald-500/10'
-                : 'border-indigo-200/90 bg-white/95 text-gray-900 shadow-indigo-500/10'
+                ? 'border-emerald-300/90 bg-emerald-50/98 text-emerald-950 shadow-emerald-500/10'
+                : 'border-indigo-200/90 bg-white/98 text-gray-900 shadow-indigo-500/10'
             }`}
           >
-            <div className="flex items-start gap-3">
+            {/* Vista Compacta en Móvil (< sm): no tapa la pantalla */}
+            <div className="flex sm:hidden items-center justify-between gap-2.5">
+              <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                <div
+                  className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-xl shadow-2xs ${
+                    esCritico
+                      ? 'bg-rose-600 text-white animate-pulse'
+                      : esProximo
+                      ? 'bg-amber-500 text-white'
+                      : esSolvente
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-indigo-600 text-white'
+                  }`}
+                >
+                  {esCritico ? (
+                    <AlertTriangle className="h-4 w-4" />
+                  ) : esProximo ? (
+                    <Clock className="h-4 w-4" />
+                  ) : esSolvente ? (
+                    <CheckCircle2 className="h-4 w-4" />
+                  ) : (
+                    <Truck className="h-4 w-4" />
+                  )}
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-xs font-bold text-gray-900 leading-tight">
+                      {infoNotificacion.titulo}
+                    </span>
+                    <Link
+                      href={infoNotificacion.enlace}
+                      onClick={() => setVisible(false)}
+                      className={`inline-flex items-center gap-0.5 text-[11px] font-bold underline ${
+                        esCritico
+                          ? 'text-rose-700'
+                          : esProximo
+                          ? 'text-amber-800'
+                          : esSolvente
+                          ? 'text-emerald-700'
+                          : 'text-indigo-700'
+                      }`}
+                    >
+                      <span>{infoNotificacion.textoEnlace}</span>
+                      <ArrowRight className="h-3 w-3" />
+                    </Link>
+                  </div>
+                  <p className="text-[10px] text-gray-600 truncate mt-0.5">
+                    {infoNotificacion.resumenCorto}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setVisible(false)}
+                className="shrink-0 rounded-full p-1 text-gray-400 hover:bg-black/5 hover:text-gray-700 transition"
+                title="Cerrar notificación"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Vista Completa en Pantallas de Escritorio (>= sm) */}
+            <div className="hidden sm:flex items-start gap-3">
               {/* Icono animado */}
               <div
                 className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl shadow-2xs ${
@@ -171,7 +240,7 @@ export function WelcomeSessionToast() {
                 )}
               </div>
 
-              {/* Contenido */}
+              {/* Contenido Completo */}
               <div className="flex-1 min-w-0 pr-1">
                 <div className="flex items-center justify-between gap-1">
                   <span

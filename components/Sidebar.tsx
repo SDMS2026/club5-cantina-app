@@ -67,43 +67,41 @@ const NAV_ITEMS: NavItem[] = [
   },
 ];
 
-// Variantes de animación progresiva y suave para el contenedor del Sidebar
+// Variantes de animación de alto rendimiento a 60fps / 120fps nativos
 const sidebarVariants = {
   open: {
     x: 0,
     transition: {
-      duration: 0.5,
-      ease: [0.16, 1, 0.3, 1] as const, // Curva de aceleración suave y progresiva
+      duration: 0.28,
+      ease: [0.32, 0.72, 0, 1] as const, // Curva iOS UIKit / Material fluida y elástica
     },
   },
   closed: {
     x: '-100%',
     transition: {
-      duration: 0.48,
-      ease: [0.16, 1, 0.3, 1] as const, // Salida suave y perfectamente sincronizada con el layout/navbar
+      duration: 0.22,
+      ease: [0.32, 0.72, 0, 1] as const,
     },
   },
 };
 
-// Variantes dinámicas para que cada elemento interno aparezca en cascada progresiva escalonada
+// Variantes dinámicas ultra-ligeras sin forzar re-rasterización (sin scale)
 const itemVariants = {
   open: (i: number = 0) => ({
     opacity: 1,
     x: 0,
-    scale: 1,
     transition: {
-      delay: 0.1 + i * 0.055, // Entrada progresiva escalonada: 100ms, 155ms, 210ms, 265ms, 320ms, 375ms, 430ms...
-      duration: 0.38,
-      ease: [0.16, 1, 0.3, 1] as const,
+      delay: 0.03 + i * 0.025, // Cascada ágil y reactiva: 30ms, 55ms, 80ms, 105ms...
+      duration: 0.2,
+      ease: [0.32, 0.72, 0, 1] as const,
     },
   }),
   closed: {
     opacity: 0,
-    x: -24,
-    scale: 0.95,
+    x: -12,
     transition: {
-      duration: 0.18,
-      ease: 'easeInOut' as const,
+      duration: 0.1,
+      ease: 'easeIn' as const,
     },
   },
 };
@@ -147,7 +145,8 @@ export function Sidebar() {
           initial="closed"
           animate="open"
           exit="closed"
-          className="fixed inset-y-0 left-0 z-50 flex w-72 max-w-[85vw] flex-col justify-between border-r border-gray-200/80 bg-white/98 p-5 shadow-2xl backdrop-blur-xl rounded-r-3xl md:w-64 md:rounded-none md:shadow-xs"
+          style={{ transform: 'translate3d(0,0,0)', WebkitTransform: 'translate3d(0,0,0)' }}
+          className="fixed inset-y-0 left-0 z-50 flex w-72 max-w-[85vw] flex-col justify-between border-r border-gray-200/80 bg-white p-5 shadow-2xl rounded-r-3xl md:w-64 md:rounded-none md:shadow-xs will-change-transform transform-gpu"
         >
           {/* Parte Superior del Sidebar */}
           <div className="flex flex-col gap-6">

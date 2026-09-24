@@ -55,17 +55,17 @@ export function LayoutContainer({ children }: { children: React.ReactNode }) {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              transition={{ duration: 0.25 }}
+              transition={{ duration: 0.22, ease: 'easeOut' }}
               onClick={() => setAbierto(false)}
-              className="fixed inset-0 z-40 bg-black/40 backdrop-blur-xs md:hidden"
+              className="fixed inset-0 z-40 bg-black/40 will-change-opacity transform-gpu md:hidden"
               aria-hidden="true"
             />
           )}
         </AnimatePresence>
 
-        {/* Contenedor principal con transición progresiva y suave sincronizada */}
+        {/* Contenedor principal con transición sincronizada fluida */}
         <div
-          className={`flex-1 flex flex-col min-h-screen overflow-x-hidden transition-[padding] duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] will-change-[padding] ${
+          className={`flex-1 flex flex-col min-h-screen overflow-x-hidden transition-[padding] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] will-change-[padding] ${
             abierto ? 'md:pl-64' : 'pl-0'
           }`}
         >
