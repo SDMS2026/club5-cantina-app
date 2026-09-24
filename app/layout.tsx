@@ -23,8 +23,21 @@ export const metadata: Metadata = {
   description:
     "Sistema de Punto de Venta ágil y moderno para la cantina escolar de Club 5 con conversión BCV en tiempo real.",
   icons: {
-    icon: "/logo-club5.png",
-    apple: "/logo-club5.png",
+    icon: [
+      { url: "/favicon.ico", sizes: "32x32" },
+      { url: "/icon.png", type: "image/png", sizes: "512x512" },
+      { url: "/club5logo-transparent.png", type: "image/png" },
+    ],
+    shortcut: "/favicon.ico",
+    apple: [
+      { url: "/apple-icon.png", sizes: "180x180", type: "image/png" },
+      { url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
+    ],
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Club 5 POS",
   },
   openGraph: {
     title: "Club 5 Cantina Escolar | Punto de Venta (POS)",
