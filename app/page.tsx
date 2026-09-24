@@ -146,12 +146,35 @@ export default function PosPage() {
     }
   }, []);
 
-  // Control de montaje e inicialización
+  // Control de montaje, inicialización y sincronización en tiempo real
   useEffect(() => {
     setMontado(true);
     cargarTasa();
     cargarClientes();
     cargarProductos();
+
+    // Suscripción Realtime en Supabase para sincronización instantánea entre dispositivos
+    const canalRealtime = supabase
+      .channel('pos_realtime_sync')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'productos' },
+        () => {
+          cargarProductos();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'clientes' },
+        () => {
+          cargarClientes();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(canalRealtime);
+    };
   }, [cargarTasa, cargarClientes, cargarProductos]);
 
   // Manejador para agregar producto al carrito

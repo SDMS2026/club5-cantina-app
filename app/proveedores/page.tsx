@@ -234,6 +234,22 @@ export default function ProveedoresPage() {
     setMontado(true);
     cargarTasa();
     cargarCuentas();
+
+    // Sincronización en tiempo real con Supabase entre dispositivos
+    const canalRealtime = supabase
+      .channel('proveedores_realtime_sync')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'proveedores_cuentas' },
+        () => {
+          cargarCuentas();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(canalRealtime);
+    };
   }, [cargarTasa, cargarCuentas]);
 
   // Lista de nombres de proveedores únicos para autocompletado rápido

@@ -241,6 +241,29 @@ export default function DeudasPage() {
     setMontado(true);
     cargarTasa();
     cargarDeudas();
+
+    // Sincronización en tiempo real con Supabase entre dispositivos
+    const canalRealtime = supabase
+      .channel('deudas_realtime_sync')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'consumos' },
+        () => {
+          cargarDeudas();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'clientes' },
+        () => {
+          cargarDeudas();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(canalRealtime);
+    };
   }, [cargarTasa, cargarDeudas]);
 
   // Lista única de Grados / Secciones para el selector desplegable

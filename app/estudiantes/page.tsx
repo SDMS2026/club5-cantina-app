@@ -276,6 +276,29 @@ export default function EstudiantesPage() {
     setMontado(true);
     cargarTasa();
     cargarDatos();
+
+    // Sincronización en tiempo real con Supabase entre dispositivos
+    const canalRealtime = supabase
+      .channel('estudiantes_realtime_sync')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'clientes' },
+        () => {
+          cargarDatos();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'consumos' },
+        () => {
+          cargarDatos();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(canalRealtime);
+    };
   }, [cargarTasa, cargarDatos]);
 
   // Grados / Secciones únicos para el filtro

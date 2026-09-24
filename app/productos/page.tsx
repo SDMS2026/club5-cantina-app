@@ -172,6 +172,22 @@ export default function ProductosPage() {
     setMontado(true);
     cargarTasa();
     cargarProductos();
+
+    // Sincronización en tiempo real con Supabase entre dispositivos
+    const canalRealtime = supabase
+      .channel('productos_realtime_sync')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'productos' },
+        () => {
+          cargarProductos();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(canalRealtime);
+    };
   }, [cargarTasa, cargarProductos]);
 
   // Lista de categorías detectadas de los productos cargados

@@ -289,7 +289,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
   useEffect(() => {
     cargarDatos();
 
-    // Suscripción al evento personalizado
+    // Suscripción al evento personalizado local
     const handleEvento = () => {
       cargarDatos();
     };
@@ -298,10 +298,30 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
       window.addEventListener(EVENTO_ACTUALIZAR_NOTIFICACIONES, handleEvento);
     }
 
+    // Sincronización Realtime con Supabase para alertas en todos los dispositivos conectados
+    const canalRealtime = supabase
+      .channel('notificaciones_realtime_sync')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'proveedores_cuentas' },
+        () => {
+          cargarDatos();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'consumos' },
+        () => {
+          cargarDatos();
+        }
+      )
+      .subscribe();
+
     return () => {
       if (typeof window !== 'undefined') {
         window.removeEventListener(EVENTO_ACTUALIZAR_NOTIFICACIONES, handleEvento);
       }
+      supabase.removeChannel(canalRealtime);
     };
   }, [cargarDatos]);
 
