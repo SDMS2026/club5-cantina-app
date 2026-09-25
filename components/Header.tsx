@@ -7,6 +7,7 @@ import { RefreshCw, TrendingUp, ShieldCheck, Menu } from 'lucide-react';
 import { formatBs } from '@/lib/utils';
 import { NotificationBell } from './NotificationBell';
 import { useSidebar } from './SidebarContext';
+import { useTheme } from './ThemeContext';
 
 interface HeaderProps {
   tasaBcv: number;
@@ -22,6 +23,7 @@ export function Header({
   ultimaActualizacion,
 }: HeaderProps) {
   const { abierto, toggleSidebar } = useSidebar();
+  const { isKirby } = useTheme();
 
   return (
     <header className="sticky top-0 z-40 w-full border-b border-gray-200/80 dark:border-[#1D263A] bg-white/90 dark:bg-[#090D16]/90 backdrop-blur-md">
@@ -56,15 +58,33 @@ export function Header({
             <div className="flex flex-col min-w-0">
               <div className="flex items-center gap-1 sm:gap-1.5">
                 <span className="font-[family-name:var(--font-brand)] text-base sm:text-xl font-black tracking-tight inline-flex items-center gap-0.5 sm:gap-1 select-none">
-                  <span className="text-[#0E52A0] dark:text-white drop-shadow-[0_1.5px_0_#FACC15] dark:drop-shadow-none">
+                  <span
+                    className={`transition-colors duration-300 ${
+                      isKirby
+                        ? 'text-[#C72352] dark:text-pink-300 drop-shadow-[0_1.5px_0_#FFAEC0]'
+                        : 'text-[#0E52A0] dark:text-white drop-shadow-[0_1.5px_0_#FACC15] dark:drop-shadow-none'
+                    }`}
+                  >
                     Club
                   </span>
-                  <span className="relative inline-flex items-center justify-center rounded-md sm:rounded-lg bg-gradient-to-br from-yellow-300 via-amber-400 to-amber-500 px-1 sm:px-1.5 py-0.2 text-[#0A3D78] font-black text-xs sm:text-base shadow-xs ring-1 ring-yellow-200 -rotate-3">
+                  <span
+                    className={`relative inline-flex items-center justify-center rounded-md sm:rounded-lg px-1 sm:px-1.5 py-0.2 font-black text-xs sm:text-base shadow-xs -rotate-3 transition-all duration-300 ${
+                      isKirby
+                        ? 'bg-gradient-to-br from-pink-400 via-rose-400 to-pink-500 text-white ring-1 ring-pink-200'
+                        : 'bg-gradient-to-br from-yellow-300 via-amber-400 to-amber-500 text-[#0A3D78] ring-1 ring-yellow-200'
+                    }`}
+                  >
                     5
                   </span>
                 </span>
-                <span className="rounded-full border border-yellow-300/80 bg-yellow-50 dark:bg-amber-950/80 dark:border-amber-700/60 px-1.5 py-0.2 text-[9px] sm:text-[10px] font-bold text-amber-900 dark:text-amber-200 shadow-2xs">
-                  POS
+                <span
+                  className={`rounded-full border px-1.5 py-0.2 text-[9px] sm:text-[10px] font-bold shadow-2xs transition-colors duration-300 ${
+                    isKirby
+                      ? 'border-pink-300 bg-pink-100 dark:bg-pink-950/80 dark:border-pink-800 text-[#8A2548] dark:text-pink-200'
+                      : 'border-yellow-300/80 bg-yellow-50 dark:bg-amber-950/80 dark:border-amber-700/60 text-amber-900 dark:text-amber-200'
+                  }`}
+                >
+                  {isKirby ? '★ POS' : 'POS'}
                 </span>
               </div>
               <p className="text-[10px] sm:text-xs text-gray-500 dark:text-slate-400 hidden sm:block">

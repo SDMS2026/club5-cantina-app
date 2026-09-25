@@ -20,6 +20,8 @@ import {
   RefreshCw,
   LogOut,
   Loader2,
+  Star,
+  Sparkles,
 } from 'lucide-react';
 import { formatBs } from '@/lib/utils';
 import { supabase } from '@/lib/supabaseClient';
@@ -111,7 +113,7 @@ export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const { abierto, setAbierto, toggleSidebar } = useSidebar();
-  const { isDark, toggleTheme } = useTheme();
+  const { isDark, toggleTheme, isKirby, toggleKirby } = useTheme();
   const { data: notifData, cargando: notifCargando, refrescar } = useSystemNotifications();
   const [cerrandoSesion, setCerrandoSesion] = useState(false);
 
@@ -175,18 +177,40 @@ export function Sidebar() {
                 <div className="flex flex-col">
                   <div className="flex items-center gap-1.5">
                     <span className="font-[family-name:var(--font-brand)] text-2xl font-black tracking-tight inline-flex items-center gap-1 select-none">
-                      <span className="text-[#0E52A0] dark:text-white drop-shadow-[0_2px_0_#FACC15] dark:drop-shadow-none transition-transform duration-200 group-hover:scale-105">
+                      <span
+                        className={`transition-colors duration-300 ${
+                          isKirby
+                            ? 'text-[#C72352] dark:text-pink-300 drop-shadow-[0_2px_0_#FFAEC0]'
+                            : 'text-[#0E52A0] dark:text-white drop-shadow-[0_2px_0_#FACC15] dark:drop-shadow-none'
+                        } transition-transform duration-200 group-hover:scale-105`}
+                      >
                         Club
                       </span>
-                      <span className="relative inline-flex items-center justify-center rounded-xl bg-gradient-to-br from-yellow-300 via-amber-400 to-amber-500 px-2 py-0.5 text-[#0A3D78] font-black text-xl shadow-xs ring-2 ring-yellow-200/80 -rotate-3 transition-transform duration-300 group-hover:rotate-0">
+                      <span
+                        className={`relative inline-flex items-center justify-center rounded-xl px-2 py-0.5 font-black text-xl shadow-xs -rotate-3 transition-all duration-300 group-hover:rotate-0 ${
+                          isKirby
+                            ? 'bg-gradient-to-br from-pink-400 via-rose-400 to-pink-500 text-white ring-2 ring-pink-200'
+                            : 'bg-gradient-to-br from-yellow-300 via-amber-400 to-amber-500 text-[#0A3D78] ring-2 ring-yellow-200/80'
+                        }`}
+                      >
                         5
                       </span>
                     </span>
-                    <span className="rounded-full border border-yellow-300/80 bg-yellow-50 dark:bg-amber-950/80 dark:border-amber-700/60 px-1.5 py-0.2 text-[10px] font-bold text-amber-900 dark:text-amber-200 shadow-2xs">
-                      POS
+                    <span
+                      className={`rounded-full border px-1.5 py-0.2 text-[10px] font-bold shadow-2xs transition-colors duration-300 ${
+                        isKirby
+                          ? 'border-pink-300 bg-pink-100 dark:bg-pink-950/80 dark:border-pink-800 text-[#8A2548] dark:text-pink-200'
+                          : 'border-yellow-300/80 bg-yellow-50 dark:bg-amber-950/80 dark:border-amber-700/60 text-amber-900 dark:text-amber-200'
+                      }`}
+                    >
+                      {isKirby ? '★ POS' : 'POS'}
                     </span>
                   </div>
-                  <span className="font-[family-name:var(--font-brand)] text-[11px] font-bold tracking-wide text-amber-700/90 dark:text-amber-400 -mt-0.5">
+                  <span
+                    className={`font-[family-name:var(--font-brand)] text-[11px] font-bold tracking-wide -mt-0.5 transition-colors duration-300 ${
+                      isKirby ? 'text-[#A0284F] dark:text-pink-400' : 'text-amber-700/90 dark:text-amber-400'
+                    }`}
+                  >
                     Cantina Escolar
                   </span>
                 </div>
@@ -398,8 +422,9 @@ export function Sidebar() {
               </p>
             </motion.div>
 
-            {/* Selector de Modo Oscuro / Claro en el Slidebar (Solo el toggle estilo ditdot-dev) */}
-            <motion.div custom={9} variants={itemVariants} className="flex items-center justify-center py-1">
+            {/* Selectores de Tema en el Slidebar: Modo Oscuro (ditdot-dev) + Modo Kirby (Estrellita) */}
+            <motion.div custom={9} variants={itemVariants} className="flex items-center justify-center gap-3 py-1">
+              {/* Toggle Modo Oscuro / Claro */}
               <button
                 type="button"
                 onClick={toggleTheme}
@@ -407,7 +432,7 @@ export function Sidebar() {
                 aria-checked={isDark}
                 aria-label={isDark ? 'Cambiar a Modo Claro' : 'Cambiar a Modo Oscuro'}
                 title={isDark ? 'Cambiar a Modo Claro' : 'Cambiar a Modo Oscuro'}
-                className="ditdot-switch relative inline-block w-[60px] h-[34px] cursor-pointer rounded-full outline-none focus-visible:ring-2 focus-visible:ring-blue-500 transition-transform active:scale-95 select-none"
+                className="ditdot-switch relative inline-block w-[58px] h-[34px] cursor-pointer rounded-full outline-none focus-visible:ring-2 focus-visible:ring-blue-500 transition-transform active:scale-95 select-none shrink-0"
               >
                 <span
                   className={`ditdot-slider absolute inset-0 rounded-full transition-colors duration-300 shadow-sm ${
@@ -435,7 +460,7 @@ export function Sidebar() {
                   {/* Perilla deslizante blanca estilo ditdot-dev */}
                   <span
                     className={`absolute left-[4px] bottom-[4px] h-[26px] w-[26px] rounded-full bg-white shadow-md transform transition-transform duration-300 ease-out flex items-center justify-center ${
-                      isDark ? 'translate-x-[26px]' : 'translate-x-0'
+                      isDark ? 'translate-x-[24px]' : 'translate-x-0'
                     }`}
                   >
                     {isDark && (
@@ -454,6 +479,38 @@ export function Sidebar() {
                       </svg>
                     )}
                   </span>
+                </span>
+              </button>
+
+              {/* Botón Estrellita de Modo Kirby */}
+              <button
+                type="button"
+                onClick={toggleKirby}
+                role="switch"
+                aria-checked={isKirby}
+                aria-label={isKirby ? 'Desactivar Modo Kirby' : 'Activar Modo Kirby ✦'}
+                title={isKirby ? 'Modo Kirby Activo (Haz clic para desactivar)' : 'Activar Modo Kirby ✦'}
+                className={`relative flex items-center justify-center h-[34px] px-3 rounded-full border transition-all duration-300 shadow-sm active:scale-95 select-none shrink-0 group ${
+                  isKirby
+                    ? 'bg-gradient-to-r from-pink-400 via-rose-400 to-pink-500 border-pink-300 text-white shadow-pink-400/40 ring-2 ring-pink-200/80 animate-pulse'
+                    : 'bg-white dark:bg-slate-900 border-gray-200 dark:border-slate-800 text-amber-500 hover:border-pink-300 hover:text-pink-500 hover:bg-pink-50/60 dark:hover:bg-pink-950/40'
+                }`}
+              >
+                <Star
+                  className={`h-4 w-4 transition-transform duration-300 ${
+                    isKirby
+                      ? 'fill-amber-300 text-amber-300 rotate-12 scale-110 drop-shadow-xs'
+                      : 'fill-amber-400/40 text-amber-500 group-hover:fill-pink-400 group-hover:text-pink-500 group-hover:scale-110'
+                  }`}
+                />
+                <span
+                  className={`ml-1 text-[11px] font-black tracking-tight transition-colors ${
+                    isKirby
+                      ? 'text-white drop-shadow-xs'
+                      : 'text-gray-600 dark:text-slate-400 group-hover:text-pink-600 dark:group-hover:text-pink-300'
+                  }`}
+                >
+                  Kirby
                 </span>
               </button>
             </motion.div>

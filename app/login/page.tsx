@@ -8,9 +8,11 @@ import { Lock, Eye, EyeOff, Loader2, AlertCircle, ArrowRight, ShieldCheck, Star,
 import { supabase } from '@/lib/supabaseClient';
 import { iniciarTransicionRuta } from '@/components/PageTransitionLoader';
 import { KirbyEmailField } from '@/components/KirbyEmailField';
+import { useTheme } from '@/components/ThemeContext';
 
 export default function LoginPage() {
   const router = useRouter();
+  const { isKirby: isKirbyMode, setKirby: setIsKirbyMode } = useTheme();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -18,8 +20,6 @@ export default function LoginPage() {
   const [cargando, setCargando] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Modo Kirby interactivo (mantiene el diseño actual como tema predeterminado)
-  const [isKirbyMode, setIsKirbyMode] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

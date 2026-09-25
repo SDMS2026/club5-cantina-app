@@ -594,3 +594,346 @@ html.dark .border-amber-300 {
   animation: popoverExit 140ms cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
   will-change: transform, opacity !important;
 }
+
+/* ========================================================
+ * MODO KIRBY GLOBAL COMPLETO (PALETA PASTEL PINK, BERRY & CLOUD)
+ * Activable globalmente en toda la aplicación (POS, Productos,
+ * Deudas, Estudiantes, Proveedores, Modales, Tablas y Sidebar).
+ * ======================================================== */
+
+/* 1. Fondos principales de la aplicación */
+html.kirby:not(.dark),
+html.kirby:not(.dark) body {
+  background-color: #FFF2F6 !important;
+  color: #421828 !important;
+}
+
+html.kirby.dark,
+html.kirby.dark body {
+  background-color: #170912 !important;
+  color: #FFE5EE !important;
+}
+
+/* Fondos de contenedores principales de páginas */
+html.kirby:not(.dark) [class*="bg-[#FAFAFA]"],
+html.kirby:not(.dark) [class*="bg-[#F8FAFC]"],
+html.kirby:not(.dark) [class*="bg-[#FBFBFB]"],
+html.kirby:not(.dark) .bg-\[\#FAFAFA\],
+html.kirby:not(.dark) .bg-\[\#F8FAFC\],
+html.kirby:not(.dark) .bg-\[\#FBFBFB\] {
+  background-color: #FFF2F6 !important;
+}
+
+html.kirby.dark [class*="bg-[#FAFAFA]"],
+html.kirby.dark [class*="bg-[#F8FAFC]"],
+html.kirby.dark [class*="bg-[#FBFBFB]"],
+html.kirby.dark .bg-\[\#FAFAFA\],
+html.kirby.dark .bg-\[\#F8FAFC\],
+html.kirby.dark .bg-\[\#FBFBFB\] {
+  background-color: #170912 !important;
+}
+
+/* 2. Barra Superior (Header Sticky) */
+html.kirby:not(.dark) header.sticky,
+html.kirby:not(.dark) header[class*="backdrop-blur"] {
+  background-color: rgba(255, 245, 248, 0.94) !important;
+  border-bottom-color: #FFCCD8 !important;
+}
+
+html.kirby.dark header.sticky,
+html.kirby.dark header[class*="backdrop-blur"] {
+  background-color: rgba(23, 9, 18, 0.94) !important;
+  border-bottom-color: #4A1C30 !important;
+}
+
+/* 3. Barra Lateral (Sidebar) */
+html.kirby:not(.dark) aside,
+html.kirby:not(.dark) [class*="w-72"][class*="fixed"] {
+  background-color: #FFF8FA !important;
+  border-right-color: #FFCCD8 !important;
+}
+
+html.kirby.dark aside,
+html.kirby.dark [class*="w-72"][class*="fixed"] {
+  background-color: #1C0D17 !important;
+  border-right-color: #4A1C30 !important;
+}
+
+/* Elemento activo de navegación en el Sidebar en Modo Kirby */
+html.kirby:not(.dark) aside nav a[class*="bg-indigo-50"],
+html.kirby:not(.dark) aside nav a[class*="text-indigo-700"] {
+  background: linear-gradient(to right, #FFE5EE, #FFF0F5) !important;
+  color: #C72352 !important;
+  border: 1px solid #FFB3C6 !important;
+  box-shadow: 0 2px 8px rgba(255, 182, 193, 0.35) !important;
+}
+
+html.kirby.dark aside nav a[class*="bg-indigo-50"],
+html.kirby.dark aside nav a[class*="text-indigo-700"],
+html.kirby.dark aside nav a[class*="dark:bg-indigo-950"] {
+  background: linear-gradient(to right, #381525, #260E1A) !important;
+  color: #FFCCD8 !important;
+  border: 1px solid #732644 !important;
+}
+
+/* 4. Tarjetas, Paneles, Contenedores y Superficies */
+html.kirby:not(.dark) .bg-white:not([class*="dark:bg-"]):not(.ditdot-switch *),
+html.kirby:not(.dark) [class*="bg-white\/"]:not([class*="dark:bg-"]):not(.ditdot-switch *) {
+  background-color: #FFFFFF !important;
+  border-color: #FFCCD8 !important;
+  box-shadow: 0 4px 18px -2px rgba(255, 182, 193, 0.22);
+}
+
+html.kirby.dark .bg-white:not(.ditdot-switch *),
+html.kirby.dark [class*="bg-white\/"]:not(.ditdot-switch *) {
+  background-color: #220F1C !important;
+  border-color: #522538 !important;
+  color: #FFE5EE;
+}
+
+/* 5. Bordes suaves en tonos fresa / pastel */
+html.kirby:not(.dark) .border-gray-100,
+html.kirby:not(.dark) .border-gray-200,
+html.kirby:not(.dark) [class*="border-gray-200\/"],
+html.kirby:not(.dark) .border-gray-300,
+html.kirby:not(.dark) .border-slate-100,
+html.kirby:not(.dark) .border-slate-200 {
+  border-color: #FFCCD8 !important;
+}
+
+html.kirby.dark .border-gray-100,
+html.kirby.dark .border-gray-200,
+html.kirby.dark [class*="border-gray-200\/"],
+html.kirby.dark .border-gray-300,
+html.kirby.dark .border-slate-100,
+html.kirby.dark .border-slate-200 {
+  border-color: #522538 !important;
+}
+
+html.kirby:not(.dark) .divide-gray-100 > :not([hidden]) ~ :not([hidden]),
+html.kirby:not(.dark) .divide-gray-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #FFE5EE !important;
+}
+
+html.kirby.dark .divide-gray-100 > :not([hidden]) ~ :not([hidden]),
+html.kirby.dark .divide-gray-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #4A1C30 !important;
+}
+
+/* 6. Textos y contrastes de legibilidad */
+html.kirby:not(.dark) .text-gray-900,
+html.kirby:not(.dark) .text-gray-800,
+html.kirby:not(.dark) .text-slate-900,
+html.kirby:not(.dark) .text-slate-800 {
+  color: #421828 !important;
+}
+
+html.kirby:not(.dark) .text-gray-700,
+html.kirby:not(.dark) .text-gray-600,
+html.kirby:not(.dark) .text-slate-700,
+html.kirby:not(.dark) .text-slate-600 {
+  color: #7A2E4B !important;
+}
+
+html.kirby:not(.dark) .text-gray-500,
+html.kirby:not(.dark) .text-gray-400,
+html.kirby:not(.dark) .text-slate-500,
+html.kirby:not(.dark) .text-slate-400 {
+  color: #A0526E !important;
+}
+
+/* 7. Botones de Acción Primaria (Cobrar, Guardar, Registrar, Agregar) */
+html.kirby button[class*="bg-[#0E52A0]"],
+html.kirby [class*="from-[#0E52A0]"],
+html.kirby button[class*="bg-indigo-600"],
+html.kirby button[class*="bg-blue-600"] {
+  background: linear-gradient(135deg, #FF5E86 0%, #FF3D6E 50%, #FF2456 100%) !important;
+  border-color: #FFA6C2 !important;
+  color: #FFFFFF !important;
+  box-shadow: 0 4px 16px rgba(255, 61, 110, 0.35) !important;
+}
+
+html.kirby button[class*="bg-[#0E52A0]"]:hover,
+html.kirby [class*="from-[#0E52A0]"]:hover,
+html.kirby button[class*="bg-indigo-600"]:hover,
+html.kirby button[class*="bg-blue-600"]:hover {
+  background: linear-gradient(135deg, #FF4573 0%, #E51848 100%) !important;
+}
+
+html.kirby .text-indigo-600,
+html.kirby .text-blue-600,
+html.kirby [class*="text-[#0E52A0]"] {
+  color: #DE1B42 !important;
+}
+
+html.kirby.dark .text-indigo-400,
+html.kirby.dark .text-blue-400 {
+  color: #FF8DA7 !important;
+}
+
+/* 8. Inputs, Buscadores, Selects y Textareas */
+html.kirby:not(.dark) input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+html.kirby:not(.dark) select,
+html.kirby:not(.dark) textarea {
+  background-color: #FFF8FA !important;
+  color: #421828 !important;
+  border-color: #FFCCD8 !important;
+}
+
+html.kirby:not(.dark) input:focus,
+html.kirby:not(.dark) select:focus,
+html.kirby:not(.dark) textarea:focus {
+  border-color: #FF527B !important;
+  background-color: #FFFFFF !important;
+  box-shadow: 0 0 0 3px rgba(255, 82, 123, 0.22) !important;
+}
+
+html.kirby:not(.dark) input::placeholder,
+html.kirby:not(.dark) textarea::placeholder {
+  color: #E29BB0 !important;
+}
+
+html.kirby.dark input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+html.kirby.dark select,
+html.kirby.dark textarea {
+  background-color: #200E19 !important;
+  color: #FFE5EE !important;
+  border-color: #522538 !important;
+}
+
+html.kirby.dark input:focus,
+html.kirby.dark select:focus,
+html.kirby.dark textarea:focus {
+  border-color: #FF527B !important;
+  background-color: #2A1322 !important;
+  box-shadow: 0 0 0 3px rgba(255, 82, 123, 0.35) !important;
+}
+
+html.kirby.dark input::placeholder,
+html.kirby.dark textarea::placeholder {
+  color: #8C4760 !important;
+}
+
+/* 9. Fondos secundarios, badges y contenedores */
+html.kirby:not(.dark) .bg-gray-50,
+html.kirby:not(.dark) [class*="bg-gray-50\/"],
+html.kirby:not(.dark) .bg-gray-100,
+html.kirby:not(.dark) [class*="bg-gray-100\/"],
+html.kirby:not(.dark) .bg-slate-50,
+html.kirby:not(.dark) .bg-slate-100 {
+  background-color: #FFF0F4 !important;
+  border-color: #FFE0EA !important;
+}
+
+html.kirby.dark .bg-gray-50,
+html.kirby.dark [class*="bg-gray-50\/"],
+html.kirby.dark .bg-gray-100,
+html.kirby.dark [class*="bg-gray-100\/"],
+html.kirby.dark .bg-slate-50,
+html.kirby.dark .bg-slate-100 {
+  background-color: #261120 !important;
+  border-color: #4A1C30 !important;
+}
+
+/* Badges azul/índigo ahora fresa pastel */
+html.kirby:not(.dark) .bg-indigo-50,
+html.kirby:not(.dark) .bg-blue-50 {
+  background-color: #FFF0F5 !important;
+  color: #C72352 !important;
+  border-color: #FFCCD8 !important;
+}
+
+html.kirby.dark .bg-indigo-50,
+html.kirby.dark .bg-blue-50 {
+  background-color: rgba(82, 37, 56, 0.45) !important;
+  color: #FFCCD8 !important;
+  border-color: #522538 !important;
+}
+
+/* 10. Filtros y Pills de Categoría en el Catálogo POS */
+html.kirby:not(.dark) [class*="bg-gray-50"] button.bg-white,
+html.kirby:not(.dark) [class*="bg-gray-100"] button.bg-white {
+  background: linear-gradient(135deg, #FF5E86, #FF2456) !important;
+  color: #FFFFFF !important;
+  box-shadow: 0 2px 10px rgba(255, 61, 110, 0.3) !important;
+}
+
+/* 11. Tablas y Filas */
+html.kirby:not(.dark) table thead th,
+html.kirby:not(.dark) table th {
+  background-color: #FFF0F4 !important;
+  color: #8A2548 !important;
+  border-bottom-color: #FFCCD8 !important;
+}
+
+html.kirby:not(.dark) table tbody tr {
+  border-bottom-color: #FFE5EE !important;
+}
+
+html.kirby:not(.dark) table tbody tr:hover {
+  background-color: #FFF5F8 !important;
+}
+
+html.kirby.dark table thead th,
+html.kirby.dark table th {
+  background-color: #24111E !important;
+  color: #FFB3C6 !important;
+  border-bottom-color: #4A1C30 !important;
+}
+
+html.kirby.dark table tbody tr {
+  border-bottom-color: #4A1C30 !important;
+}
+
+html.kirby.dark table tbody tr:hover {
+  background-color: #2D1426 !important;
+}
+
+/* 12. Diálogos y Modales Radix UI */
+html.kirby:not(.dark) [role="dialog"],
+html.kirby:not(.dark) [data-radix-dialog-content] {
+  background-color: #FFFFFF !important;
+  border-color: #FFCCD8 !important;
+  box-shadow: 0 25px 50px -12px rgba(255, 105, 180, 0.25) !important;
+}
+
+html.kirby.dark [role="dialog"],
+html.kirby.dark [data-radix-dialog-content] {
+  background-color: #20101A !important;
+  border-color: #522538 !important;
+  color: #FFE5EE !important;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.85) !important;
+}
+
+/* 13. Scrollbar personalizada en Modo Kirby */
+html.kirby ::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+html.kirby:not(.dark) ::-webkit-scrollbar-track {
+  background: #FFF2F6;
+}
+html.kirby:not(.dark) ::-webkit-scrollbar-thumb {
+  background: #FFA6BC;
+  border-radius: 9999px;
+}
+html.kirby:not(.dark) ::-webkit-scrollbar-thumb:hover {
+  background: #FF7096;
+}
+
+html.kirby.dark ::-webkit-scrollbar-track {
+  background: #170912;
+}
+html.kirby.dark ::-webkit-scrollbar-thumb {
+  background: #522538;
+  border-radius: 9999px;
+}
+html.kirby.dark ::-webkit-scrollbar-thumb:hover {
+  background: #73314E;
+}
+
+/* 14. Selección de Texto */
+html.kirby ::selection {
+  background-color: #FFA6BC !important;
+  color: #590B23 !important;
+}

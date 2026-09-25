@@ -85,6 +85,10 @@ export default function RootLayout({
                 } else {
                   document.documentElement.classList.remove('dark');
                 }
+                var storedKirby = localStorage.getItem('club5_kirby');
+                if (storedKirby === 'true') {
+                  document.documentElement.classList.add('kirby');
+                }
               } catch (e) {}
             `,
           }}
