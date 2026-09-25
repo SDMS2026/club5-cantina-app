@@ -147,7 +147,7 @@ export function KirbyEmailField({
 
       <div className="relative z-10">
         {/* Etiqueta suave en tono rosado/berry */}
-        <div className="flex items-center justify-between mb-1.5 px-1">
+        <div className="mb-1.5 px-1">
           <label
             htmlFor="email"
             className="text-xs font-bold text-[#8A2548] dark:text-pink-300 flex items-center gap-1.5 transition-colors"
@@ -155,12 +155,6 @@ export function KirbyEmailField({
             <Sparkles className="h-3.5 w-3.5 text-pink-400" />
             <span>Correo Electrónico</span>
           </label>
-
-          {/* Indicador de ayuda interactiva */}
-          <span className="text-[10px] font-semibold text-pink-500/80 dark:text-pink-400/80 flex items-center gap-1">
-            <span>¡Usa la estrella para que Kirby aspire!</span>
-            <span className="text-amber-400">★</span>
-          </span>
         </div>
 
         {/* Fila del input + Kirby al lado */}
