@@ -15,4 +15,10 @@ export const supabase =
     ? createBrowserClient(supabaseUrl, supabaseAnonKey)
     : createClient(supabaseUrl, supabaseAnonKey);
 
+export const createClientComponentClient = () => {
+  return typeof window !== 'undefined'
+    ? createBrowserClient(supabaseUrl, supabaseAnonKey)
+    : createClient(supabaseUrl, supabaseAnonKey);
+};
+
 export default supabase;

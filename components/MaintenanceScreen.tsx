@@ -12,6 +12,7 @@ import {
   Lock,
   CheckCircle2,
 } from 'lucide-react';
+import { createClientComponentClient } from '@/lib/supabaseClient';
 import { ejecutarCierreForzadoMantenimiento } from '@/lib/maintenance';
 
 export function MaintenanceScreen() {
@@ -19,22 +20,16 @@ export function MaintenanceScreen() {
   const [comprobando, setComprobando] = useState<boolean>(false);
   const [mensajeEstado, setMensajeEstado] = useState<string | null>(null);
 
-  // Ejecución automática inmediata del cierre forzado de sesión y depuración de caché
+  // Cierre Activo de Sesión (signOut) e invalidación de almacenamiento inmediato
   useEffect(() => {
-    let montado = true;
+    const supabase = createClientComponentClient();
+    supabase.auth.signOut({ scope: 'local' });
+    localStorage.clear();
+    sessionStorage.clear();
+    setLimpiezaEjecutada(true);
 
-    async function aplicarSeguridadMantenimiento() {
-      try {
-        await ejecutarCierreForzadoMantenimiento();
-        if (montado) {
-          setLimpiezaEjecutada(true);
-        }
-      } catch (err) {
-        console.error('Error aplicando cierre forzado de mantenimiento:', err);
-      }
-    }
-
-    aplicarSeguridadMantenimiento();
+    // Depuración complementaria de cachés en el navegador
+    ejecutarCierreForzadoMantenimiento().catch(() => {});
 
     // Verificación periódica en segundo plano para detectar cuando se levante el mantenimiento
     const interval = setInterval(async () => {
@@ -42,14 +37,13 @@ export function MaintenanceScreen() {
         const res = await fetch('/api/mantenimiento', { cache: 'no-store' });
         const data = await res.json();
         if (data && data.mantenimiento === false) {
-          // El mantenimiento se ha desactivado: recargar automáticamente
+          // El mantenimiento se ha desactivado: recargar automáticamente hacia el login
           window.location.href = '/login';
         }
       } catch {}
     }, 20000);
 
     return () => {
-      montado = false;
       clearInterval(interval);
     };
   }, []);

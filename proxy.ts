@@ -2,6 +2,41 @@ import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
 export async function proxy(request: NextRequest) {
+  // 1. Verificación Global Prioritaria de Modo Mantenimiento
+  // Intercepta CUALQUIER ruta ANTES de comprobar cookies o sesiones de Supabase Auth
+  const maintenanceEnv = process.env.NEXT_PUBLIC_MAINTENANCE_MODE?.toLowerCase().trim();
+  const isMaintenance = maintenanceEnv === 'true' || maintenanceEnv === '1';
+
+  if (isMaintenance) {
+    // Si es una petición a la API (excepto /api/mantenimiento para monitorear el estado)
+    if (
+      request.nextUrl.pathname.startsWith('/api') &&
+      !request.nextUrl.pathname.startsWith('/api/mantenimiento')
+    ) {
+      return NextResponse.json(
+        {
+          error: 'Sitio en Mantenimiento - Actualizando Club 5 Cantina Escolar. Regresaremos en breve.',
+          mantenimiento: true,
+        },
+        {
+          status: 503,
+          headers: {
+            'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+            'Retry-After': '60',
+          },
+        }
+      );
+    }
+
+    // Para todas las páginas, inyectar cabeceras estrictas contra caché y permitir que RootLayout renderice MaintenanceScreen
+    const response = NextResponse.next();
+    response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+    response.headers.set('Pragma', 'no-cache');
+    response.headers.set('Expires', '0');
+    response.headers.set('x-maintenance-active', 'true');
+    return response;
+  }
+
   let response = NextResponse.next({
     request: {
       headers: request.headers,
