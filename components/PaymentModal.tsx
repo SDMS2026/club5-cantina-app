@@ -29,7 +29,12 @@ import {
   handleDecimalKeyDown,
 } from '@/lib/utils';
 import { useModalDragScroll } from '@/lib/useModalDragScroll';
-import { obtenerSaldoCliente, procesarAbonoCliente, ResumenSaldoCliente } from '@/lib/clientBalance';
+import {
+  obtenerSaldoCliente,
+  procesarAbonoCliente,
+  descontarSaldoCliente,
+  ResumenSaldoCliente,
+} from '@/lib/clientBalance';
 import { refrescarNotificacionesGlobales } from '@/components/NotificationsContext';
 
 interface PaymentModalProps {
@@ -202,17 +207,24 @@ export function PaymentModal({
       let metodoPagoFinal = metodoSeleccionado as string;
       const pagado = metodoSeleccionado !== 'pendiente';
 
-      // Determinar si es pago con saldo total o pago mixto
+      // Determinar monto a descontar del campo clientes.saldo:
+      // "Al hacer una Venta/Consumo: Resta el monto total del carrito del campo clientes.saldo (ya sea que pague con su saldo a favor o que quede debiendo/fiado)."
+      let montoADescontarSaldo = 0;
       if (metodoSeleccionado === 'saldo_favor') {
         if (saldoDisponible >= totalUsd) {
           // Cubre el 100%
           metodoPagoFinal = 'saldo_favor';
+          montoADescontarSaldo = totalUsd;
         } else {
           // Pago mixto: se usa todo el saldo a favor disponible y la diferencia por el sub-método
           const saldoUsado = saldoDisponible;
           const diferencia = Math.round((totalUsd - saldoUsado) * 100) / 100;
           metodoPagoFinal = `mixto:saldo_favor=${saldoUsado.toFixed(2)},${subMetodoDiferencia}=${diferencia.toFixed(2)}`;
+          montoADescontarSaldo = saldoUsado;
         }
+      } else if (metodoSeleccionado === 'pendiente') {
+        // Venta a cuenta / Fiado
+        montoADescontarSaldo = totalUsd;
       }
 
       // 1. Insertar consumo cabecera
@@ -248,7 +260,19 @@ export function PaymentModal({
         throw new Error(detallesError.message || 'Error al guardar los detalles de la compra');
       }
 
-      // 3. Si se marcó guardar vuelto como saldo a favor del cliente
+      // 3. Descontar del campo clientes.saldo (actualización en tiempo real de la cuenta corriente)
+      if (cliente?.id && montoADescontarSaldo > 0) {
+        try {
+          await descontarSaldoCliente({
+            clienteId: cliente.id,
+            montoUsd: montoADescontarSaldo,
+          });
+        } catch (errDescuento) {
+          console.error('Error descontando saldo del cliente:', errDescuento);
+        }
+      }
+
+      // 4. Si se marcó guardar vuelto como saldo a favor del cliente
       if (guardarVueltoComoSaldo && vueltoUsd > 0 && cliente?.id) {
         try {
           await procesarAbonoCliente({

@@ -2,11 +2,12 @@ import { supabase } from '@/lib/supabaseClient';
 
 export interface ResumenSaldoCliente {
   clienteId: string;
-  deudaTotalUsd: number;
-  saldoAFavorTotalUsd: number;
-  saldoNetoUsd: number; // saldoAFavorTotalUsd - deudaTotalUsd (+ positivo: a favor, - negativo: debe)
-  cantidadConsumosPendientes: number;
-  cantidadAbonos: number;
+  saldo: number;              // Saldo unificado directo de clientes.saldo
+  deudaTotalUsd: number;      // saldo < 0 ? Math.abs(saldo) : 0
+  saldoAFavorTotalUsd: number;// saldo > 0 ? saldo : 0
+  saldoNetoUsd: number;       // igual a saldo
+  cantidadConsumosPendientes?: number;
+  cantidadAbonos?: number;
 }
 
 /**
@@ -19,6 +20,7 @@ export function esAbonoOEntradaSaldo(metodoPago?: string | null): boolean {
     m === 'abono_saldo_favor' ||
     m === 'vuelto_saldo_favor' ||
     m === 'abono_adelantado' ||
+    m === 'abono_cuenta' ||
     m.startsWith('abono_') ||
     m.startsWith('vuelto_')
   );
@@ -45,90 +47,47 @@ export function extraerSaldoFavorUsado(metodoPago?: string | null, montoTotal: n
 }
 
 /**
- * Procesa un arreglo de consumos de Supabase y calcula el balance (deuda y saldo a favor)
- * para cada cliente agrupado por su ID.
- */
-export function calcularSaldosClientes(
-  consumos: Array<{
-    id?: string;
-    cliente_id: string | null;
-    monto_total_usd: number;
-    metodo_pago?: string | null;
-    pagado: boolean;
-    fecha?: string;
-  }>
-): Record<string, ResumenSaldoCliente> {
-  const saldosMap: Record<string, ResumenSaldoCliente> = {};
-
-  for (const c of consumos) {
-    if (!c.cliente_id) continue;
-    const cid = c.cliente_id;
-
-    if (!saldosMap[cid]) {
-      saldosMap[cid] = {
-        clienteId: cid,
-        deudaTotalUsd: 0,
-        saldoAFavorTotalUsd: 0,
-        saldoNetoUsd: 0,
-        cantidadConsumosPendientes: 0,
-        cantidadAbonos: 0,
-      };
-    }
-
-    const monto = Number(c.monto_total_usd) || 0;
-
-    if (!c.pagado) {
-      // Consumo a crédito / fiado pendiente
-      saldosMap[cid].deudaTotalUsd += monto;
-      saldosMap[cid].cantidadConsumosPendientes += 1;
-    } else {
-      // Consumo pagado: puede ser abono entrante o gasto usando saldo a favor
-      if (esAbonoOEntradaSaldo(c.metodo_pago)) {
-        saldosMap[cid].saldoAFavorTotalUsd += monto;
-        saldosMap[cid].cantidadAbonos += 1;
-      } else {
-        const gastado = extraerSaldoFavorUsado(c.metodo_pago, monto);
-        saldosMap[cid].saldoAFavorTotalUsd -= gastado;
-      }
-    }
-  }
-
-  // Redondear a 2 decimales y calcular saldo neto
-  for (const cid in saldosMap) {
-    const s = saldosMap[cid];
-    s.saldoAFavorTotalUsd = Math.max(0, Math.round(s.saldoAFavorTotalUsd * 100) / 100);
-    s.deudaTotalUsd = Math.round(s.deudaTotalUsd * 100) / 100;
-    s.saldoNetoUsd = Math.round((s.saldoAFavorTotalUsd - s.deudaTotalUsd) * 100) / 100;
-  }
-
-  return saldosMap;
-}
-
-/**
  * Consulta la base de datos de Supabase para obtener el estado financiero consolidado
- * de todos los clientes.
+ * de todos los clientes leyendo DIRECTAMENTE del campo clientes.saldo.
+ * - saldo > 0 => Saldo a Favor disponible
+ * - saldo < 0 => Deuda / Cuenta por cobrar (Math.abs(saldo))
+ * - saldo === 0 => Solvente ($0.00)
  */
 export async function obtenerSaldosTodosClientes(): Promise<Record<string, ResumenSaldoCliente>> {
   const { data, error } = await supabase
-    .from('consumos')
-    .select('id, cliente_id, monto_total_usd, metodo_pago, pagado, fecha')
-    .not('cliente_id', 'is', null);
+    .from('clientes')
+    .select('id, saldo, nombre_estudiante');
 
   if (error || !data) {
-    console.error('Error obteniendo consumos para saldos:', error);
+    console.error('Error obteniendo clientes para saldos unificados:', error);
     return {};
   }
 
-  return calcularSaldosClientes(data);
+  const mapa: Record<string, ResumenSaldoCliente> = {};
+  for (const c of data) {
+    const s = Math.round(Number(c.saldo || 0) * 100) / 100;
+    mapa[c.id] = {
+      clienteId: c.id,
+      saldo: s,
+      deudaTotalUsd: s < 0 ? Math.round(Math.abs(s) * 100) / 100 : 0,
+      saldoAFavorTotalUsd: s > 0 ? s : 0,
+      saldoNetoUsd: s,
+      cantidadConsumosPendientes: s < 0 ? 1 : 0,
+      cantidadAbonos: s > 0 ? 1 : 0,
+    };
+  }
+
+  return mapa;
 }
 
 /**
- * Consulta el saldo consolidado de un único cliente.
+ * Consulta el saldo de la cuenta corriente unificada de un único cliente leyendo clientes.saldo.
  */
 export async function obtenerSaldoCliente(clienteId: string): Promise<ResumenSaldoCliente> {
   if (!clienteId) {
     return {
       clienteId: '',
+      saldo: 0,
       deudaTotalUsd: 0,
       saldoAFavorTotalUsd: 0,
       saldoNetoUsd: 0,
@@ -138,14 +97,16 @@ export async function obtenerSaldoCliente(clienteId: string): Promise<ResumenSal
   }
 
   const { data, error } = await supabase
-    .from('consumos')
-    .select('id, cliente_id, monto_total_usd, metodo_pago, pagado, fecha')
-    .eq('cliente_id', clienteId);
+    .from('clientes')
+    .select('id, saldo')
+    .eq('id', clienteId)
+    .single();
 
   if (error || !data) {
     console.error('Error obteniendo saldo del cliente:', error);
     return {
       clienteId,
+      saldo: 0,
       deudaTotalUsd: 0,
       saldoAFavorTotalUsd: 0,
       saldoNetoUsd: 0,
@@ -154,25 +115,71 @@ export async function obtenerSaldoCliente(clienteId: string): Promise<ResumenSal
     };
   }
 
-  const mapa = calcularSaldosClientes(data);
-  return (
-    mapa[clienteId] || {
-      clienteId,
-      deudaTotalUsd: 0,
-      saldoAFavorTotalUsd: 0,
-      saldoNetoUsd: 0,
-      cantidadConsumosPendientes: 0,
-      cantidadAbonos: 0,
-    }
-  );
+  const s = Math.round(Number(data.saldo || 0) * 100) / 100;
+  return {
+    clienteId,
+    saldo: s,
+    deudaTotalUsd: s < 0 ? Math.round(Math.abs(s) * 100) / 100 : 0,
+    saldoAFavorTotalUsd: s > 0 ? s : 0,
+    saldoNetoUsd: s,
+    cantidadConsumosPendientes: s < 0 ? 1 : 0,
+    cantidadAbonos: s > 0 ? 1 : 0,
+  };
 }
 
 /**
- * Procesa un abono o depósito de un cliente aplicando las reglas de negocio estrictas:
- * 1. Liquidación prioritaria de deudas (de la más antigua a la más reciente).
- * 2. Si el abono cubre parcialmente una deuda, se rebaja el saldo deudor.
- * 3. Si el dinero abonado supera la deuda pendiente, el sobrante se asigna automáticamente como saldo a favor.
- * 4. Si no tiene deuda pendiente ($0.00), el 100% va directo como saldo a favor disponible.
+ * Descuenta el monto de un consumo directamente de clientes.saldo:
+ * Aplica cuando el cliente paga con 'saldo_favor' o queda debiendo con 'pendiente' / fiado.
+ * Retorna el nuevo saldo resultante.
+ */
+export async function descontarSaldoCliente({
+  clienteId,
+  montoUsd,
+}: {
+  clienteId: string;
+  montoUsd: number;
+}): Promise<number> {
+  if (!clienteId || montoUsd <= 0) return 0;
+
+  // 1. Consultar saldo actual
+  const { data: cliente, error: errSelect } = await supabase
+    .from('clientes')
+    .select('saldo')
+    .eq('id', clienteId)
+    .single();
+
+  if (errSelect) {
+    console.error('Error al consultar saldo para descontar consumo:', errSelect);
+    throw new Error('Error al consultar saldo en Supabase: ' + errSelect.message);
+  }
+
+  const saldoActual = Number(cliente?.saldo || 0);
+  const nuevoSaldo = Math.round((saldoActual - montoUsd) * 100) / 100;
+
+  // 2. Actualizar clientes.saldo
+  const { error: errUpdate } = await supabase
+    .from('clientes')
+    .update({ saldo: nuevoSaldo })
+    .eq('id', clienteId);
+
+  if (errUpdate) {
+    console.error('Error al descontar saldo en la tabla clientes:', errUpdate);
+    throw new Error('Error al actualizar clientes.saldo: ' + errUpdate.message);
+  }
+
+  // 3. Notificar actualización en tiempo real
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('club5:actualizar-notificaciones'));
+  }
+
+  return nuevoSaldo;
+}
+
+/**
+ * Procesa un abono o depósito de un cliente sobre su cuenta corriente unificada:
+ * 1. Suma el monto ingresado al campo clientes.saldo.
+ * 2. Guarda el ticket en la tabla 'consumos' para el historial contable detallado.
+ * 3. Notifica a toda la app y el sistema de notificaciones para actualización en tiempo real.
  */
 export async function procesarAbonoCliente({
   clienteId,
@@ -188,6 +195,8 @@ export async function procesarAbonoCliente({
   esVuelto?: boolean;
 }): Promise<{
   exito: boolean;
+  saldoAnterior: number;
+  nuevoSaldo: number;
   deudaLiquidadaUsd: number;
   saldoAFavorAcreditadoUsd: number;
   mensaje: string;
@@ -195,111 +204,122 @@ export async function procesarAbonoCliente({
   if (!clienteId || montoUsd <= 0) {
     return {
       exito: false,
+      saldoAnterior: 0,
+      nuevoSaldo: 0,
       deudaLiquidadaUsd: 0,
       saldoAFavorAcreditadoUsd: 0,
       mensaje: 'Monto inválido o cliente no especificado.',
     };
   }
 
-  // 1. Obtener deudas pendientes del cliente ordenadas cronológicamente ASC (más antiguas primero)
-  const { data: deudasPendientes, error: errDeudas } = await supabase
-    .from('consumos')
-    .select('id, monto_total_usd, fecha')
-    .eq('cliente_id', clienteId)
-    .eq('pagado', false)
-    .order('fecha', { ascending: true });
+  // 1. Consultar saldo actual directamente de clientes.saldo
+  const { data: cliente, error: errCliente } = await supabase
+    .from('clientes')
+    .select('id, saldo, nombre_estudiante')
+    .eq('id', clienteId)
+    .single();
 
-  if (errDeudas) {
-    console.error('Error buscando deudas pendientes:', errDeudas);
-    throw new Error('Error al consultar deudas pendientes en Supabase: ' + errDeudas.message);
+  if (errCliente || !cliente) {
+    console.error('Error consultando saldo del cliente:', errCliente);
+    throw new Error('Error al consultar saldo en Supabase: ' + (errCliente?.message || 'Cliente no encontrado'));
   }
 
-  let dineroRestante = Math.round(montoUsd * 100) / 100;
-  let deudaLiquidada = 0;
+  const saldoActual = Number(cliente.saldo || 0);
+  const nuevoSaldo = Math.round((saldoActual + montoUsd) * 100) / 100;
 
-  // 2. Liquidación prioritaria de deuda
-  if (deudasPendientes && deudasPendientes.length > 0) {
-    for (const d of deudasPendientes) {
-      if (dineroRestante <= 0) break;
-      const montoDeuda = Math.round(Number(d.monto_total_usd) * 100) / 100;
+  // 2. Sumar el monto ingresado al campo clientes.saldo
+  const { error: errUpdate } = await supabase
+    .from('clientes')
+    .update({ saldo: nuevoSaldo })
+    .eq('id', clienteId);
 
-      if (dineroRestante >= montoDeuda) {
-        // Se cancela completamente esta deuda
-        const { error: errUpd } = await supabase
-          .from('consumos')
-          .update({
-            pagado: true,
-            metodo_pago: metodoPago,
-          })
-          .eq('id', d.id);
+  if (errUpdate) {
+    console.error('Error actualizando clientes.saldo en Supabase:', errUpdate);
+    throw new Error('Error al actualizar clientes.saldo en Supabase: ' + errUpdate.message);
+  }
 
-        if (errUpd) throw errUpd;
+  // 3. Registrar el ticket en consumos para el historial contable detallado
+  const metodoRegistro = esVuelto ? 'vuelto_saldo_favor' : (metodoPago || 'abono_saldo_favor');
+  const { error: errHistorial } = await supabase.from('consumos').insert({
+    cliente_id: clienteId,
+    monto_total_usd: montoUsd,
+    tasa_bcv_historica: tasaBcv,
+    metodo_pago: metodoRegistro,
+    pagado: true,
+  });
 
-        dineroRestante = Math.round((dineroRestante - montoDeuda) * 100) / 100;
-        deudaLiquidada = Math.round((deudaLiquidada + montoDeuda) * 100) / 100;
-      } else {
-        // Se cubre parcialmente la deuda
-        const restanteDeuda = Math.round((montoDeuda - dineroRestante) * 100) / 100;
-        const { error: errUpdPart } = await supabase
-          .from('consumos')
-          .update({
-            monto_total_usd: restanteDeuda,
-          })
-          .eq('id', d.id);
+  if (errHistorial) {
+    console.warn('Aviso: el saldo se actualizó pero hubo un problema guardando en consumos:', errHistorial);
+  }
 
-        if (errUpdPart) throw errUpdPart;
+  // Si tenía consumos pendientes marcados en consumos con pagado: false, marcarlos como solventados
+  if (saldoActual < 0) {
+    try {
+      const { data: consumosPendientes } = await supabase
+        .from('consumos')
+        .select('id, monto_total_usd')
+        .eq('cliente_id', clienteId)
+        .eq('pagado', false)
+        .order('fecha', { ascending: true });
 
-        // Registrar el pago parcial recibido
-        await supabase.from('consumos').insert({
-          cliente_id: clienteId,
-          monto_total_usd: dineroRestante,
-          tasa_bcv_historica: tasaBcv,
-          metodo_pago: metodoPago,
-          pagado: true,
-        });
-
-        deudaLiquidada = Math.round((deudaLiquidada + dineroRestante) * 100) / 100;
-        dineroRestante = 0;
-        break;
+      if (consumosPendientes && consumosPendientes.length > 0) {
+        let disponible = montoUsd;
+        for (const cp of consumosPendientes) {
+          if (disponible <= 0) break;
+          const m = Number(cp.monto_total_usd || 0);
+          if (disponible >= m) {
+            await supabase.from('consumos').update({ pagado: true }).eq('id', cp.id);
+            disponible = Math.round((disponible - m) * 100) / 100;
+          } else {
+            const restante = Math.round((m - disponible) * 100) / 100;
+            await supabase.from('consumos').update({ monto_total_usd: restante }).eq('id', cp.id);
+            disponible = 0;
+            break;
+          }
+        }
       }
+    } catch (e) {
+      console.warn('Aviso al conciliar consumos pendientes:', e);
     }
   }
 
-  // 3. Excedente o abono sin deuda -> Asignar como Saldo a Favor
+  // 4. Mensajes informativos
+  let deudaLiquidada = 0;
   let saldoAcreditado = 0;
-  if (dineroRestante > 0) {
-    saldoAcreditado = dineroRestante;
-    const metodoRegistro = esVuelto ? 'vuelto_saldo_favor' : 'abono_saldo_favor';
-    const { error: errAbono } = await supabase.from('consumos').insert({
-      cliente_id: clienteId,
-      monto_total_usd: dineroRestante,
-      tasa_bcv_historica: tasaBcv,
-      metodo_pago: metodoRegistro,
-      pagado: true,
-    });
 
-    if (errAbono) {
-      console.error('Error insertando saldo a favor en Supabase:', errAbono);
-      throw new Error('Error al registrar saldo a favor en Supabase: ' + errAbono.message);
+  if (saldoActual < 0) {
+    const deudaAnterior = Math.abs(saldoActual);
+    if (montoUsd >= deudaAnterior) {
+      deudaLiquidada = deudaAnterior;
+      saldoAcreditado = Math.round((montoUsd - deudaAnterior) * 100) / 100;
+    } else {
+      deudaLiquidada = montoUsd;
+      saldoAcreditado = 0;
     }
+  } else {
+    saldoAcreditado = montoUsd;
   }
 
   let mensaje = '';
   if (deudaLiquidada > 0 && saldoAcreditado > 0) {
     mensaje = `¡Deuda saldada ($${deudaLiquidada.toFixed(2)}) y sobrante de $${saldoAcreditado.toFixed(2)} acreditado como saldo a favor!`;
-  } else if (deudaLiquidada > 0) {
-    mensaje = `¡Se liquidaron $${deudaLiquidada.toFixed(2)} de deuda pendiente exitosamente!`;
+  } else if (deudaLiquidada > 0 && nuevoSaldo === 0) {
+    mensaje = `¡Deuda pendiente de $${deudaLiquidada.toFixed(2)} saldada exitosamente! Cuenta al día ($0.00).`;
+  } else if (deudaLiquidada > 0 && nuevoSaldo < 0) {
+    mensaje = `¡Abono de $${montoUsd.toFixed(2)} aplicado! Saldo deudor restante: $${Math.abs(nuevoSaldo).toFixed(2)}.`;
   } else {
-    mensaje = `¡Se acreditaron $${saldoAcreditado.toFixed(2)} como saldo a favor exitosamente!`;
+    mensaje = `¡Se acreditaron $${montoUsd.toFixed(2)} como saldo a favor! Saldo total disponible: $${nuevoSaldo.toFixed(2)}.`;
   }
 
-  // Notificar al contexto global de notificaciones para actualizar badges en tiempo real
+  // 5. Notificar actualización en tiempo real
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('club5:actualizar-notificaciones'));
   }
 
   return {
     exito: true,
+    saldoAnterior: saldoActual,
+    nuevoSaldo,
     deudaLiquidadaUsd: deudaLiquidada,
     saldoAFavorAcreditadoUsd: saldoAcreditado,
     mensaje,

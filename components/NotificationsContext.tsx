@@ -4,7 +4,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { usePathname } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import { obtenerTasaBCV, TASA_BCV_FALLBACK_DEFAULT } from '@/lib/dolarApi';
-import { calcularConversionBs } from '@/lib/utils';
+import { calcularConversionBs, formatUSD } from '@/lib/utils';
 import { ProveedorCuenta } from '@/types/pos';
 import { obtenerSaldosTodosClientes } from '@/lib/clientBalance';
 
@@ -194,83 +194,45 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
 
       const totalPendienteBsProv = calcularConversionBs(totalPendienteUsdProv, tasaActual);
 
-      // 3. Obtener Cuentas por Cobrar (Consumos y Saldos Reales Consolidados)
-      const [saldosMap, { data: consumosData, error: consumosErr }] = await Promise.all([
-        obtenerSaldosTodosClientes(),
-        supabase
-          .from('consumos')
-          .select(`
-            id,
-            cliente_id,
-            monto_total_usd,
-            pagado,
-            clientes (
-              id,
-              nombre_estudiante,
-              grado_seccion,
-              nombre_representante
-            )
-          `)
-          .eq('pagado', false),
-      ]);
+      // 3. Obtener Cuentas por Cobrar directamente de la cuenta corriente unificada (clientes.saldo < 0)
+      const { data: clientesConDeudaData, error: clientesErr } = await supabase
+        .from('clientes')
+        .select('id, nombre_estudiante, grado_seccion, nombre_representante, saldo')
+        .lt('saldo', 0)
+        .order('saldo', { ascending: true });
 
-      if (consumosErr) {
-        console.error('Error al cargar consumos en notificaciones:', consumosErr);
+      if (clientesErr) {
+        console.error('Error al cargar clientes con saldo deudor en notificaciones:', clientesErr);
       }
 
-      // Solo contar como consumos pendientes aquellos de clientes que efectivamente tengan deuda activa (> 0)
-      const consumosPendientes = (consumosData || []).filter((c: any) => {
-        const cid = c.cliente_id;
-        if (!cid) return false;
-        const saldo = saldosMap[cid];
-        return saldo && saldo.deudaTotalUsd > 0;
-      });
-
-      const clientesDeudaMap = new Map<string, { cliente: any; totalUsd: number; count: number }>();
+      const clientesConDeuda = clientesConDeudaData || [];
       let totalDeudaUsd = 0;
-
-      consumosPendientes.forEach((c: any) => {
-        const monto = Number(c.monto_total_usd || 0);
-        const clienteId = c.cliente_id || 'anonimo';
-        const saldo = saldosMap[clienteId];
-        const deudaEfectiva = saldo ? saldo.deudaTotalUsd : monto;
-
-        const existente = clientesDeudaMap.get(clienteId);
-        if (existente) {
-          existente.count++;
-        } else {
-          clientesDeudaMap.set(clienteId, {
-            cliente: c.clientes,
-            totalUsd: deudaEfectiva,
-            count: 1,
-          });
-          totalDeudaUsd += deudaEfectiva;
-        }
-      });
-
       const alertasDeudas: NotificacionItem[] = [];
-      Array.from(clientesDeudaMap.entries())
-        .sort((a, b) => b[1].totalUsd - a[1].totalUsd)
-        .forEach(([id, item]) => {
-          const nombre = item.cliente?.nombre_estudiante || 'Cliente sin registrar';
-          const grado = item.cliente?.grado_seccion ? ` (${item.cliente.grado_seccion})` : '';
-          const montoBs = calcularConversionBs(item.totalUsd, tasaActual);
 
-          alertasDeudas.push({
-            id: `deuda-${id}`,
-            tipo: 'cliente_deuda',
-            titulo: `${nombre}${grado}`,
-            descripcion: `${item.count} ${item.count === 1 ? 'consumo pendiente' : 'consumos pendientes'}`,
-            montoUsd: item.totalUsd,
-            montoBs,
-            etiqueta: 'Saldo por cobrar',
-            color: 'amber',
-            href: '/deudas',
-          });
+      clientesConDeuda.forEach((c) => {
+        const saldoVal = Number(c.saldo || 0);
+        const deudaUsd = Math.round(Math.abs(saldoVal) * 100) / 100;
+        totalDeudaUsd += deudaUsd;
+
+        const nombre = c.nombre_estudiante || 'Cliente';
+        const grado = c.grado_seccion ? ` (${c.grado_seccion})` : '';
+        const montoBs = calcularConversionBs(deudaUsd, tasaActual);
+
+        alertasDeudas.push({
+          id: `deuda-${c.id}`,
+          tipo: 'cliente_deuda',
+          titulo: `${nombre}${grado}`,
+          descripcion: `Cuenta corriente con saldo deudor: -${formatUSD(deudaUsd)}`,
+          montoUsd: deudaUsd,
+          montoBs,
+          etiqueta: 'Saldo por cobrar',
+          color: 'amber',
+          href: '/deudas',
         });
+      });
 
       const totalDeudaBs = calcularConversionBs(totalDeudaUsd, tasaActual);
-      const totalAlertasCriticas = vencidasProv + proximasProv + (clientesDeudaMap.size > 0 ? 1 : 0);
+      const totalAlertasCriticas = vencidasProv + proximasProv + (clientesConDeuda.length > 0 ? 1 : 0);
 
       setData({
         proveedores: {
@@ -284,10 +246,10 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
           alertas: alertasProv,
         },
         deudas: {
-          clientesConDeuda: clientesDeudaMap.size,
+          clientesConDeuda: clientesConDeuda.length,
           totalDeudaUsd,
           totalDeudaBs,
-          consumosPendientes: consumosPendientes.length,
+          consumosPendientes: clientesConDeuda.length,
           alertas: alertasDeudas,
         },
         tasaBcv: tasaActual,
@@ -336,6 +298,13 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'consumos' },
+        () => {
+          cargarDatos();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'clientes' },
         () => {
           cargarDatos();
         }

@@ -101,28 +101,37 @@ export function ModernClientSelect({
           </div>
 
           {/* Resumen Financiero del Cliente Seleccionado */}
-          <div className="mt-2.5 pt-2 border-t border-indigo-100/80 dark:border-indigo-950/80 grid grid-cols-2 gap-2 text-xs">
-            <div className="rounded-xl bg-white/70 dark:bg-slate-900/60 p-2 border border-gray-100 dark:border-slate-800/80">
-              <span className="text-gray-500 dark:text-slate-400 text-[10px] font-medium block">
-                Deuda Pendiente:
-              </span>
-              <p className={`font-mono font-bold text-xs ${
-                (saldo?.deudaTotalUsd || 0) > 0 ? 'text-amber-800 dark:text-amber-300' : 'text-gray-700 dark:text-slate-300'
-              }`}>
-                {formatUSD(saldo?.deudaTotalUsd || 0)}
-              </p>
-            </div>
-            <div className="rounded-xl bg-white/70 dark:bg-slate-900/60 p-2 border border-gray-100 dark:border-slate-800/80">
-              <span className="text-gray-500 dark:text-slate-400 text-[10px] font-medium block">
-                Saldo a Favor:
-              </span>
-              <p className={`font-mono font-bold text-xs ${
-                (saldo?.saldoAFavorTotalUsd || 0) > 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-gray-700 dark:text-slate-300'
-              }`}>
-                +{formatUSD(saldo?.saldoAFavorTotalUsd || 0)}
-              </p>
-            </div>
-          </div>
+          {(() => {
+            const s = clienteSeleccionado.saldo !== undefined && clienteSeleccionado.saldo !== null
+              ? Number(clienteSeleccionado.saldo)
+              : (saldo?.saldoNetoUsd ?? 0);
+            const deudaPendiente = s < 0 ? Math.abs(s) : 0;
+            const saldoAFavor = s > 0 ? s : 0;
+            return (
+              <div className="mt-2.5 pt-2 border-t border-indigo-100/80 dark:border-indigo-950/80 grid grid-cols-2 gap-2 text-xs">
+                <div className="rounded-xl bg-white/70 dark:bg-slate-900/60 p-2 border border-gray-100 dark:border-slate-800/80">
+                  <span className="text-gray-500 dark:text-slate-400 text-[10px] font-medium block">
+                    Deuda Pendiente:
+                  </span>
+                  <p className={`font-mono font-bold text-xs ${
+                    deudaPendiente > 0 ? 'text-amber-800 dark:text-amber-300' : 'text-gray-700 dark:text-slate-300'
+                  }`}>
+                    {formatUSD(deudaPendiente)}
+                  </p>
+                </div>
+                <div className="rounded-xl bg-white/70 dark:bg-slate-900/60 p-2 border border-gray-100 dark:border-slate-800/80">
+                  <span className="text-gray-500 dark:text-slate-400 text-[10px] font-medium block">
+                    Saldo a Favor:
+                  </span>
+                  <p className={`font-mono font-bold text-xs ${
+                    saldoAFavor > 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-gray-700 dark:text-slate-300'
+                  }`}>
+                    +{formatUSD(saldoAFavor)}
+                  </p>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       ) : (
         // Selector desplegable no seleccionado
@@ -182,9 +191,13 @@ export function ModernClientSelect({
                   </div>
                 ) : (
                   clientesFiltrados.map((cl) => {
-                    const s = saldosClientes[cl.id];
-                    const tieneDeuda = (s?.deudaTotalUsd || 0) > 0;
-                    const tieneSaldo = (s?.saldoAFavorTotalUsd || 0) > 0;
+                    const saldoVal = cl.saldo !== undefined && cl.saldo !== null
+                      ? Number(cl.saldo)
+                      : (saldosClientes[cl.id]?.saldoNetoUsd ?? 0);
+                    const tieneDeuda = saldoVal < 0;
+                    const tieneSaldo = saldoVal > 0;
+                    const montoDeuda = saldoVal < 0 ? Math.abs(saldoVal) : 0;
+                    const montoSaldo = saldoVal > 0 ? saldoVal : 0;
 
                     return (
                       <button
@@ -212,12 +225,12 @@ export function ModernClientSelect({
                         <div className="shrink-0 flex items-center gap-1 text-[11px] font-mono font-bold">
                           {tieneDeuda && (
                             <span className="rounded-lg bg-amber-100/80 dark:bg-amber-950/60 px-1.5 py-0.5 text-amber-800 dark:text-amber-300">
-                              Debe: {formatUSD(s.deudaTotalUsd)}
+                              Debe: {formatUSD(montoDeuda)}
                             </span>
                           )}
                           {tieneSaldo && (
                             <span className="rounded-lg bg-emerald-100/80 dark:bg-emerald-950/60 px-1.5 py-0.5 text-emerald-800 dark:text-emerald-300">
-                              +{formatUSD(s.saldoAFavorTotalUsd)}
+                              +{formatUSD(montoSaldo)}
                             </span>
                           )}
                           {!tieneDeuda && !tieneSaldo && (

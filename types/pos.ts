@@ -5,6 +5,7 @@ export interface Cliente {
   nombre_representante?: string | null;
   telefono_whatsapp?: string | null;
   created_at?: string;
+  saldo?: number; // Cuenta corriente unificada (> 0: saldo a favor, < 0: deuda / cuenta por cobrar, 0: solvente)
   saldo_a_favor?: number;
   deuda_total?: number;
 }

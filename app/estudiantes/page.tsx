@@ -356,37 +356,58 @@ export default function EstudiantesPage() {
     }
 
     if (filtroEstado === 'con_deuda') {
-      lista = lista.filter((c) => (saldosClientes[c.id]?.deudaTotalUsd || 0) > 0);
+      lista = lista.filter((c) => {
+        const s = c.saldo !== undefined && c.saldo !== null ? Number(c.saldo) : (saldosClientes[c.id]?.saldoNetoUsd || 0);
+        return s < 0;
+      });
     } else if (filtroEstado === 'con_saldo_favor') {
-      lista = lista.filter((c) => (saldosClientes[c.id]?.saldoAFavorTotalUsd || 0) > 0);
+      lista = lista.filter((c) => {
+        const s = c.saldo !== undefined && c.saldo !== null ? Number(c.saldo) : (saldosClientes[c.id]?.saldoNetoUsd || 0);
+        return s > 0;
+      });
     } else if (filtroEstado === 'solvente') {
-      lista = lista.filter((c) => (saldosClientes[c.id]?.deudaTotalUsd || 0) === 0);
+      lista = lista.filter((c) => {
+        const s = c.saldo !== undefined && c.saldo !== null ? Number(c.saldo) : (saldosClientes[c.id]?.saldoNetoUsd || 0);
+        return s >= 0;
+      });
     }
 
     return lista;
   }, [clientes, busqueda, filtroGrado, filtroEstado, saldosClientes]);
 
-  // Métricas
+  // Métricas de cuenta corriente unificada
   const totalEstudiantes = clientes.length;
   const estudiantesConDeuda = useMemo(() => {
-    return clientes.filter((c) => (saldosClientes[c.id]?.deudaTotalUsd || 0) > 0).length;
+    return clientes.filter((c) => {
+      const s = c.saldo !== undefined && c.saldo !== null ? Number(c.saldo) : (saldosClientes[c.id]?.saldoNetoUsd || 0);
+      return s < 0;
+    }).length;
   }, [clientes, saldosClientes]);
 
   const estudiantesConSaldoFavor = useMemo(() => {
-    return clientes.filter((c) => (saldosClientes[c.id]?.saldoAFavorTotalUsd || 0) > 0).length;
+    return clientes.filter((c) => {
+      const s = c.saldo !== undefined && c.saldo !== null ? Number(c.saldo) : (saldosClientes[c.id]?.saldoNetoUsd || 0);
+      return s > 0;
+    }).length;
   }, [clientes, saldosClientes]);
 
   const totalDeudaGlobalUsd = useMemo(() => {
-    return Object.values(saldosClientes).reduce((acc, curr) => acc + curr.deudaTotalUsd, 0);
-  }, [saldosClientes]);
+    return clientes.reduce((acc, c) => {
+      const s = c.saldo !== undefined && c.saldo !== null ? Number(c.saldo) : (saldosClientes[c.id]?.saldoNetoUsd || 0);
+      return s < 0 ? acc + Math.abs(s) : acc;
+    }, 0);
+  }, [clientes, saldosClientes]);
 
   const totalDeudaGlobalBs = useMemo(() => {
     return calcularConversionBs(totalDeudaGlobalUsd, tasaBcv);
   }, [totalDeudaGlobalUsd, tasaBcv]);
 
   const totalSaldoAFavorGlobalUsd = useMemo(() => {
-    return Object.values(saldosClientes).reduce((acc, curr) => acc + curr.saldoAFavorTotalUsd, 0);
-  }, [saldosClientes]);
+    return clientes.reduce((acc, c) => {
+      const s = c.saldo !== undefined && c.saldo !== null ? Number(c.saldo) : (saldosClientes[c.id]?.saldoNetoUsd || 0);
+      return s > 0 ? acc + s : acc;
+    }, 0);
+  }, [clientes, saldosClientes]);
 
   const totalSaldoAFavorGlobalBs = useMemo(() => {
     return calcularConversionBs(totalSaldoAFavorGlobalUsd, tasaBcv);
@@ -627,13 +648,13 @@ export default function EstudiantesPage() {
 
   // Abrir Modal Eliminar
   const handleAbrirEliminar = (c: Cliente) => {
-    const saldo = saldosClientes[c.id];
-    const tieneDeuda = !!(saldo && saldo.deudaTotalUsd > 0);
+    const s = c.saldo !== undefined && c.saldo !== null ? Number(c.saldo) : (saldosClientes[c.id]?.saldoNetoUsd || 0);
+    const tieneDeuda = s < 0;
     setModalEliminar({
       abierto: true,
       cliente: c,
       tieneDeuda,
-      totalDeudaUsd: saldo ? saldo.deudaTotalUsd : 0,
+      totalDeudaUsd: s < 0 ? Math.abs(s) : 0,
       eliminando: false,
       error: null,
     });
@@ -696,15 +717,16 @@ export default function EstudiantesPage() {
     const sujeto = esProf
       ? `su cuenta de cantina (${c.grado_seccion})`
       : `el estudiante *${c.nombre_estudiante}* (${c.grado_seccion || 'Cantina'})`;
-    const saldo = saldosClientes[c.id];
+    const s = c.saldo !== undefined && c.saldo !== null ? Number(c.saldo) : (saldosClientes[c.id]?.saldoNetoUsd || 0);
 
     let textoDeuda = 'Actualmente su cuenta se encuentra completamente al dia y solvente ($0.00).';
-    if (saldo && saldo.deudaTotalUsd > 0) {
-      const bs = calcularConversionBs(saldo.deudaTotalUsd, tasaBcv);
-      textoDeuda = `Le recordamos amablemente que presenta un saldo pendiente de ${formatUSD(saldo.deudaTotalUsd)} (${formatBs(bs)} a tasa oficial BCV: ${formatBs(tasaBcv)}).`;
-    } else if (saldo && saldo.saldoAFavorTotalUsd > 0) {
-      const bs = calcularConversionBs(saldo.saldoAFavorTotalUsd, tasaBcv);
-      textoDeuda = `Le informamos cordialmente que cuenta con un saldo a favor disponible de +${formatUSD(saldo.saldoAFavorTotalUsd)} (+${formatBs(bs)} a tasa oficial BCV).`;
+    if (s < 0) {
+      const deuda = Math.abs(s);
+      const bs = calcularConversionBs(deuda, tasaBcv);
+      textoDeuda = `Le recordamos amablemente que presenta un saldo pendiente de ${formatUSD(deuda)} (${formatBs(bs)} a tasa oficial BCV: ${formatBs(tasaBcv)}).`;
+    } else if (s > 0) {
+      const bs = calcularConversionBs(s, tasaBcv);
+      textoDeuda = `Le informamos cordialmente que cuenta con un saldo a favor disponible de +${formatUSD(s)} (+${formatBs(bs)} a tasa oficial BCV).`;
     }
 
     const mensaje = `Hola, *${destinatario}*.
@@ -1132,9 +1154,11 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <AnimatePresence mode="popLayout">
               {clientesFiltrados.map((cliente, index) => {
-                const saldo = saldosClientes[cliente.id];
-                const tieneDeuda = !!(saldo && saldo.deudaTotalUsd > 0);
-                const tieneSaldoFavor = !!(saldo && saldo.saldoAFavorTotalUsd > 0);
+                const s = cliente.saldo !== undefined && cliente.saldo !== null ? Number(cliente.saldo) : (saldosClientes[cliente.id]?.saldoNetoUsd ?? 0);
+                const tieneDeuda = s < 0;
+                const tieneSaldoFavor = s > 0;
+                const montoSaldoFavor = s > 0 ? s : 0;
+                const montoDeuda = s < 0 ? Math.abs(s) : 0;
                 const iniciales = getIniciales(cliente.nombre_estudiante);
                 const esProf = esProfesorOPersonal(cliente.grado_seccion);
                 const esPadre = esRepresentante(cliente.grado_seccion);
@@ -1292,23 +1316,18 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
 
                       {/* Estado de Cuenta: Saldo a Favor / Deuda / Solvencia */}
                       <div className="mt-3">
-                        {tieneSaldoFavor && saldo ? (
+                        {tieneSaldoFavor ? (
                           <div className="rounded-2xl border border-emerald-300 bg-gradient-to-r from-emerald-50 via-teal-50/70 to-emerald-50/50 p-2.5 flex items-center justify-between shadow-2xs">
                             <div className="flex items-center gap-2">
                               <Wallet className="h-4 w-4 text-emerald-600 shrink-0" />
                               <div className="flex flex-col">
                                 <span className="text-[10px] font-bold uppercase text-emerald-800 flex items-center gap-1">
                                   <span>Saldo a Favor Disponible</span>
-                                  {saldo.cantidadAbonos > 0 && (
-                                    <span className="font-normal text-[9px] text-emerald-600">
-                                      ({saldo.cantidadAbonos} abono{saldo.cantidadAbonos === 1 ? '' : 's'})
-                                    </span>
-                                  )}
                                 </span>
                                 <span className="font-mono text-xs font-black text-emerald-700">
-                                  +{formatUSD(saldo.saldoAFavorTotalUsd)} a favor
+                                  +{formatUSD(montoSaldoFavor)} a favor
                                   <span className="font-normal text-[10px] text-emerald-600 ml-1">
-                                    (+{formatBs(calcularConversionBs(saldo.saldoAFavorTotalUsd, tasaBcv))})
+                                    (+{formatBs(calcularConversionBs(montoSaldoFavor, tasaBcv))})
                                   </span>
                                 </span>
                               </div>
@@ -1317,18 +1336,17 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
                               Disponible
                             </span>
                           </div>
-                        ) : tieneDeuda && saldo ? (
+                        ) : tieneDeuda ? (
                           <div className="rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50/80 to-yellow-50/50 p-2.5 flex items-center justify-between">
                             <div className="flex items-center gap-2">
                               <Receipt className="h-4 w-4 text-amber-700 shrink-0" />
                               <div className="flex flex-col">
                                 <span className="text-[10px] font-bold uppercase text-amber-900">
-                                  Saldo Pendiente ({saldo.cantidadConsumosPendientes}{' '}
-                                  {saldo.cantidadConsumosPendientes === 1 ? 'consumo' : 'consumos'})
+                                  Deuda / Cuenta por Cobrar
                                 </span>
                                 <span className="font-mono text-xs font-bold text-amber-950">
-                                  -{formatUSD(saldo.deudaTotalUsd)} &bull;{' '}
-                                  {formatBs(calcularConversionBs(saldo.deudaTotalUsd, tasaBcv))}
+                                  -{formatUSD(montoDeuda)} &bull;{' '}
+                                  {formatBs(calcularConversionBs(montoDeuda, tasaBcv))}
                                 </span>
                               </div>
                             </div>
@@ -2107,26 +2125,29 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
             )}
 
             {/* Estado actual del cliente */}
-            {modalAbono.cliente && (
-              <div className="mt-3 rounded-2xl border border-gray-200/80 bg-gray-50/70 p-3 text-xs space-y-1">
-                <div className="flex justify-between text-gray-600">
-                  <span>Deuda pendiente actual:</span>
-                  <span className={`font-bold ${
-                    (saldosClientes[modalAbono.cliente.id]?.deudaTotalUsd || 0) > 0 ? 'text-amber-800' : 'text-gray-700'
-                  }`}>
-                    {formatUSD(saldosClientes[modalAbono.cliente.id]?.deudaTotalUsd || 0)}
-                  </span>
+            {modalAbono.cliente && (() => {
+              const s = modalAbono.cliente.saldo !== undefined && modalAbono.cliente.saldo !== null
+                ? Number(modalAbono.cliente.saldo)
+                : (saldosClientes[modalAbono.cliente.id]?.saldoNetoUsd || 0);
+              const deudaActual = s < 0 ? Math.abs(s) : 0;
+              const saldoAFavor = s > 0 ? s : 0;
+              return (
+                <div className="mt-3 rounded-2xl border border-gray-200/80 bg-gray-50/70 p-3 text-xs space-y-1">
+                  <div className="flex justify-between text-gray-600">
+                    <span>Deuda pendiente actual:</span>
+                    <span className={`font-bold ${deudaActual > 0 ? 'text-amber-800' : 'text-gray-700'}`}>
+                      {formatUSD(deudaActual)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-gray-600">
+                    <span>Saldo a favor disponible:</span>
+                    <span className={`font-bold ${saldoAFavor > 0 ? 'text-emerald-700' : 'text-gray-700'}`}>
+                      +{formatUSD(saldoAFavor)}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex justify-between text-gray-600">
-                  <span>Saldo a favor disponible:</span>
-                  <span className={`font-bold ${
-                    (saldosClientes[modalAbono.cliente.id]?.saldoAFavorTotalUsd || 0) > 0 ? 'text-emerald-700' : 'text-gray-700'
-                  }`}>
-                    +{(formatUSD(saldosClientes[modalAbono.cliente.id]?.saldoAFavorTotalUsd || 0))}
-                  </span>
-                </div>
-              </div>
-            )}
+              );
+            })()}
 
             <form onSubmit={handleConfirmarAbono} className="mt-4 space-y-4">
               {/* Selector de Método de Pago con Autodetección de Divisa */}
@@ -2298,7 +2319,10 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
                 const montoNumBs = parseFloat(modalAbono.montoBs.replace(',', '.')) || (montoNumUsd > 0 ? calcularConversionBs(montoNumUsd, tasaBcv) : 0);
                 if (montoNumUsd <= 0 || !modalAbono.cliente) return null;
 
-                const deudaActualUsd = saldosClientes[modalAbono.cliente.id]?.deudaTotalUsd || 0;
+                const s = modalAbono.cliente.saldo !== undefined && modalAbono.cliente.saldo !== null
+                  ? Number(modalAbono.cliente.saldo)
+                  : (saldosClientes[modalAbono.cliente.id]?.saldoNetoUsd || 0);
+                const deudaActualUsd = s < 0 ? Math.abs(s) : 0;
                 const deudaActualBs = calcularConversionBs(deudaActualUsd, tasaBcv);
 
                 return (

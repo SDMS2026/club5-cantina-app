@@ -309,16 +309,26 @@ export function ClientSelector({
                     {clienteSeleccionado ? (
                       <>
                         <span className="truncate">{clienteSeleccionado.nombre_estudiante}</span>
-                        {saldosClientes[clienteSeleccionado.id]?.saldoAFavorTotalUsd > 0 && (
-                          <span className="shrink-0 font-bold text-emerald-700 bg-emerald-50 border border-emerald-200/90 px-2 py-0.5 rounded-full text-[10px]">
-                            +{formatUSD(saldosClientes[clienteSeleccionado.id].saldoAFavorTotalUsd)}
-                          </span>
-                        )}
-                        {saldosClientes[clienteSeleccionado.id]?.deudaTotalUsd > 0 && (
-                          <span className="shrink-0 font-bold text-rose-700 bg-rose-50 border border-rose-200/90 px-2 py-0.5 rounded-full text-[10px]">
-                            -{formatUSD(saldosClientes[clienteSeleccionado.id].deudaTotalUsd)}
-                          </span>
-                        )}
+                        {(() => {
+                          const s = clienteSeleccionado.saldo !== undefined && clienteSeleccionado.saldo !== null
+                            ? Number(clienteSeleccionado.saldo)
+                            : (saldosClientes[clienteSeleccionado.id]?.saldoNetoUsd ?? 0);
+                          if (s > 0) {
+                            return (
+                              <span className="shrink-0 font-bold text-emerald-700 bg-emerald-50 border border-emerald-200/90 px-2 py-0.5 rounded-full text-[10px]">
+                                +{formatUSD(s)}
+                              </span>
+                            );
+                          }
+                          if (s < 0) {
+                            return (
+                              <span className="shrink-0 font-bold text-rose-700 bg-rose-50 border border-rose-200/90 px-2 py-0.5 rounded-full text-[10px]">
+                                -{formatUSD(Math.abs(s))}
+                              </span>
+                            );
+                          }
+                          return null;
+                        })()}
                       </>
                     ) : (
                       <span className="font-normal text-gray-500 truncate block">
@@ -556,16 +566,26 @@ export function ClientSelector({
                         </div>
 
                         <div className="flex items-center gap-1.5 shrink-0 ml-2">
-                          {saldosClientes[cliente.id]?.saldoAFavorTotalUsd > 0 && (
-                            <span className="font-bold text-emerald-700 bg-emerald-50 border border-emerald-200/90 px-2 py-0.5 rounded-full text-[10px]">
-                              +{formatUSD(saldosClientes[cliente.id].saldoAFavorTotalUsd)}
-                            </span>
-                          )}
-                          {saldosClientes[cliente.id]?.deudaTotalUsd > 0 && (
-                            <span className="font-bold text-rose-700 bg-rose-50 border border-rose-200/90 px-2 py-0.5 rounded-full text-[10px]">
-                              -{formatUSD(saldosClientes[cliente.id].deudaTotalUsd)}
-                            </span>
-                          )}
+                          {(() => {
+                            const s = cliente.saldo !== undefined && cliente.saldo !== null
+                              ? Number(cliente.saldo)
+                              : (saldosClientes[cliente.id]?.saldoNetoUsd ?? 0);
+                            if (s > 0) {
+                              return (
+                                <span className="font-bold text-emerald-700 bg-emerald-50 border border-emerald-200/90 px-2 py-0.5 rounded-full text-[10px]">
+                                  +{formatUSD(s)}
+                                </span>
+                              );
+                            }
+                            if (s < 0) {
+                              return (
+                                <span className="font-bold text-rose-700 bg-rose-50 border border-rose-200/90 px-2 py-0.5 rounded-full text-[10px]">
+                                  -{formatUSD(Math.abs(s))}
+                                </span>
+                              );
+                            }
+                            return null;
+                          })()}
                           {estaSeleccionado && (
                             <Check className="h-4 w-4 shrink-0 text-indigo-600" />
                           )}

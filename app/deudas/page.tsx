@@ -336,12 +336,19 @@ export default function DeudasPage() {
     return Array.from(set).sort();
   }, [deudas]);
 
-  // Agrupar deudas pendientes por estudiante
+  // Agrupar deudas pendientes por estudiante basado en clientes.saldo
   const cuentasAgrupadas = useMemo(() => {
     const mapa = new Map<string, CuentaEstudianteAgrupada>();
 
     for (const deuda of deudas) {
       const key = deuda.cliente_id || `sin-cliente-${deuda.id}`;
+      // Si el cliente tiene id, verificar si su cuenta corriente unificada tiene saldo negativo
+      if (deuda.cliente_id) {
+        const s = saldosClientes[deuda.cliente_id]?.saldoNetoUsd ?? deuda.clientes?.saldo ?? 0;
+        // Si el cliente ya está solvente o a favor (saldo >= 0), no tiene deuda activa
+        if (s >= 0) continue;
+      }
+
       if (!mapa.has(key)) {
         mapa.set(key, {
           clienteKey: key,
@@ -366,8 +373,14 @@ export default function DeudasPage() {
       }
     }
 
-    // Calcular montos en Bs y ordenar consumos internos
+    // Asegurar que si un cliente tiene clientes.saldo < 0, su totalDeudaUsd refleje el saldo adeudado real
     for (const cuenta of mapa.values()) {
+      if (cuenta.cliente?.id) {
+        const s = saldosClientes[cuenta.cliente.id]?.saldoNetoUsd ?? cuenta.cliente.saldo;
+        if (s !== undefined && s !== null && s < 0) {
+          cuenta.totalDeudaUsd = Math.abs(s);
+        }
+      }
       cuenta.totalDeudaBs = calcularConversionBs(cuenta.totalDeudaUsd, tasaBcv);
       cuenta.consumos.sort(
         (a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime()
@@ -375,7 +388,7 @@ export default function DeudasPage() {
     }
 
     return Array.from(mapa.values());
-  }, [deudas, tasaBcv]);
+  }, [deudas, tasaBcv, saldosClientes]);
 
   // Filtrar y ordenar cuentas de estudiantes
   const cuentasFiltradas = useMemo(() => {
@@ -424,10 +437,13 @@ export default function DeudasPage() {
     return lista;
   }, [cuentasAgrupadas, busqueda, filtroGrado, criterioOrden]);
 
-  // Totales globales de deudas
+  // Totales globales de deudas y saldos leyendo directamente clientes.saldo
   const granTotalUsd = useMemo(() => {
-    return deudas.reduce((acc, d) => acc + (d.monto_total_usd || 0), 0);
-  }, [deudas]);
+    return todosLosClientes.reduce((acc, c) => {
+      const s = c.saldo !== undefined && c.saldo !== null ? Number(c.saldo) : (saldosClientes[c.id]?.saldoNetoUsd || 0);
+      return s < 0 ? acc + Math.abs(s) : acc;
+    }, 0);
+  }, [todosLosClientes, saldosClientes]);
 
   const granTotalBs = useMemo(() => {
     return calcularConversionBs(granTotalUsd, tasaBcv);
@@ -435,11 +451,11 @@ export default function DeudasPage() {
 
   // Total global de saldos a favor (créditos positivos disponibles de todos los clientes)
   const totalSaldoAFavorGlobalUsd = useMemo(() => {
-    return Object.values(saldosClientes).reduce(
-      (acc, s) => acc + (s.saldoAFavorTotalUsd || 0),
-      0
-    );
-  }, [saldosClientes]);
+    return todosLosClientes.reduce((acc, c) => {
+      const s = c.saldo !== undefined && c.saldo !== null ? Number(c.saldo) : (saldosClientes[c.id]?.saldoNetoUsd || 0);
+      return s > 0 ? acc + s : acc;
+    }, 0);
+  }, [todosLosClientes, saldosClientes]);
 
   const totalSaldoAFavorGlobalBs = useMemo(() => {
     return calcularConversionBs(totalSaldoAFavorGlobalUsd, tasaBcv);
@@ -527,6 +543,25 @@ export default function DeudasPage() {
 
       if (error) {
         throw new Error(error.message || 'Error al actualizar el estado de los consumos');
+      }
+
+      // Si el pago de la deuda fue con dinero externo (efectivo, pago móvil, etc.), sumamos a clientes.saldo
+      if (modalLiquidacion.clienteId && metodoPago !== 'saldo_favor') {
+        try {
+          const { data: cli } = await supabase
+            .from('clientes')
+            .select('saldo')
+            .eq('id', modalLiquidacion.clienteId)
+            .single();
+          const saldoActual = Number(cli?.saldo || 0);
+          const nuevoSaldo = Math.round((saldoActual + modalLiquidacion.montoUsd) * 100) / 100;
+          await supabase
+            .from('clientes')
+            .update({ saldo: nuevoSaldo })
+            .eq('id', modalLiquidacion.clienteId);
+        } catch (e) {
+          console.error('Error actualizando clientes.saldo tras liquidar deuda:', e);
+        }
       }
 
       setModalLiquidacion((prev) => ({ ...prev, abierto: false }));
@@ -1825,7 +1860,10 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
                 const montoNumBs = parseFloat(modalAbono.montoBs.replace(',', '.')) || (montoNumUsd > 0 ? calcularConversionBs(montoNumUsd, tasaBcv) : 0);
                 if (montoNumUsd <= 0 || !modalAbono.cliente) return null;
 
-                const deudaActualUsd = saldosClientes[modalAbono.cliente.id]?.deudaTotalUsd || 0;
+                const s = modalAbono.cliente.saldo !== undefined && modalAbono.cliente.saldo !== null
+                  ? Number(modalAbono.cliente.saldo)
+                  : (saldosClientes[modalAbono.cliente.id]?.saldoNetoUsd || 0);
+                const deudaActualUsd = s < 0 ? Math.abs(s) : 0;
                 const deudaActualBs = calcularConversionBs(deudaActualUsd, tasaBcv);
 
                 return (
