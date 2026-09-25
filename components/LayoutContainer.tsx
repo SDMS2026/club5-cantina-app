@@ -8,10 +8,17 @@ import { NotificationsProvider } from './NotificationsContext';
 import { WelcomeSessionToast } from './WelcomeSessionToast';
 import { Footer } from './Footer';
 import { motion, AnimatePresence } from 'framer-motion';
+import { isMaintenanceMode } from '@/lib/maintenance';
+import { MaintenanceScreen } from './MaintenanceScreen';
 
 export function LayoutContainer({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { abierto, setAbierto } = useSidebar();
+
+  // Si el modo mantenimiento está activo, bloquear el acceso a todas las rutas y mostrar la pantalla personalizada
+  if (isMaintenanceMode()) {
+    return <MaintenanceScreen />;
+  }
 
   // Reseteo automático de desplazamiento en iOS Safari al cerrar teclados virtuales
   React.useEffect(() => {

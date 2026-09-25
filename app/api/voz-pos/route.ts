@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabaseClient';
 import { procesarAbonoCliente } from '@/lib/clientBalance';
 import { obtenerTasaBCV, TASA_BCV_FALLBACK_DEFAULT } from '@/lib/dolarApi';
+import { isMaintenanceMode } from '@/lib/maintenance';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,6 +43,13 @@ interface RespuestaVozPos {
 }
 
 export async function POST(req: NextRequest) {
+  if (isMaintenanceMode()) {
+    return NextResponse.json(
+      { error: 'Sitio en Mantenimiento - Actualizando Club 5 Cantina Escolar. Regresaremos en breve.' },
+      { status: 503 }
+    );
+  }
+
   try {
     const body = await req.json().catch(() => ({}));
     const headerKey = req.headers.get('x-gemini-api-key')?.trim();
