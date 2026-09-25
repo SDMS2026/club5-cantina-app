@@ -144,12 +144,12 @@ export function WelcomeSessionToast() {
           <div
             className={`rounded-2xl sm:rounded-3xl border p-2.5 sm:p-4 shadow-xl backdrop-blur-md transition-all ${
               esCritico
-                ? 'border-rose-300/90 bg-rose-50/98 text-rose-950 shadow-rose-500/10'
+                ? 'border-rose-300/90 dark:border-rose-900/60 bg-rose-50/98 dark:bg-rose-950/90 text-rose-950 dark:text-rose-100 shadow-rose-500/10'
                 : esProximo
-                ? 'border-amber-300/90 bg-amber-50/98 text-amber-950 shadow-amber-500/10'
+                ? 'border-amber-300/90 dark:border-amber-900/60 bg-amber-50/98 dark:bg-amber-950/90 text-amber-950 dark:text-amber-100 shadow-amber-500/10'
                 : esSolvente
-                ? 'border-emerald-300/90 bg-emerald-50/98 text-emerald-950 shadow-emerald-500/10'
-                : 'border-indigo-200/90 bg-white/98 text-gray-900 shadow-indigo-500/10'
+                ? 'border-emerald-300/90 dark:border-emerald-900/60 bg-emerald-50/98 dark:bg-emerald-950/90 text-emerald-950 dark:text-emerald-100 shadow-emerald-500/10'
+                : 'border-indigo-200/90 dark:border-indigo-900/60 bg-white/98 dark:bg-slate-900/95 text-gray-900 dark:text-slate-100 shadow-indigo-500/10'
             }`}
           >
             {/* Vista Compacta en Móvil (< sm): no tapa la pantalla */}

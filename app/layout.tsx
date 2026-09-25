@@ -3,6 +3,7 @@ import { Inter, Fredoka } from "next/font/google";
 import { SidebarProvider } from "@/components/SidebarContext";
 import { LayoutContainer } from "@/components/LayoutContainer";
 import { PageTransitionLoader } from "@/components/PageTransitionLoader";
+import { ThemeProvider } from "@/components/ThemeContext";
 import { isMaintenanceMode } from "@/lib/maintenance";
 import { MaintenanceScreen } from "@/components/MaintenanceScreen";
 import "./globals.css";
@@ -73,6 +74,21 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <head>
+        {/* Script de prevención de destello blanco (Flash Of Unstyled Theme) */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              try {
+                var storedTheme = localStorage.getItem('club5_theme');
+                if (storedTheme === 'dark' || (!storedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                  document.documentElement.classList.add('dark');
+                } else {
+                  document.documentElement.classList.remove('dark');
+                }
+              } catch (e) {}
+            `,
+          }}
+        />
         <script
           dangerouslySetInnerHTML={{
             __html: `
@@ -92,19 +108,21 @@ export default function RootLayout({
         />
       </head>
       <body
-        className="min-h-full flex flex-col font-sans bg-[#FAFAFA] text-slate-900 antialiased selection:bg-amber-100 selection:text-amber-900 overflow-x-hidden"
+        className="min-h-full flex flex-col font-sans bg-[#FAFAFA] dark:bg-[#0B0F19] text-slate-900 dark:text-slate-100 antialiased selection:bg-amber-100 selection:text-amber-900 dark:selection:bg-amber-900/40 dark:selection:text-amber-200 overflow-x-hidden"
         suppressHydrationWarning
       >
-        {modoMantenimientoActivo ? (
-          <MaintenanceScreen />
-        ) : (
-          <>
-            <PageTransitionLoader />
-            <SidebarProvider>
-              <LayoutContainer>{children}</LayoutContainer>
-            </SidebarProvider>
-          </>
-        )}
+        <ThemeProvider>
+          {modoMantenimientoActivo ? (
+            <MaintenanceScreen />
+          ) : (
+            <>
+              <PageTransitionLoader />
+              <SidebarProvider>
+                <LayoutContainer>{children}</LayoutContainer>
+              </SidebarProvider>
+            </>
+          )}
+        </ThemeProvider>
       </body>
     </html>
   );
