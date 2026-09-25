@@ -20,8 +20,6 @@ import {
   RefreshCw,
   LogOut,
   Loader2,
-  Sun,
-  Moon,
 } from 'lucide-react';
 import { formatBs } from '@/lib/utils';
 import { supabase } from '@/lib/supabaseClient';
@@ -400,88 +398,63 @@ export function Sidebar() {
               </p>
             </motion.div>
 
-            {/* Selector de Modo Oscuro / Claro en el Slidebar (Diseño ditdot-dev / dark-mode-example) */}
-            <motion.div custom={9} variants={itemVariants}>
+            {/* Selector de Modo Oscuro / Claro en el Slidebar (Solo el toggle estilo ditdot-dev) */}
+            <motion.div custom={9} variants={itemVariants} className="flex items-center justify-center py-1">
               <button
                 type="button"
                 onClick={toggleTheme}
+                role="switch"
+                aria-checked={isDark}
                 aria-label={isDark ? 'Cambiar a Modo Claro' : 'Cambiar a Modo Oscuro'}
-                className="w-full flex items-center justify-between rounded-2xl border border-gray-200/90 dark:border-[#1D263A] bg-gray-50/90 dark:bg-[#111726]/80 hover:bg-gray-100/90 dark:hover:bg-[#141C2E] px-3.5 py-2.5 shadow-2xs group cursor-pointer select-none transition-colors duration-150"
                 title={isDark ? 'Cambiar a Modo Claro' : 'Cambiar a Modo Oscuro'}
+                className="ditdot-switch relative inline-block w-[60px] h-[34px] cursor-pointer rounded-full outline-none focus-visible:ring-2 focus-visible:ring-blue-500 transition-transform active:scale-95 select-none"
               >
-                <div className="flex items-center gap-2.5">
-                  <div
-                    className={`flex h-7 w-7 items-center justify-center rounded-xl transition-colors ${
-                      isDark
-                        ? 'bg-blue-600/20 text-blue-400 ring-1 ring-blue-500/30'
-                        : 'bg-sky-400/20 text-sky-600 ring-1 ring-sky-400/30'
+                <span
+                  className={`ditdot-slider absolute inset-0 rounded-full transition-colors duration-300 shadow-sm ${
+                    isDark ? 'bg-[#1e38ff]' : 'bg-[#bae6fd]'
+                  }`}
+                >
+                  {/* Icono de luna en el extremo derecho en modo claro (estilo ditdot-dev) */}
+                  <svg
+                    className={`ditdot-slider-icon absolute right-[6px] top-[7px] transform rotate-[250deg] transition-opacity duration-200 ${
+                      isDark ? 'opacity-0' : 'opacity-90'
                     }`}
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    height="20"
+                    stroke="#0284c7"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2.5"
+                    width="20"
+                    xmlns="http://www.w3.org/2000/svg"
                   >
-                    {isDark ? (
-                      <Moon className="h-4 w-4 text-blue-400" />
-                    ) : (
-                      <Sun className="h-4 w-4 text-amber-500" />
-                    )}
-                  </div>
-                  <div className="flex flex-col text-left">
-                    <span className="text-xs font-semibold text-gray-800 dark:text-slate-200 leading-tight">
-                      Modo Oscuro
-                    </span>
-                    <span className="text-[10px] text-gray-500 dark:text-slate-400 leading-tight">
-                      {isDark ? 'Activado (Noche)' : 'Desactivado (Día)'}
-                    </span>
-                  </div>
-                </div>
+                    <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
+                  </svg>
 
-                {/* Switch estilo ditdot-dev */}
-                <div className="ditdot-switch relative inline-block w-[56px] h-[30px] shrink-0 pointer-events-none">
+                  {/* Perilla deslizante blanca estilo ditdot-dev */}
                   <span
-                    className={`ditdot-slider absolute inset-0 rounded-full transition-colors duration-300 shadow-inner ${
-                      isDark ? 'bg-[#1e38ff]' : 'bg-[#bae6fd]'
+                    className={`absolute left-[4px] bottom-[4px] h-[26px] w-[26px] rounded-full bg-white shadow-md transform transition-transform duration-300 ease-out flex items-center justify-center ${
+                      isDark ? 'translate-x-[26px]' : 'translate-x-0'
                     }`}
                   >
-                    {/* Icono de luna en el extremo derecho cuando está en modo claro */}
-                    <svg
-                      className={`ditdot-slider-icon absolute right-[7px] top-[7px] transform rotate-[250deg] transition-opacity duration-200 ${
-                        isDark ? 'opacity-0' : 'opacity-90'
-                      }`}
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      height="16"
-                      stroke="#0284c7"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth="2.5"
-                      width="16"
-                      xmlns="http://www.w3.org/2000/svg"
-                    >
-                      <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
-                    </svg>
-
-                    {/* Perilla deslizante blanca estilo ditdot-dev */}
-                    <span
-                      className={`absolute left-[3px] top-[3px] h-6 w-6 rounded-full bg-white shadow-md transform transition-transform duration-300 ease-out flex items-center justify-center ${
-                        isDark ? 'translate-x-[26px]' : 'translate-x-0'
-                      }`}
-                    >
-                      {isDark && (
-                        <svg
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          height="13"
-                          stroke="#1e38ff"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth="2.5"
-                          width="13"
-                          className="transform rotate-[250deg]"
-                        >
-                          <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
-                        </svg>
-                      )}
-                    </span>
+                    {isDark && (
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        height="15"
+                        stroke="#1e38ff"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="2.5"
+                        width="15"
+                        className="transform rotate-[250deg]"
+                      >
+                        <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
+                      </svg>
+                    )}
                   </span>
-                </div>
+                </span>
               </button>
             </motion.div>
 
