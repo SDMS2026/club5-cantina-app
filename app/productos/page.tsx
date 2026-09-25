@@ -457,18 +457,18 @@ export default function ProductosPage() {
 
   if (!montado) {
     return (
-      <div className="min-h-screen flex flex-col bg-[#FAFAFA]" suppressHydrationWarning>
-        <header className="sticky top-0 z-30 w-full border-b border-gray-200/70 bg-white/80 backdrop-blur-md">
+      <div className="min-h-screen flex flex-col bg-[#FAFAFA] dark:bg-[#090D16]" suppressHydrationWarning>
+        <header className="sticky top-0 z-30 w-full border-b border-gray-200/70 dark:border-slate-800 bg-white/80 dark:bg-[#0D111A]/80 backdrop-blur-md">
           <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
-            <div className="h-6 w-48 bg-gray-200 rounded-md animate-pulse" />
-            <div className="h-9 w-44 bg-amber-50 rounded-2xl animate-pulse" />
+            <div className="h-6 w-48 bg-gray-200 dark:bg-slate-800 rounded-md animate-pulse" />
+            <div className="h-9 w-44 bg-amber-50 dark:bg-amber-950/30 rounded-2xl animate-pulse" />
           </div>
         </header>
         <main className="mx-auto max-w-7xl flex-1 px-4 py-8 sm:px-6 lg:px-8">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="h-28 rounded-3xl bg-gray-100 animate-pulse" />
-            <div className="h-28 rounded-3xl bg-gray-100 animate-pulse" />
-            <div className="h-28 rounded-3xl bg-gray-100 animate-pulse" />
+            <div className="h-28 rounded-3xl bg-gray-100 dark:bg-slate-800 animate-pulse" />
+            <div className="h-28 rounded-3xl bg-gray-100 dark:bg-slate-800 animate-pulse" />
+            <div className="h-28 rounded-3xl bg-gray-100 dark:bg-slate-800 animate-pulse" />
           </div>
         </main>
       </div>
@@ -476,18 +476,18 @@ export default function ProductosPage() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#FAFAFA] w-full max-w-full overflow-x-hidden">
+    <div className="min-h-screen flex flex-col bg-[#FAFAFA] dark:bg-[#090D16] text-slate-900 dark:text-slate-100 transition-colors w-full max-w-full overflow-x-hidden">
 
 
       {/* Header Sticky con diseño unificado y navegación móvil */}
-      <header className="sticky top-0 z-40 w-full border-b border-gray-200/80 bg-white/90 backdrop-blur-md">
+      <header className="sticky top-0 z-40 w-full border-b border-gray-200/80 dark:border-slate-800 bg-white/90 dark:bg-[#0D111A]/90 backdrop-blur-md">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-3 py-2 sm:px-6 lg:px-8">
           <div className="flex items-center gap-1.5 sm:gap-3 min-w-0">
             {/* Botón Hamburguesa: visible en móviles (< md) o en escritorio cuando el sidebar está cerrado (!abierto) */}
             <button
               type="button"
               onClick={toggleSidebar}
-              className={`h-9 w-9 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-xl sm:rounded-2xl border border-gray-200/90 bg-white text-gray-700 shadow-2xs hover:bg-gray-100 hover:text-indigo-600 transition active:scale-95 ${
+              className={`h-9 w-9 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-xl sm:rounded-2xl border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 text-gray-700 dark:text-slate-200 shadow-2xs hover:bg-gray-100 dark:hover:bg-slate-800 hover:text-indigo-600 dark:hover:text-indigo-400 transition active:scale-95 ${
                 !sidebarAbierto ? 'flex' : 'flex md:hidden'
               }`}
               title="Abrir menú de navegación"
@@ -496,19 +496,19 @@ export default function ProductosPage() {
               <Menu className="h-5 w-5" />
             </button>
 
-            <div className="hidden sm:flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-indigo-50 border border-indigo-100 text-indigo-700 shadow-xs">
+            <div className="hidden sm:flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-100 dark:border-indigo-900/50 text-indigo-700 dark:text-indigo-400 shadow-xs">
               <Package className="h-5 w-5" />
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-1.5 sm:gap-2">
-                <h1 className="text-sm sm:text-lg font-bold tracking-tight text-gray-900 truncate">
+                <h1 className="text-sm sm:text-lg font-bold tracking-tight text-gray-900 dark:text-white truncate">
                   Inventario
                 </h1>
-                <span className="rounded-full border border-indigo-200 bg-indigo-50 px-1.5 py-0.2 text-[10px] sm:text-[11px] font-semibold text-indigo-700 shrink-0">
+                <span className="rounded-full border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/60 px-1.5 py-0.2 text-[10px] sm:text-[11px] font-semibold text-indigo-700 dark:text-indigo-300 shrink-0">
                   {productos.length}
                 </span>
               </div>
-              <p className="text-[11px] sm:text-xs text-gray-500 hidden sm:block">
+              <p className="text-[11px] sm:text-xs text-gray-500 dark:text-slate-400 hidden sm:block">
                 Catálogo oficial de la cantina, precios duales ($/Bs) y visibilidad en el Punto de Venta
               </p>
             </div>

@@ -596,19 +596,19 @@ export default function ProveedoresPage() {
 
   if (!montado) {
     return (
-      <div className="min-h-screen flex flex-col bg-[#FAFAFA]" suppressHydrationWarning>
-        <header className="sticky top-0 z-30 w-full border-b border-gray-200/70 bg-white/80 backdrop-blur-md">
+      <div className="min-h-screen flex flex-col bg-[#FAFAFA] dark:bg-[#090D16]" suppressHydrationWarning>
+        <header className="sticky top-0 z-30 w-full border-b border-gray-200/70 dark:border-slate-800 bg-white/80 dark:bg-[#0D111A]/80 backdrop-blur-md">
           <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6 lg:px-8">
-            <div className="h-6 w-48 bg-gray-200 rounded-md animate-pulse" />
-            <div className="h-9 w-44 bg-amber-50 rounded-2xl animate-pulse" />
+            <div className="h-6 w-48 bg-gray-200 dark:bg-slate-800 rounded-md animate-pulse" />
+            <div className="h-9 w-44 bg-amber-50 dark:bg-amber-950/30 rounded-2xl animate-pulse" />
           </div>
         </header>
         <main className="mx-auto max-w-7xl flex-1 px-4 py-8 sm:px-6 lg:px-8">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="h-28 rounded-3xl bg-gray-100 animate-pulse" />
-            <div className="h-28 rounded-3xl bg-gray-100 animate-pulse" />
-            <div className="h-28 rounded-3xl bg-gray-100 animate-pulse" />
-            <div className="h-28 rounded-3xl bg-gray-100 animate-pulse" />
+            <div className="h-28 rounded-3xl bg-gray-100 dark:bg-slate-800 animate-pulse" />
+            <div className="h-28 rounded-3xl bg-gray-100 dark:bg-slate-800 animate-pulse" />
+            <div className="h-28 rounded-3xl bg-gray-100 dark:bg-slate-800 animate-pulse" />
+            <div className="h-28 rounded-3xl bg-gray-100 dark:bg-slate-800 animate-pulse" />
           </div>
         </main>
       </div>
@@ -616,16 +616,16 @@ export default function ProveedoresPage() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#FAFAFA]" suppressHydrationWarning>
+    <div className="min-h-screen flex flex-col bg-[#FAFAFA] dark:bg-[#090D16] text-slate-900 dark:text-slate-100 transition-colors" suppressHydrationWarning>
       {/* Header Sticky con diseño unificado y navegación móvil */}
-      <header className="sticky top-0 z-40 w-full border-b border-gray-200/80 bg-white/90 backdrop-blur-md">
+      <header className="sticky top-0 z-40 w-full border-b border-gray-200/80 dark:border-slate-800 bg-white/90 dark:bg-[#0D111A]/90 backdrop-blur-md">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-3 py-2 sm:px-6 lg:px-8">
           <div className="flex items-center gap-1.5 sm:gap-3 min-w-0">
             {/* Botón Hamburguesa: visible en móviles (< md) o en escritorio cuando el sidebar está cerrado (!abierto) */}
             <button
               type="button"
               onClick={toggleSidebar}
-              className={`h-9 w-9 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-xl sm:rounded-2xl border border-gray-200/90 bg-white text-gray-700 shadow-2xs hover:bg-gray-100 hover:text-indigo-600 transition active:scale-95 ${
+              className={`h-9 w-9 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-xl sm:rounded-2xl border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 text-gray-700 dark:text-slate-200 shadow-2xs hover:bg-gray-100 dark:hover:bg-slate-800 hover:text-indigo-600 dark:hover:text-indigo-400 transition active:scale-95 ${
                 !sidebarAbierto ? 'flex' : 'flex md:hidden'
               }`}
               title="Abrir menú de navegación"
@@ -634,19 +634,19 @@ export default function ProveedoresPage() {
               <Menu className="h-5 w-5" />
             </button>
 
-            <div className="hidden sm:flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-indigo-50 border border-indigo-100 text-indigo-700 shadow-xs">
+            <div className="hidden sm:flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-100 dark:border-indigo-900/50 text-indigo-700 dark:text-indigo-400 shadow-xs">
               <Truck className="h-5 w-5" />
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-1.5 sm:gap-2">
-                <h1 className="text-sm sm:text-lg font-bold tracking-tight text-gray-900 truncate">
+                <h1 className="text-sm sm:text-lg font-bold tracking-tight text-gray-900 dark:text-white truncate">
                   Proveedores
                 </h1>
-                <span className="rounded-full border border-indigo-200 bg-indigo-50 px-1.5 py-0.2 text-[10px] sm:text-[11px] font-semibold text-indigo-700 shrink-0">
+                <span className="rounded-full border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/60 px-1.5 py-0.2 text-[10px] sm:text-[11px] font-semibold text-indigo-700 dark:text-indigo-300 shrink-0">
                   {cuentas.length}
                 </span>
               </div>
-              <p className="text-[11px] sm:text-xs text-gray-500 hidden sm:block">
+              <p className="text-[11px] sm:text-xs text-gray-500 dark:text-slate-400 hidden sm:block">
                 Recepción de mercancía, plazos de crédito y liquidación a tasa oficial BCV
               </p>
             </div>
@@ -659,21 +659,21 @@ export default function ProveedoresPage() {
               onClick={cargarTasa}
               disabled={cargandoTasa}
               title="Actualizar tasa oficial BCV"
-              className="flex sm:hidden items-center gap-1 rounded-full border border-amber-200/90 bg-amber-50/90 px-2 py-1 text-[11px] font-mono font-bold text-amber-900 shadow-2xs active:scale-95 transition"
+              className="flex sm:hidden items-center gap-1 rounded-full border border-amber-200/90 dark:border-amber-900/50 bg-amber-50/90 dark:bg-amber-950/40 px-2 py-1 text-[11px] font-mono font-bold text-amber-900 dark:text-amber-300 shadow-2xs active:scale-95 transition"
             >
-              <TrendingUp className="h-3 w-3 text-amber-700 shrink-0" />
+              <TrendingUp className="h-3 w-3 text-amber-700 dark:text-amber-400 shrink-0" />
               <span>{tasaBcv > 0 ? formatBs(tasaBcv) : '...'}</span>
-              {cargandoTasa && <RefreshCw className="h-2.5 w-2.5 animate-spin text-amber-700" />}
+              {cargandoTasa && <RefreshCw className="h-2.5 w-2.5 animate-spin text-amber-700 dark:text-amber-400" />}
             </button>
 
             {/* Tasa BCV Completa en Pantallas Mayores (≥ sm) */}
-            <div className="hidden sm:flex items-center gap-2 rounded-2xl border border-amber-200/80 bg-gradient-to-r from-amber-50/70 to-yellow-50/60 px-3 py-1.5 shadow-xs">
-              <TrendingUp className="h-4 w-4 text-amber-700 shrink-0" />
+            <div className="hidden sm:flex items-center gap-2 rounded-2xl border border-amber-200/80 dark:border-amber-900/50 bg-gradient-to-r from-amber-50/70 to-yellow-50/60 dark:from-amber-950/40 dark:to-yellow-950/30 px-3 py-1.5 shadow-xs">
+              <TrendingUp className="h-4 w-4 text-amber-700 dark:text-amber-400 shrink-0" />
               <div className="flex flex-col">
-                <span className="text-[10px] font-semibold uppercase text-amber-800/80 hidden xs:inline">
+                <span className="text-[10px] font-semibold uppercase text-amber-800/80 dark:text-amber-400 hidden xs:inline">
                   Tasa BCV
                 </span>
-                <span className="font-mono text-xs font-bold text-gray-900 whitespace-nowrap">
+                <span className="font-mono text-xs font-bold text-gray-900 dark:text-amber-100 whitespace-nowrap">
                   {tasaBcv > 0 ? formatBs(tasaBcv) : '...'}
                 </span>
               </div>

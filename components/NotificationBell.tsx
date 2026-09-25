@@ -45,7 +45,7 @@ export function NotificationBell() {
       <Popover.Trigger asChild>
         <button
           type="button"
-          className="relative flex h-10 w-10 items-center justify-center rounded-2xl border border-gray-200/90 bg-white/95 text-gray-700 shadow-2xs transition hover:border-indigo-300 hover:bg-indigo-50/50 hover:text-indigo-600 active:scale-95"
+          className="relative flex h-10 w-10 items-center justify-center rounded-2xl border border-gray-200/90 dark:border-slate-800 bg-white/95 dark:bg-slate-900/90 text-gray-700 dark:text-slate-200 shadow-2xs transition hover:border-indigo-300 dark:hover:border-indigo-600 hover:bg-indigo-50/50 dark:hover:bg-indigo-950/40 hover:text-indigo-600 dark:hover:text-indigo-400 active:scale-95"
           title="Centro de notificaciones y alertas"
           aria-label="Notificaciones"
         >
@@ -55,15 +55,15 @@ export function NotificationBell() {
           {!cargando && (
             <>
               {hayCriticas ? (
-                <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-600 px-1 text-[9px] font-black text-white shadow-xs animate-pulse ring-2 ring-white">
+                <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-600 px-1 text-[9px] font-black text-white shadow-xs animate-pulse ring-2 ring-white dark:ring-slate-900">
                   {data.proveedores.vencidas}
                 </span>
               ) : hayProximas || hayDeudasAlumnos ? (
-                <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-500 px-1 text-[9px] font-black text-white shadow-xs ring-2 ring-white">
+                <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-500 px-1 text-[9px] font-black text-white shadow-xs ring-2 ring-white dark:ring-slate-900">
                   {data.proveedores.proximas + (hayDeudasAlumnos ? 1 : 0)}
                 </span>
               ) : (
-                <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-white" />
+                <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-slate-900" />
               )}
             </>
           )}

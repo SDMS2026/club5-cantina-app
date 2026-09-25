@@ -8,7 +8,7 @@
 }
 
 .dark {
-  --background: #0b0f19;
+  --background: #090d16;
   --foreground: #f8fafc;
   color-scheme: dark;
 }
@@ -34,6 +34,282 @@ body {
   max-width: 100vw;
   min-height: 100vh;
   min-height: 100dvh;
+}
+
+/* ========================================================
+ * MODO OSCURO GLOBAL COMPLETO (NEGRO Y TONOS GRISES SLEEK)
+ * Transforma toda la aplicación en negros y grises elegantes
+ * garantizando contraste de texto y legibilidad en toda la web.
+ * ======================================================== */
+
+html.dark,
+html.dark body {
+  background-color: #090d16 !important;
+  color: #f8fafc !important;
+  color-scheme: dark;
+}
+
+/* 1. Fondos principales de páginas y contenedores */
+html.dark [class*="bg-[#FAFAFA]"],
+html.dark [class*="bg-[#F8FAFC]"],
+html.dark [class*="bg-[#FBFBFB]"],
+html.dark .bg-\[\#FAFAFA\],
+html.dark .bg-\[\#F8FAFC\],
+html.dark .bg-\[\#FBFBFB\] {
+  background-color: #090d16 !important;
+}
+
+/* 2. Encabezados Sticky (Header) */
+html.dark header.sticky,
+html.dark header[class*="backdrop-blur"] {
+  background-color: rgba(13, 17, 26, 0.95) !important;
+  border-bottom-color: #1e2638 !important;
+}
+
+/* 3. Tarjetas, Paneles, Contenedores y Superficies antes blancas */
+html.dark .bg-white:not([class*="dark:bg-"]) {
+  background-color: #111726 !important;
+  border-color: #1d263a !important;
+  color: #f8fafc;
+}
+
+/* 4. Bordes en tonos grises elegantes */
+html.dark .border-gray-100,
+html.dark .border-gray-200,
+html.dark .border-gray-200\/60,
+html.dark .border-gray-200\/70,
+html.dark .border-gray-200\/80,
+html.dark .border-gray-200\/90,
+html.dark .border-gray-300,
+html.dark .border-slate-100,
+html.dark .border-slate-200 {
+  border-color: #1d263a !important;
+}
+
+html.dark .divide-gray-100 > :not([hidden]) ~ :not([hidden]),
+html.dark .divide-gray-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #1d263a !important;
+}
+
+/* 5. Textos en tonos grises claros y blanco de alto contraste */
+html.dark .text-gray-900,
+html.dark .text-gray-800,
+html.dark .text-slate-900,
+html.dark .text-slate-800,
+html.dark .text-rose-950,
+html.dark .text-indigo-950,
+html.dark .text-amber-950 {
+  color: #f8fafc !important;
+}
+
+html.dark .text-gray-700,
+html.dark .text-gray-600,
+html.dark .text-slate-700,
+html.dark .text-slate-600 {
+  color: #cbd5e1 !important;
+}
+
+html.dark .text-gray-500,
+html.dark .text-gray-400,
+html.dark .text-slate-500,
+html.dark .text-slate-400 {
+  color: #94a3b8 !important;
+}
+
+/* 6. Fondos secundarios, badges y contenedores grises suaves */
+html.dark .bg-gray-50,
+html.dark .bg-gray-50\/50,
+html.dark .bg-gray-50\/70,
+html.dark .bg-gray-50\/80,
+html.dark .bg-gray-50\/90,
+html.dark .bg-gray-100,
+html.dark .bg-gray-100\/60,
+html.dark .bg-slate-50,
+html.dark .bg-slate-100 {
+  background-color: #141c2e !important;
+}
+
+/* 7. Inputs, Selects, Buscadores y Textareas */
+html.dark input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+html.dark select,
+html.dark textarea {
+  background-color: #111827 !important;
+  color: #f8fafc !important;
+  border-color: #243048 !important;
+}
+
+html.dark input:focus,
+html.dark select:focus,
+html.dark textarea:focus {
+  border-color: #6366f1 !important;
+  background-color: #162035 !important;
+}
+
+html.dark input::placeholder,
+html.dark textarea::placeholder {
+  color: #64748b !important;
+}
+
+/* 8. Tarjetas Métricas con Degradados Adaptados a Modo Nocturno */
+html.dark [class*="from-rose-50"] {
+  background: linear-gradient(135deg, rgba(76, 5, 25, 0.4) 0%, rgba(20, 15, 25, 0.5) 100%) !important;
+  border-color: rgba(159, 18, 57, 0.45) !important;
+}
+html.dark [class*="from-rose-50"] .text-rose-950,
+html.dark [class*="from-rose-50"] .text-rose-900,
+html.dark [class*="from-rose-50"] .text-rose-800 {
+  color: #fda4af !important;
+}
+
+html.dark [class*="from-indigo-50"] {
+  background: linear-gradient(135deg, rgba(30, 27, 75, 0.45) 0%, rgba(13, 17, 26, 0.5) 100%) !important;
+  border-color: rgba(99, 102, 241, 0.4) !important;
+}
+html.dark [class*="from-indigo-50"] .text-indigo-950,
+html.dark [class*="from-indigo-50"] .text-indigo-900,
+html.dark [class*="from-indigo-50"] .text-indigo-800,
+html.dark [class*="from-indigo-50"] .text-indigo-700 {
+  color: #c7d2fe !important;
+}
+
+html.dark [class*="from-amber-50"] {
+  background: linear-gradient(135deg, rgba(69, 26, 3, 0.4) 0%, rgba(20, 18, 22, 0.5) 100%) !important;
+  border-color: rgba(217, 119, 6, 0.4) !important;
+}
+html.dark [class*="from-amber-50"] .text-amber-950,
+html.dark [class*="from-amber-50"] .text-amber-900,
+html.dark [class*="from-amber-50"] .text-amber-800 {
+  color: #fde68a !important;
+}
+
+html.dark [class*="from-emerald-50"] {
+  background: linear-gradient(135deg, rgba(6, 78, 59, 0.4) 0%, rgba(13, 17, 26, 0.5) 100%) !important;
+  border-color: rgba(5, 150, 105, 0.4) !important;
+}
+html.dark [class*="from-emerald-50"] .text-emerald-950,
+html.dark [class*="from-emerald-50"] .text-emerald-900,
+html.dark [class*="from-emerald-50"] .text-emerald-800 {
+  color: #a7f3d0 !important;
+}
+
+/* 9. Diálogos, Modales Radix y Bottom Sheets Móviles */
+html.dark [role="dialog"],
+html.dark [data-radix-dialog-content] {
+  background-color: #0d121f !important;
+  border-color: #1e2638 !important;
+  color: #f8fafc !important;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.85) !important;
+}
+
+html.dark [role="dialog"] .bg-gray-50,
+html.dark [role="dialog"] .bg-gray-100 {
+  background-color: #141c2e !important;
+}
+
+/* 10. Tablas y Filas */
+html.dark table {
+  color: #f8fafc !important;
+}
+
+html.dark table thead th,
+html.dark table th {
+  background-color: #111726 !important;
+  color: #94a3b8 !important;
+  border-bottom-color: #1d263a !important;
+}
+
+html.dark table tbody tr {
+  border-bottom-color: #1d263a !important;
+}
+
+html.dark table tbody tr:hover {
+  background-color: #141c2e !important;
+}
+
+/* 11. Empty states y bordes discontinuos (dashed) */
+html.dark .border-dashed {
+  border-color: #243048 !important;
+}
+
+/* 12. Pestañas y Filtros (Pills activas e inactivas) */
+html.dark [class*="bg-gray-50"] button.bg-white,
+html.dark [class*="bg-gray-100"] button.bg-white {
+  background-color: #1e293b !important;
+  color: #f8fafc !important;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.5) !important;
+}
+
+/* 13. Popovers de Radix UI */
+html.dark [data-radix-popper-content-wrapper] > div,
+html.dark [data-radix-popover-content] {
+  background-color: #0d121f !important;
+  border-color: #1e2638 !important;
+  color: #f8fafc !important;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.85) !important;
+}
+
+/* 14. Scrollbar personalizada en modo oscuro */
+html.dark ::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+html.dark ::-webkit-scrollbar-track {
+  background: #090d16;
+}
+html.dark ::-webkit-scrollbar-thumb {
+  background: #1e2638;
+  border-radius: 9999px;
+}
+html.dark ::-webkit-scrollbar-thumb:hover {
+  background: #2d3748;
+}
+
+/* 15. Contenedores de color suave y sombras en modo nocturno */
+html.dark .bg-indigo-50,
+html.dark .bg-indigo-50\/50,
+html.dark .bg-indigo-50\/70 {
+  background-color: rgba(30, 27, 75, 0.35) !important;
+  color: #c7d2fe !important;
+}
+html.dark .border-indigo-100,
+html.dark .border-indigo-200 {
+  border-color: rgba(99, 102, 241, 0.3) !important;
+}
+
+html.dark .bg-emerald-50,
+html.dark .bg-emerald-50\/50,
+html.dark .bg-emerald-50\/80 {
+  background-color: rgba(6, 78, 59, 0.3) !important;
+  color: #a7f3d0 !important;
+}
+html.dark .border-emerald-100,
+html.dark .border-emerald-200,
+html.dark .border-emerald-300 {
+  border-color: rgba(16, 185, 129, 0.3) !important;
+}
+
+html.dark .bg-rose-50,
+html.dark .bg-rose-50\/50,
+html.dark .bg-rose-50\/70 {
+  background-color: rgba(76, 5, 25, 0.3) !important;
+  color: #fecdd3 !important;
+}
+html.dark .border-rose-100,
+html.dark .border-rose-200,
+html.dark .border-rose-300 {
+  border-color: rgba(244, 63, 94, 0.3) !important;
+}
+
+html.dark .bg-amber-50,
+html.dark .bg-amber-50\/50,
+html.dark .bg-amber-50\/80 {
+  background-color: rgba(69, 26, 3, 0.3) !important;
+  color: #fde68a !important;
+}
+html.dark .border-amber-100,
+html.dark .border-amber-200,
+html.dark .border-amber-300 {
+  border-color: rgba(245, 158, 11, 0.3) !important;
 }
 
 /* 

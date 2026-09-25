@@ -376,8 +376,8 @@ export default function PosPage() {
   // Esto elimina cualquier discrepancia de hidratación con extensiones de navegador
   if (!montado) {
     return (
-      <div className="min-h-screen flex flex-col bg-[#FAFAFA]" suppressHydrationWarning>
-        <header className="sticky top-0 z-40 w-full border-b border-gray-200/70 bg-white/80 backdrop-blur-md">
+      <div className="min-h-screen flex flex-col bg-[#FAFAFA] dark:bg-[#090D16]" suppressHydrationWarning>
+        <header className="sticky top-0 z-40 w-full border-b border-gray-200/70 dark:border-slate-800 bg-white/80 dark:bg-[#0D111A]/80 backdrop-blur-md">
           <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6 lg:px-8">
             <div className="flex items-center gap-3">
               <div className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full overflow-hidden">
@@ -391,24 +391,24 @@ export default function PosPage() {
                 />
               </div>
               <div>
-                <h1 className="text-lg font-bold tracking-tight text-gray-900">
+                <h1 className="text-lg font-bold tracking-tight text-gray-900 dark:text-white">
                   Club 5 Cantina Escolar
                 </h1>
-                <p className="text-xs text-gray-500">Punto de Venta &bull; Facturación Bimoneda</p>
+                <p className="text-xs text-gray-500 dark:text-slate-400">Punto de Venta &bull; Facturación Bimoneda</p>
               </div>
             </div>
-            <div className="h-9 w-48 rounded-2xl bg-amber-50/80 border border-amber-200/60 animate-pulse" />
+            <div className="h-9 w-48 rounded-2xl bg-amber-50/80 dark:bg-amber-950/40 border border-amber-200/60 dark:border-amber-900/50 animate-pulse" />
           </div>
         </header>
 
         <main className="mx-auto flex-1 w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
             <div className="flex flex-col gap-5 lg:col-span-8">
-              <div className="h-16 rounded-3xl border border-gray-200/80 bg-white p-4 shadow-xs animate-pulse" />
-              <div className="h-96 rounded-3xl border border-gray-200/80 bg-white p-5 shadow-xs animate-pulse" />
+              <div className="h-16 rounded-3xl border border-gray-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-xs animate-pulse" />
+              <div className="h-96 rounded-3xl border border-gray-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-xs animate-pulse" />
             </div>
             <div className="lg:col-span-4">
-              <div className="h-96 rounded-3xl border border-gray-200/80 bg-white p-5 shadow-xs animate-pulse" />
+              <div className="h-96 rounded-3xl border border-gray-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-xs animate-pulse" />
             </div>
           </div>
         </main>
@@ -425,7 +425,7 @@ export default function PosPage() {
   const totalItemsCarrito = itemsCarrito.reduce((sum, item) => sum + item.cantidad, 0);
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#FAFAFA]" suppressHydrationWarning>
+    <div className="min-h-screen flex flex-col bg-[#FAFAFA] dark:bg-[#090D16] text-slate-900 dark:text-slate-100 transition-colors" suppressHydrationWarning>
       {/* Header Precedent con Logo Oficial */}
       <Header
         tasaBcv={tasaBcv}
