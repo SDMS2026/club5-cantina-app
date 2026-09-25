@@ -48,7 +48,7 @@ export function LayoutContainer({ children }: { children: React.ReactNode }) {
 
   return (
     <NotificationsProvider>
-      <div className="relative min-h-screen flex flex-col bg-[#FAFAFA] dark:bg-[#090D16] text-slate-900 dark:text-slate-100 overflow-x-hidden transition-colors">
+      <div className="relative min-h-screen flex flex-col bg-[#FAFAFA] dark:bg-[#090D16] text-slate-900 dark:text-slate-100 overflow-x-hidden">
         {/* Notificación suave de bienvenida en la sesión */}
         <WelcomeSessionToast />
 

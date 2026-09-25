@@ -400,27 +400,27 @@ export function Sidebar() {
               </p>
             </motion.div>
 
-            {/* Selector de Modo Oscuro / Claro en el Slidebar */}
+            {/* Selector de Modo Oscuro / Claro en el Slidebar (Diseño ditdot-dev / dark-mode-example) */}
             <motion.div custom={9} variants={itemVariants}>
               <button
                 type="button"
                 onClick={toggleTheme}
                 aria-label={isDark ? 'Cambiar a Modo Claro' : 'Cambiar a Modo Oscuro'}
-                className="w-full flex items-center justify-between rounded-2xl border border-gray-200/90 dark:border-slate-800 bg-gray-50/90 dark:bg-slate-900/80 hover:bg-gray-100/90 dark:hover:bg-slate-800/90 px-3 py-2 transition-all shadow-2xs group cursor-pointer"
+                className="w-full flex items-center justify-between rounded-2xl border border-gray-200/90 dark:border-[#1D263A] bg-gray-50/90 dark:bg-[#111726]/80 hover:bg-gray-100/90 dark:hover:bg-[#141C2E] px-3.5 py-2.5 shadow-2xs group cursor-pointer select-none transition-colors duration-150"
                 title={isDark ? 'Cambiar a Modo Claro' : 'Cambiar a Modo Oscuro'}
               >
                 <div className="flex items-center gap-2.5">
                   <div
                     className={`flex h-7 w-7 items-center justify-center rounded-xl transition-colors ${
                       isDark
-                        ? 'bg-indigo-500/20 text-indigo-400 ring-1 ring-indigo-500/30'
-                        : 'bg-amber-500/15 text-amber-600 ring-1 ring-amber-400/30'
+                        ? 'bg-blue-600/20 text-blue-400 ring-1 ring-blue-500/30'
+                        : 'bg-sky-400/20 text-sky-600 ring-1 ring-sky-400/30'
                     }`}
                   >
                     {isDark ? (
-                      <Moon className="h-4 w-4 transition-transform duration-200 group-hover:rotate-12" />
+                      <Moon className="h-4 w-4 text-blue-400" />
                     ) : (
-                      <Sun className="h-4 w-4 transition-transform duration-200 group-hover:rotate-45" />
+                      <Sun className="h-4 w-4 text-amber-500" />
                     )}
                   </div>
                   <div className="flex flex-col text-left">
@@ -433,17 +433,54 @@ export function Sidebar() {
                   </div>
                 </div>
 
-                {/* Toggle Switch animado */}
-                <div
-                  className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
-                    isDark ? 'bg-indigo-600' : 'bg-gray-300 dark:bg-slate-700'
-                  }`}
-                >
+                {/* Switch estilo ditdot-dev */}
+                <div className="ditdot-switch relative inline-block w-[56px] h-[30px] shrink-0 pointer-events-none">
                   <span
-                    className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
-                      isDark ? 'translate-x-4' : 'translate-x-0'
+                    className={`ditdot-slider absolute inset-0 rounded-full transition-colors duration-300 shadow-inner ${
+                      isDark ? 'bg-[#1e38ff]' : 'bg-[#bae6fd]'
                     }`}
-                  />
+                  >
+                    {/* Icono de luna en el extremo derecho cuando está en modo claro */}
+                    <svg
+                      className={`ditdot-slider-icon absolute right-[7px] top-[7px] transform rotate-[250deg] transition-opacity duration-200 ${
+                        isDark ? 'opacity-0' : 'opacity-90'
+                      }`}
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      height="16"
+                      stroke="#0284c7"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2.5"
+                      width="16"
+                      xmlns="http://www.w3.org/2000/svg"
+                    >
+                      <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
+                    </svg>
+
+                    {/* Perilla deslizante blanca estilo ditdot-dev */}
+                    <span
+                      className={`absolute left-[3px] top-[3px] h-6 w-6 rounded-full bg-white shadow-md transform transition-transform duration-300 ease-out flex items-center justify-center ${
+                        isDark ? 'translate-x-[26px]' : 'translate-x-0'
+                      }`}
+                    >
+                      {isDark && (
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          height="13"
+                          stroke="#1e38ff"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="2.5"
+                          width="13"
+                          className="transform rotate-[250deg]"
+                        >
+                          <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
+                        </svg>
+                      )}
+                    </span>
+                  </span>
                 </div>
               </button>
             </motion.div>

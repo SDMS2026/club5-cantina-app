@@ -41,12 +41,47 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   const aplicarClaseTema = (nuevoTema: Theme) => {
     if (typeof document !== 'undefined') {
+      // Bloquear temporalmente transiciones en masa en toda la página para evitar caída a 4 FPS
+      // mientras se permite que el toggle animado fluya suavemente a 60fps
+      let lock = document.getElementById('theme-transition-lock');
+      if (!lock) {
+        lock = document.createElement('style');
+        lock.id = 'theme-transition-lock';
+        lock.appendChild(
+          document.createTextNode(`
+            *:not(.ditdot-switch):not(.ditdot-slider):not(.ditdot-slider *) {
+              -webkit-transition: none !important;
+              -moz-transition: none !important;
+              -o-transition: none !important;
+              -ms-transition: none !important;
+              transition: none !important;
+            }
+          `)
+        );
+        document.head.appendChild(lock);
+      }
+
       const root = document.documentElement;
       if (nuevoTema === 'dark') {
         root.classList.add('dark');
       } else {
         root.classList.remove('dark');
       }
+
+      // Forzar un reflow instantáneo en un único fotograma
+      if (document.body) {
+        void document.body.offsetHeight;
+      }
+
+      // Liberar el bloqueo tras el fotograma de cambio
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const l = document.getElementById('theme-transition-lock');
+          if (l) {
+            l.remove();
+          }
+        });
+      });
     }
   };
 
