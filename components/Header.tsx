@@ -24,7 +24,7 @@ export function Header({
   const { abierto, toggleSidebar } = useSidebar();
 
   return (
-    <header className="sticky top-0 z-40 w-full border-b border-gray-200/80 dark:border-slate-800 bg-white/90 dark:bg-[#0f172a]/90 backdrop-blur-md">
+    <header className="sticky top-0 z-40 w-full border-b border-gray-200/80 dark:border-[#1D263A] bg-white/90 dark:bg-[#090D16]/90 backdrop-blur-md">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-3 py-2 sm:px-6 lg:px-8">
         {/* Lado Izquierdo: Botón Hamburguesa (☰) + Identidad Club 5 */}
         <div className="flex items-center gap-1.5 sm:gap-3 min-w-0">
@@ -32,7 +32,7 @@ export function Header({
           <button
             type="button"
             onClick={toggleSidebar}
-            className={`h-9 w-9 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-xl sm:rounded-2xl border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 text-gray-700 dark:text-slate-200 shadow-2xs hover:bg-gray-100 dark:hover:bg-slate-800 hover:text-indigo-600 dark:hover:text-indigo-400 transition active:scale-95 ${
+            className={`h-9 w-9 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-xl sm:rounded-2xl border border-gray-200/90 dark:border-[#1D263A] bg-white dark:bg-[#111726] text-gray-700 dark:text-slate-200 shadow-2xs hover:bg-gray-100 dark:hover:bg-[#141C2E] hover:text-indigo-600 dark:hover:text-indigo-400 transition active:scale-95 ${
               !abierto ? 'flex' : 'flex md:hidden'
             }`}
             title="Abrir menú de navegación"
@@ -56,14 +56,14 @@ export function Header({
             <div className="flex flex-col min-w-0">
               <div className="flex items-center gap-1 sm:gap-1.5">
                 <span className="font-[family-name:var(--font-brand)] text-base sm:text-xl font-black tracking-tight inline-flex items-center gap-0.5 sm:gap-1 select-none">
-                  <span className="text-[#0E52A0] dark:text-blue-400 drop-shadow-[0_1.5px_0_#FACC15]">
+                  <span className="text-[#0E52A0] dark:text-white drop-shadow-[0_1.5px_0_#FACC15] dark:drop-shadow-none">
                     Club
                   </span>
                   <span className="relative inline-flex items-center justify-center rounded-md sm:rounded-lg bg-gradient-to-br from-yellow-300 via-amber-400 to-amber-500 px-1 sm:px-1.5 py-0.2 text-[#0A3D78] font-black text-xs sm:text-base shadow-xs ring-1 ring-yellow-200 -rotate-3">
                     5
                   </span>
                 </span>
-                <span className="rounded-full border border-yellow-300/80 bg-yellow-50 px-1.5 py-0.2 text-[9px] sm:text-[10px] font-bold text-amber-900 shadow-2xs">
+                <span className="rounded-full border border-yellow-300/80 bg-yellow-50 dark:bg-amber-950/80 dark:border-amber-700/60 px-1.5 py-0.2 text-[9px] sm:text-[10px] font-bold text-amber-900 dark:text-amber-200 shadow-2xs">
                   POS
                 </span>
               </div>

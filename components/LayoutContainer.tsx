@@ -40,7 +40,7 @@ export function LayoutContainer({ children }: { children: React.ReactNode }) {
   // En la pantalla de inicio de sesión no mostrar Sidebar, Toast ni Footer estándar
   if (pathname === '/login') {
     return (
-      <main className="min-h-screen bg-[#F8FAFC] dark:bg-[#0B0F19] flex flex-col justify-center">
+      <main className="min-h-screen bg-[#F8FAFC] dark:bg-[#090D16] flex flex-col justify-center">
         {children}
       </main>
     );
@@ -48,7 +48,7 @@ export function LayoutContainer({ children }: { children: React.ReactNode }) {
 
   return (
     <NotificationsProvider>
-      <div className="relative min-h-screen flex flex-col bg-[#FAFAFA] dark:bg-[#0B0F19] text-slate-900 dark:text-slate-100 overflow-x-hidden transition-colors">
+      <div className="relative min-h-screen flex flex-col bg-[#FAFAFA] dark:bg-[#090D16] text-slate-900 dark:text-slate-100 overflow-x-hidden transition-colors">
         {/* Notificación suave de bienvenida en la sesión */}
         <WelcomeSessionToast />
 

@@ -1122,16 +1122,16 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
             ))}
           </div>
         ) : clientesFiltrados.length === 0 ? (
-          <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed border-gray-200 bg-white/70 py-16 text-center">
-            <div className="flex h-14 w-14 items-center justify-center rounded-3xl bg-indigo-50 border border-indigo-100 text-indigo-600 mb-3 shadow-xs">
+          <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed border-gray-200 dark:border-slate-800 bg-white/70 dark:bg-[#111726]/40 py-16 text-center">
+            <div className="flex h-14 w-14 items-center justify-center rounded-3xl bg-indigo-50 dark:bg-slate-800 border border-indigo-100 dark:border-slate-700 text-indigo-600 dark:text-indigo-400 mb-3 shadow-xs">
               <Users className="h-7 w-7" />
             </div>
-            <h3 className="text-base font-bold text-gray-900">
+            <h3 className="text-base font-bold text-gray-900 dark:text-white">
               {busqueda || filtroGrado !== 'todos' || filtroEstado !== 'todos'
                 ? 'No se encontraron coincidencias'
                 : 'Directorio escolar vacío'}
             </h3>
-            <p className="mt-1 text-xs text-gray-500 max-w-sm">
+            <p className="mt-1 text-xs text-gray-500 dark:text-slate-400 max-w-sm">
               {busqueda || filtroGrado !== 'todos' || filtroEstado !== 'todos'
                 ? 'Prueba modificando los filtros de búsqueda o nivel escolar.'
                 : 'Registra a los alumnos y profesores de la cantina para asociar sus consumos y cuentas por cobrar.'}
@@ -1148,8 +1148,8 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            <AnimatePresence>
-              {clientesFiltrados.map((cliente) => {
+            <AnimatePresence mode="popLayout">
+              {clientesFiltrados.map((cliente, index) => {
                 const saldo = saldosClientes[cliente.id];
                 const tieneDeuda = !!(saldo && saldo.deudaTotalUsd > 0);
                 const tieneSaldoFavor = !!(saldo && saldo.saldoAFavorTotalUsd > 0);
@@ -1161,11 +1161,14 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
                 return (
                   <motion.div
                     key={cliente.id}
-                    layout
-                    initial={{ opacity: 0, y: 12 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.96 }}
-                    transition={{ duration: 0.2 }}
+                    initial={{ opacity: 0, y: 12, scale: 0.98 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.15 } }}
+                    transition={{
+                      duration: 0.22,
+                      delay: Math.min(index * 0.02, 0.2),
+                      ease: [0.25, 1, 0.5, 1],
+                    }}
                     className="flex flex-col justify-between rounded-3xl border border-gray-200/80 bg-white p-5 shadow-xs hover:border-gray-300 hover:shadow-md transition group"
                   >
                     <div>

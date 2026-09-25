@@ -934,16 +934,16 @@ export default function ProveedoresPage() {
             ))}
           </div>
         ) : cuentasFiltradas.length === 0 ? (
-          <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed border-gray-200 bg-white/70 py-16 text-center">
-            <div className="flex h-14 w-14 items-center justify-center rounded-3xl bg-indigo-50 border border-indigo-100 text-indigo-600 mb-3 shadow-xs">
+          <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed border-gray-200 dark:border-slate-800 bg-white/70 dark:bg-[#111726]/40 py-16 text-center">
+            <div className="flex h-14 w-14 items-center justify-center rounded-3xl bg-indigo-50 dark:bg-slate-800 border border-indigo-100 dark:border-slate-700 text-indigo-600 dark:text-indigo-400 mb-3 shadow-xs">
               <Truck className="h-7 w-7" />
             </div>
-            <h3 className="text-base font-bold text-gray-900">
+            <h3 className="text-base font-bold text-gray-900 dark:text-white">
               {busqueda || filtroEstado !== 'todos'
                 ? 'No se encontraron coincidencias'
                 : 'No hay cuentas por pagar registradas'}
             </h3>
-            <p className="mt-1 text-xs text-gray-500 max-w-sm">
+            <p className="mt-1 text-xs text-gray-500 dark:text-slate-400 max-w-sm">
               {busqueda || filtroEstado !== 'todos'
                 ? 'Prueba modificando los filtros de búsqueda o el estado seleccionado.'
                 : 'Registra los pedidos de mercancía a crédito para llevar el control de tus deudas comerciales.'}
@@ -959,8 +959,8 @@ export default function ProveedoresPage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            <AnimatePresence>
-              {cuentasFiltradas.map((cuenta) => {
+            <AnimatePresence mode="popLayout">
+              {cuentasFiltradas.map((cuenta, index) => {
                 const infoVenc = calcularVencimiento(cuenta.fecha_vencimiento_pago, cuenta.pagado);
                 const montoBsHoy = calcularConversionBs(cuenta.monto_usd, tasaBcv);
                 const montoBsHistorico = cuenta.tasa_bcv_historica
@@ -970,12 +970,15 @@ export default function ProveedoresPage() {
                 return (
                   <motion.div
                     key={cuenta.id}
-                    layout
-                    initial={{ opacity: 0, y: 12 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.96 }}
-                    transition={{ duration: 0.2 }}
-                    className={`flex flex-col justify-between rounded-3xl border bg-white p-5 shadow-xs hover:shadow-md transition group ${
+                    initial={{ opacity: 0, y: 12, scale: 0.98 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.15 } }}
+                    transition={{
+                      duration: 0.22,
+                      delay: Math.min(index * 0.02, 0.2),
+                      ease: [0.25, 1, 0.5, 1],
+                    }}
+                    className={`flex flex-col justify-between rounded-3xl border bg-white dark:bg-[#111726] p-5 shadow-xs hover:shadow-md transition group ${
                       cuenta.pagado
                         ? 'border-gray-200/70 bg-gray-50/40 opacity-90'
                         : infoVenc.estado === 'vencida'
@@ -1462,20 +1465,20 @@ export default function ProveedoresPage() {
                 <div
                   className={`rounded-2xl border p-3 text-xs transition ${
                     infoFechasModal.invalido
-                      ? 'border-rose-300 bg-rose-50 text-rose-800'
+                      ? 'border-rose-300 bg-rose-50 text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-200'
                       : infoFechasModal.vencidaHoy
-                      ? 'border-rose-200 bg-rose-50/70 text-rose-900'
+                      ? 'border-rose-200 bg-rose-50/70 text-rose-900 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-200'
                       : infoFechasModal.proxima || infoFechasModal.venceHoy
-                      ? 'border-amber-200 bg-amber-50/80 text-amber-950'
-                      : 'border-indigo-100 bg-indigo-50/60 text-indigo-950'
+                      ? 'border-amber-200 bg-amber-50/80 text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200'
+                      : 'border-indigo-100 bg-indigo-50/60 text-indigo-950 dark:border-indigo-900/50 dark:bg-indigo-950/40 dark:text-indigo-200'
                   }`}
                 >
                   {infoFechasModal.invalido ? (
                     <div className="flex items-start gap-2">
-                      <AlertTriangle className="h-4 w-4 shrink-0 text-rose-600 mt-0.5" />
+                      <AlertTriangle className="h-4 w-4 shrink-0 text-rose-600 dark:text-rose-400 mt-0.5" />
                       <div>
-                        <span className="font-bold text-rose-900">¡Incoherencia en las fechas!</span>
-                        <p className="mt-0.5 text-[11px] text-rose-700 leading-snug">
+                        <span className="font-bold text-rose-900 dark:text-rose-200">¡Incoherencia en las fechas!</span>
+                        <p className="mt-0.5 text-[11px] text-rose-700 dark:text-rose-300 leading-snug">
                           La fecha límite de pago ({formatearFechaLegible(modalForm.fecha_vencimiento_pago)}) es anterior al día que recibiste la mercancía ({formatearFechaLegible(modalForm.fecha_recepcion)}). Revisa el mes o año seleccionado.
                         </p>
                       </div>
@@ -1483,15 +1486,15 @@ export default function ProveedoresPage() {
                   ) : (
                     <div className="flex flex-col gap-1.5">
                       <div className="flex items-center justify-between">
-                        <span className="text-gray-500 font-medium">Plazo de crédito acordado:</span>
-                        <span className="font-mono font-bold text-indigo-700">
+                        <span className="text-gray-500 dark:text-slate-400 font-medium">Plazo de crédito acordado:</span>
+                        <span className="font-mono font-bold text-indigo-700 dark:text-indigo-300">
                           {infoFechasModal.plazoDias} {infoFechasModal.plazoDias === 1 ? 'día' : 'días'}
                         </span>
                       </div>
-                      <div className="flex flex-col gap-0.5 border-t border-black/5 pt-1.5 text-[11px]">
+                      <div className="flex flex-col gap-0.5 border-t border-black/5 dark:border-white/10 pt-1.5 text-[11px]">
                         <div className="flex items-center justify-between">
-                          <span className="text-gray-500 font-medium">Tiempo restante desde HOY:</span>
-                          <span className="font-bold">
+                          <span className="text-gray-500 dark:text-slate-400 font-medium">Tiempo restante desde HOY:</span>
+                          <span className="font-bold text-gray-900 dark:text-white">
                             {infoFechasModal.vencidaHoy
                               ? `⚠️ Ya vencida hace ${Math.abs(infoFechasModal.diasDesdeHoy)} días (Alerta Roja)`
                               : infoFechasModal.venceHoy
@@ -1501,7 +1504,7 @@ export default function ProveedoresPage() {
                               : `✓ Vence en ${infoFechasModal.diasDesdeHoy} días (Al día)`}
                           </span>
                         </div>
-                        <p className="text-[10px] text-gray-400 mt-0.5">
+                        <p className="text-[10px] text-gray-400 dark:text-slate-400 mt-0.5">
                           💡 Este plazo se calcula desde HOY hasta la <strong>Fecha Límite de Pago</strong>.
                         </p>
                       </div>

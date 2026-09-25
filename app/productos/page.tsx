@@ -766,8 +766,8 @@ export default function ProductosPage() {
                 onClick={() => setFiltroCategoria(cat)}
                 className={`rounded-2xl px-4 py-2 text-xs font-bold transition shrink-0 ${
                   esActiva
-                    ? 'bg-indigo-600 text-white shadow-xs'
-                    : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                    ? 'bg-indigo-600 dark:bg-indigo-500 text-white shadow-xs'
+                    : 'border border-gray-200 dark:border-[#1D263A] bg-white dark:bg-[#111726] text-gray-600 dark:text-slate-300 hover:bg-gray-50 dark:hover:bg-[#141C2E]'
                 }`}
               >
                 {cat}
@@ -780,24 +780,24 @@ export default function ProductosPage() {
         {cargandoProductos ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4 w-full min-w-0 max-w-full">
             {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
-              <div key={i} className="h-64 rounded-3xl bg-white border border-gray-100 p-4 animate-pulse flex flex-col justify-between w-full min-w-0 max-w-full">
-                <div className="h-32 bg-gray-100 rounded-2xl" />
+              <div key={i} className="h-64 rounded-3xl bg-white dark:bg-[#111726] border border-gray-100 dark:border-[#1D263A] p-4 animate-pulse flex flex-col justify-between w-full min-w-0 max-w-full">
+                <div className="h-32 bg-gray-100 dark:bg-slate-800 rounded-2xl" />
                 <div className="space-y-2 mt-3">
-                  <div className="h-4 bg-gray-100 rounded w-3/4" />
-                  <div className="h-3 bg-gray-100 rounded w-1/2" />
+                  <div className="h-4 bg-gray-100 dark:bg-slate-800 rounded w-3/4" />
+                  <div className="h-3 bg-gray-100 dark:bg-slate-800 rounded w-1/2" />
                 </div>
               </div>
             ))}
           </div>
         ) : productosFiltrados.length === 0 ? (
-          <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed border-gray-200 bg-white py-16 text-center w-full min-w-0 max-w-full">
-            <div className="flex h-14 w-14 items-center justify-center rounded-3xl bg-gray-50 text-gray-400 mb-3 border border-gray-100">
+          <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed border-gray-200 dark:border-slate-800 bg-white dark:bg-[#111726]/40 py-16 text-center w-full min-w-0 max-w-full">
+            <div className="flex h-14 w-14 items-center justify-center rounded-3xl bg-gray-50 dark:bg-slate-800 text-gray-400 mb-3 border border-gray-100 dark:border-slate-700">
               <Package className="h-7 w-7" />
             </div>
-            <h3 className="text-base font-bold text-gray-900">
+            <h3 className="text-base font-bold text-gray-900 dark:text-white">
               No se encontraron productos
             </h3>
-            <p className="mt-1 text-xs text-gray-400 max-w-sm px-4">
+            <p className="mt-1 text-xs text-gray-400 dark:text-slate-400 max-w-sm px-4">
               {busqueda
                 ? `No hay productos que coincidan con "${busqueda}". Intenta con otro término.`
                 : 'Aún no hay productos registrados en esta categoría.'}
@@ -813,8 +813,8 @@ export default function ProductosPage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4 w-full min-w-0 max-w-full">
-            <AnimatePresence>
-              {productosFiltrados.map((producto) => {
+            <AnimatePresence mode="popLayout">
+              {productosFiltrados.map((producto, index) => {
                 const precioBs = calcularConversionBs(producto.precio_usd, tasaBcv);
                 const emojiMostrar = producto.imagen_url || obtenerEmojiPorNombre(producto.nombre);
                 const esUrl = esUrlImagen(producto.imagen_url);
@@ -822,20 +822,23 @@ export default function ProductosPage() {
                 return (
                   <motion.div
                     key={producto.id}
-                    layout
-                    initial={{ opacity: 0, y: 12 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.96 }}
-                    transition={{ duration: 0.2 }}
-                    className={`group relative flex flex-col justify-between rounded-3xl border bg-white p-4 shadow-xs transition hover:shadow-md w-full min-w-0 max-w-full overflow-hidden ${
+                    initial={{ opacity: 0, y: 12, scale: 0.98 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.15 } }}
+                    transition={{
+                      duration: 0.22,
+                      delay: Math.min(index * 0.02, 0.2),
+                      ease: [0.25, 1, 0.5, 1],
+                    }}
+                    className={`group relative flex flex-col justify-between rounded-3xl border bg-white dark:bg-[#111726] p-4 shadow-xs transition hover:shadow-md w-full min-w-0 max-w-full overflow-hidden will-change-transform ${
                       producto.activo
-                        ? 'border-gray-200/80 hover:border-gray-300'
-                        : 'border-dashed border-gray-300/80 opacity-75 bg-gray-50/50'
+                        ? 'border-gray-200/80 dark:border-[#1D263A] hover:border-gray-300 dark:hover:border-slate-700'
+                        : 'border-dashed border-gray-300/80 dark:border-slate-700 opacity-75 bg-gray-50/50 dark:bg-slate-900/40'
                     }`}
                   >
                     <div>
                       {/* Cabecera del Producto: Emoji 3D Grande + Badges de Estado */}
-                      <div className="relative mb-3 flex h-36 w-full items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-b from-gray-50 to-gray-100/60 border border-gray-100/80">
+                      <div className="relative mb-3 flex h-36 w-full items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-b from-gray-50 to-gray-100/60 border border-gray-100/80 dark:from-slate-900/90 dark:to-[#141C2E] dark:border-slate-800">
                         {esUrl ? (
                           <Image
                             src={producto.imagen_url!}
@@ -851,7 +854,7 @@ export default function ProductosPage() {
                         )}
 
                         {/* Badge de Categoría */}
-                        <span className="absolute left-2.5 top-2.5 max-w-[55%] truncate rounded-full border border-gray-200/80 bg-white/90 px-2 py-0.5 text-[10px] font-bold text-gray-700 backdrop-blur-xs shadow-2xs">
+                        <span className="absolute left-2.5 top-2.5 max-w-[55%] truncate rounded-full border border-gray-200/80 dark:border-slate-700 bg-white/90 dark:bg-slate-900/90 px-2 py-0.5 text-[10px] font-bold text-gray-700 dark:text-slate-200 backdrop-blur-xs shadow-2xs">
                           {producto.categoria || 'General'}
                         </span>
 
@@ -860,7 +863,7 @@ export default function ProductosPage() {
                           <button
                             type="button"
                             onClick={() => handleAbrirEditar(producto)}
-                            className="rounded-xl bg-white/95 p-1.5 text-gray-600 hover:text-indigo-600 hover:bg-white shadow-2xs transition active:scale-95"
+                            className="rounded-xl bg-white/95 dark:bg-slate-800/90 p-1.5 text-gray-600 dark:text-slate-200 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-white dark:hover:bg-slate-700 shadow-2xs transition active:scale-95"
                             title="Editar producto"
                           >
                             <Pencil className="h-3.5 w-3.5" />
@@ -868,7 +871,7 @@ export default function ProductosPage() {
                           <button
                             type="button"
                             onClick={(e) => handleAbrirEliminar(producto, e)}
-                            className="rounded-xl bg-white/95 p-1.5 text-gray-600 hover:text-rose-600 hover:bg-white shadow-2xs transition active:scale-95"
+                            className="rounded-xl bg-white/95 dark:bg-slate-800/90 p-1.5 text-gray-600 dark:text-slate-200 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-white dark:hover:bg-slate-700 shadow-2xs transition active:scale-95"
                             title="Eliminar producto"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
@@ -878,23 +881,23 @@ export default function ProductosPage() {
 
                       {/* Información del Producto */}
                       <div className="min-w-0">
-                        <h3 className="line-clamp-2 text-sm font-bold text-gray-900 group-hover:text-indigo-600 transition leading-snug break-words">
+                        <h3 className="line-clamp-2 text-sm font-bold text-gray-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition leading-snug break-words">
                           {producto.nombre}
                         </h3>
 
                         {/* Precios Duales ($ y Bs) */}
                         <div className="mt-2 flex items-baseline justify-between gap-2 min-w-0">
                           <div className="flex flex-col min-w-0">
-                            <span className="text-base font-black text-gray-950 font-mono truncate">
+                            <span className="text-base font-black text-gray-950 dark:text-white font-mono truncate">
                               {formatUSD(producto.precio_usd)}
                             </span>
-                            <span className="text-[11px] font-semibold text-emerald-700 font-mono truncate">
+                            <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 font-mono truncate">
                               {formatBs(precioBs)}
                             </span>
                           </div>
 
                           <div className="text-right shrink-0">
-                            <span className="text-[10px] font-medium text-gray-400">
+                            <span className="text-[10px] font-medium text-gray-400 dark:text-slate-500">
                               Tasa BCV
                             </span>
                           </div>
@@ -903,14 +906,14 @@ export default function ProductosPage() {
                     </div>
 
                     {/* Switch de Visibilidad en POS */}
-                    <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between gap-2 min-w-0">
+                    <div className="mt-4 pt-3 border-t border-gray-100 dark:border-slate-800 flex items-center justify-between gap-2 min-w-0">
                       <div className="flex items-center gap-1.5 min-w-0">
                         <span
                           className={`h-2 w-2 shrink-0 rounded-full ${
-                            producto.activo ? 'bg-emerald-500' : 'bg-gray-300'
+                            producto.activo ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-slate-600'
                           }`}
                         />
-                        <span className="text-[11px] font-semibold text-gray-600 truncate">
+                        <span className="text-[11px] font-semibold text-gray-600 dark:text-slate-300 truncate">
                           {producto.activo ? 'Visible en POS' : 'Pausado'}
                         </span>
                       </div>

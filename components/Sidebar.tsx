@@ -150,7 +150,7 @@ export function Sidebar() {
           animate="open"
           exit="closed"
           style={{ transform: 'translate3d(0,0,0)', WebkitTransform: 'translate3d(0,0,0)' }}
-          className="fixed inset-y-0 left-0 z-50 flex w-72 max-w-[85vw] flex-col justify-between border-r border-gray-200/80 dark:border-slate-800 bg-white dark:bg-[#0f172a] p-5 shadow-2xl dark:shadow-black/60 rounded-r-3xl md:w-64 md:rounded-none md:shadow-xs will-change-transform transform-gpu"
+          className="fixed inset-y-0 left-0 z-50 flex w-72 max-w-[85vw] flex-col justify-between overflow-y-auto no-scrollbar border-r border-gray-200/80 dark:border-[#1D263A] bg-white dark:bg-[#090D16] p-5 shadow-2xl dark:shadow-black/60 rounded-r-3xl md:w-64 md:rounded-none md:shadow-xs will-change-transform transform-gpu"
         >
           {/* Parte Superior del Sidebar */}
           <div className="flex flex-col gap-6">
@@ -158,7 +158,7 @@ export function Sidebar() {
             <motion.div
               custom={0}
               variants={itemVariants}
-              className="flex items-center justify-between pb-2 border-b border-gray-100 dark:border-slate-800"
+              className="flex items-center justify-between pb-2 border-b border-gray-100 dark:border-[#1D263A]"
             >
               <Link href="/" onClick={handleCerrarMovil} className="group flex items-center gap-3">
                 {/* Logo circular limpio */}
@@ -177,18 +177,18 @@ export function Sidebar() {
                 <div className="flex flex-col">
                   <div className="flex items-center gap-1.5">
                     <span className="font-[family-name:var(--font-brand)] text-2xl font-black tracking-tight inline-flex items-center gap-1 select-none">
-                      <span className="text-[#0E52A0] drop-shadow-[0_2px_0_#FACC15] transition-transform duration-200 group-hover:scale-105">
+                      <span className="text-[#0E52A0] dark:text-white drop-shadow-[0_2px_0_#FACC15] dark:drop-shadow-none transition-transform duration-200 group-hover:scale-105">
                         Club
                       </span>
                       <span className="relative inline-flex items-center justify-center rounded-xl bg-gradient-to-br from-yellow-300 via-amber-400 to-amber-500 px-2 py-0.5 text-[#0A3D78] font-black text-xl shadow-xs ring-2 ring-yellow-200/80 -rotate-3 transition-transform duration-300 group-hover:rotate-0">
                         5
                       </span>
                     </span>
-                    <span className="rounded-full border border-yellow-300/80 bg-yellow-50 px-1.5 py-0.2 text-[10px] font-bold text-amber-900 shadow-2xs">
+                    <span className="rounded-full border border-yellow-300/80 bg-yellow-50 dark:bg-amber-950/80 dark:border-amber-700/60 px-1.5 py-0.2 text-[10px] font-bold text-amber-900 dark:text-amber-200 shadow-2xs">
                       POS
                     </span>
                   </div>
-                  <span className="font-[family-name:var(--font-brand)] text-[11px] font-bold tracking-wide text-amber-700/90 -mt-0.5">
+                  <span className="font-[family-name:var(--font-brand)] text-[11px] font-bold tracking-wide text-amber-700/90 dark:text-amber-400 -mt-0.5">
                     Cantina Escolar
                   </span>
                 </div>
@@ -340,7 +340,7 @@ export function Sidebar() {
           </div>
 
           {/* Sección Inferior: Tasa BCV Oficial + Estado del Sistema + Selector Modo Oscuro + Logout */}
-          <div className="flex flex-col gap-2.5">
+          <div className="flex flex-col gap-2.5 mt-8 pt-4 border-t border-gray-100 dark:border-[#1D263A]">
             {/* Tarjeta Oficial Tasa BCV */}
             <motion.div
               custom={7}

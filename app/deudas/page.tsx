@@ -1084,16 +1084,16 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
             ))}
           </div>
         ) : cuentasFiltradas.length === 0 ? (
-          <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed border-gray-200 bg-white/70 py-16 text-center">
-            <div className="flex h-14 w-14 items-center justify-center rounded-3xl bg-emerald-50 border border-emerald-100 text-emerald-600 mb-3 shadow-xs">
+          <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed border-gray-200 dark:border-slate-800 bg-white/70 dark:bg-[#111726]/40 py-16 text-center">
+            <div className="flex h-14 w-14 items-center justify-center rounded-3xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-100 dark:border-emerald-800/40 text-emerald-600 dark:text-emerald-400 mb-3 shadow-xs">
               <CheckCircle2 className="h-7 w-7" />
             </div>
-            <h3 className="text-base font-bold text-gray-900">
+            <h3 className="text-base font-bold text-gray-900 dark:text-white">
               {busqueda || filtroGrado !== 'todos'
                 ? 'No se encontraron coincidencias'
                 : '¡Todas las cuentas están al día!'}
             </h3>
-            <p className="mt-1 text-xs text-gray-500 max-w-sm">
+            <p className="mt-1 text-xs text-gray-500 dark:text-slate-400 max-w-sm">
               {busqueda || filtroGrado !== 'todos'
                 ? 'Prueba modificando los filtros de búsqueda o grado.'
                 : 'No existen consumos pendientes por cobrar en este momento.'}
@@ -1113,8 +1113,8 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
           </div>
         ) : (
           <div className="space-y-4">
-            <AnimatePresence>
-              {cuentasFiltradas.map((cuenta) => {
+            <AnimatePresence mode="popLayout">
+              {cuentasFiltradas.map((cuenta, index) => {
                 const abierto = !!estudiantesDesplegados[cuenta.clienteKey];
                 const estudiante = cuenta.cliente?.nombre_estudiante || 'Venta General Ocasional';
                 const grado = cuenta.cliente?.grado_seccion || 'Sin sección asignada';
@@ -1138,11 +1138,14 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
                 return (
                   <motion.div
                     key={cuenta.clienteKey}
-                    layout
-                    initial={{ opacity: 0, y: 12 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.98 }}
-                    transition={{ duration: 0.2 }}
+                    initial={{ opacity: 0, y: 10, scale: 0.99 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.98, transition: { duration: 0.15 } }}
+                    transition={{
+                      duration: 0.22,
+                      delay: Math.min(index * 0.02, 0.2),
+                      ease: [0.25, 1, 0.5, 1],
+                    }}
                     className="overflow-hidden rounded-3xl border border-gray-200/80 bg-white p-5 shadow-xs transition hover:border-gray-300"
                   >
                     {/* Cabecera de la Cuenta del Estudiante / Profesor */}

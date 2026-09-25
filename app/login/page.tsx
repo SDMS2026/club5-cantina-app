@@ -101,7 +101,7 @@ export default function LoginPage() {
 
             <div className="flex items-center justify-center mb-1">
               <span className="font-[family-name:var(--font-brand)] text-3xl font-black tracking-tight inline-flex items-center gap-1 select-none">
-                <span className="text-[#0E52A0] dark:text-blue-400 drop-shadow-[0_2px_0_#FACC15]">Club</span>
+                <span className="text-[#0E52A0] dark:text-white drop-shadow-[0_2px_0_#FACC15] dark:drop-shadow-none">Club</span>
                 <span className="relative inline-flex items-center justify-center rounded-xl bg-gradient-to-br from-yellow-300 via-amber-400 to-amber-500 px-2.5 py-0.5 text-[#0A3D78] font-black text-2xl shadow-xs ring-2 ring-yellow-200/80 -rotate-3">
                   5
                 </span>
