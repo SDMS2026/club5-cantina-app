@@ -1,10 +1,12 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { usePathname } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import { obtenerTasaBCV, TASA_BCV_FALLBACK_DEFAULT } from '@/lib/dolarApi';
 import { calcularConversionBs } from '@/lib/utils';
 import { ProveedorCuenta } from '@/types/pos';
+import { obtenerSaldosTodosClientes } from '@/lib/clientBalance';
 
 export interface NotificacionItem {
   id: string;
@@ -88,6 +90,7 @@ export function refrescarNotificacionesGlobales() {
 }
 
 export function NotificationsProvider({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
   const [data, setData] = useState<NotificationsData>(DEFAULT_DATA);
   const [cargando, setCargando] = useState<boolean>(true);
 
@@ -191,46 +194,57 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
 
       const totalPendienteBsProv = calcularConversionBs(totalPendienteUsdProv, tasaActual);
 
-      // 3. Obtener Cuentas por Cobrar (Consumos de Estudiantes / Profesores)
-      const { data: consumosData, error: consumosErr } = await supabase
-        .from('consumos')
-        .select(`
-          id,
-          cliente_id,
-          monto_total_usd,
-          pagado,
-          clientes (
+      // 3. Obtener Cuentas por Cobrar (Consumos y Saldos Reales Consolidados)
+      const [saldosMap, { data: consumosData, error: consumosErr }] = await Promise.all([
+        obtenerSaldosTodosClientes(),
+        supabase
+          .from('consumos')
+          .select(`
             id,
-            nombre_estudiante,
-            grado_seccion,
-            nombre_representante
-          )
-        `)
-        .eq('pagado', false);
+            cliente_id,
+            monto_total_usd,
+            pagado,
+            clientes (
+              id,
+              nombre_estudiante,
+              grado_seccion,
+              nombre_representante
+            )
+          `)
+          .eq('pagado', false),
+      ]);
 
       if (consumosErr) {
         console.error('Error al cargar consumos en notificaciones:', consumosErr);
       }
 
-      const consumosPendientes = consumosData || [];
+      // Solo contar como consumos pendientes aquellos de clientes que efectivamente tengan deuda activa (> 0)
+      const consumosPendientes = (consumosData || []).filter((c: any) => {
+        const cid = c.cliente_id;
+        if (!cid) return false;
+        const saldo = saldosMap[cid];
+        return saldo && saldo.deudaTotalUsd > 0;
+      });
+
       const clientesDeudaMap = new Map<string, { cliente: any; totalUsd: number; count: number }>();
       let totalDeudaUsd = 0;
 
       consumosPendientes.forEach((c: any) => {
         const monto = Number(c.monto_total_usd || 0);
-        totalDeudaUsd += monto;
-
         const clienteId = c.cliente_id || 'anonimo';
+        const saldo = saldosMap[clienteId];
+        const deudaEfectiva = saldo ? saldo.deudaTotalUsd : monto;
+
         const existente = clientesDeudaMap.get(clienteId);
         if (existente) {
-          existente.totalUsd += monto;
           existente.count++;
         } else {
           clientesDeudaMap.set(clienteId, {
             cliente: c.clientes,
-            totalUsd: monto,
+            totalUsd: deudaEfectiva,
             count: 1,
           });
+          totalDeudaUsd += deudaEfectiva;
         }
       });
 
@@ -286,9 +300,20 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     }
   }, []);
 
+  // 1. Sincronización instantánea al cambiar de ruta en la aplicación
   useEffect(() => {
     cargarDatos();
+  }, [pathname, cargarDatos]);
 
+  // 2. Sondeo regular en segundo plano (cada 12s) para mantener badges 100% frescos
+  useEffect(() => {
+    const timer = setInterval(() => {
+      cargarDatos();
+    }, 12000);
+    return () => clearInterval(timer);
+  }, [cargarDatos]);
+
+  useEffect(() => {
     // Suscripción al evento personalizado local
     const handleEvento = () => {
       cargarDatos();

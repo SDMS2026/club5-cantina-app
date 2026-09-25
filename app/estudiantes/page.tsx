@@ -51,6 +51,7 @@ import {
   handleDecimalKeyDown,
 } from '@/lib/utils';
 import { NotificationBell } from '@/components/NotificationBell';
+import { refrescarNotificacionesGlobales } from '@/components/NotificationsContext';
 import { useSidebar } from '@/components/SidebarContext';
 import {
   PREFIJOS_TELEFONICOS,
@@ -430,6 +431,7 @@ export default function EstudiantesPage() {
       });
       setTimeout(() => setNotificacion(null), 4500);
       await cargarDatos();
+      refrescarNotificacionesGlobales();
     } catch (err: unknown) {
       console.error('Error registrando abono:', err);
       setModalAbono((prev) => ({
@@ -611,6 +613,7 @@ export default function EstudiantesPage() {
       setModalForm((prev) => ({ ...prev, abierto: false }));
       setTimeout(() => setNotificacion(null), 4000);
       await cargarDatos();
+      refrescarNotificacionesGlobales();
     } catch (err: unknown) {
       console.error('Error guardando registro:', err);
       setModalForm((prev) => ({
@@ -669,6 +672,7 @@ export default function EstudiantesPage() {
       });
       setTimeout(() => setNotificacion(null), 4000);
       await cargarDatos();
+      refrescarNotificacionesGlobales();
     } catch (err: unknown) {
       console.error('Error eliminando cliente:', err);
       setModalEliminar((prev) => ({

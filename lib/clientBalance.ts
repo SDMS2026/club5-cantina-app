@@ -293,6 +293,11 @@ export async function procesarAbonoCliente({
     mensaje = `¡Se acreditaron $${saldoAcreditado.toFixed(2)} como saldo a favor exitosamente!`;
   }
 
+  // Notificar al contexto global de notificaciones para actualizar badges en tiempo real
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('club5:actualizar-notificaciones'));
+  }
+
   return {
     exito: true,
     deudaLiquidadaUsd: deudaLiquidada,

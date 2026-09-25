@@ -30,6 +30,7 @@ import {
 } from '@/lib/utils';
 import { useModalDragScroll } from '@/lib/useModalDragScroll';
 import { obtenerSaldoCliente, procesarAbonoCliente, ResumenSaldoCliente } from '@/lib/clientBalance';
+import { refrescarNotificacionesGlobales } from '@/components/NotificationsContext';
 
 interface PaymentModalProps {
   abierto: boolean;
@@ -265,6 +266,7 @@ export function PaymentModal({
 
       setConsumoGuardadoId(consumoData.id);
       setExito(true);
+      refrescarNotificacionesGlobales();
       setTimeout(() => {
         onTransaccionExitosa();
       }, 1600);
@@ -290,6 +292,7 @@ export function PaymentModal({
         esVuelto: true,
       });
       setVueltoAcreditadoExito(vueltoUsd);
+      refrescarNotificacionesGlobales();
     } catch (e) {
       console.error('Error guardando vuelto:', e);
     } finally {
