@@ -37,7 +37,15 @@ import {
 } from 'lucide-react';
 import { obtenerTasaBCV, TASA_BCV_FALLBACK_DEFAULT } from '@/lib/dolarApi';
 import { supabase } from '@/lib/supabaseClient';
-import { formatUSD, formatBs, calcularConversionBs } from '@/lib/utils';
+import {
+  formatUSD,
+  formatBs,
+  calcularConversionBs,
+  calcularConversionUSD,
+  sanitizeDecimalInput,
+  handleDecimalKeyDown,
+} from '@/lib/utils';
+import { ModernClientSelect } from '@/components/ModernClientSelect';
 import { esProfesorOPersonal } from '@/lib/constants';
 import { Cliente, Producto } from '@/types/pos';
 import { NotificationBell } from '@/components/NotificationBell';
@@ -194,6 +202,7 @@ export default function DeudasPage() {
     abierto: boolean;
     cliente: Cliente | null;
     montoUsd: string;
+    montoBs: string;
     metodoPago: string;
     guardando: boolean;
     error: string | null;
@@ -201,6 +210,7 @@ export default function DeudasPage() {
     abierto: false,
     cliente: null,
     montoUsd: '',
+    montoBs: '',
     metodoPago: 'efectivo_usd',
     guardando: false,
     error: null,
@@ -545,6 +555,7 @@ export default function DeudasPage() {
       abierto: true,
       cliente: c,
       montoUsd: '',
+      montoBs: '',
       metodoPago: 'efectivo_usd',
       guardando: false,
       error: null,
@@ -794,44 +805,8 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
             </div>
           </div>
 
-          {/* Tasa BCV en tiempo real + Notificaciones */}
+          {/* Botón Registrar Abono / Saldo a Favor */}
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            {/* Mini Burbuja Tasa BCV en Móviles (< sm) */}
-            <button
-              type="button"
-              onClick={cargarTasa}
-              disabled={cargandoTasa}
-              title="Actualizar tasa oficial BCV"
-              className="flex sm:hidden items-center gap-1 rounded-full border border-amber-200/90 dark:border-amber-900/50 bg-amber-50/90 dark:bg-amber-950/40 px-2 py-1 text-[11px] font-mono font-bold text-amber-900 dark:text-amber-300 shadow-2xs active:scale-95 transition"
-            >
-              <TrendingUp className="h-3 w-3 text-amber-700 dark:text-amber-400 shrink-0" />
-              <span>{tasaBcv > 0 ? formatBs(tasaBcv) : '...'}</span>
-              {cargandoTasa && <RefreshCw className="h-2.5 w-2.5 animate-spin text-amber-700 dark:text-amber-400" />}
-            </button>
-
-            {/* Tasa BCV Completa en Pantallas Mayores (≥ sm) */}
-            <div className="hidden sm:flex items-center gap-2 rounded-2xl border border-amber-200/80 bg-gradient-to-r from-amber-50/70 to-yellow-50/60 px-3 py-1.5 shadow-xs">
-              <TrendingUp className="h-4 w-4 text-amber-700 shrink-0" />
-              <div className="flex flex-col">
-                <span className="text-[10px] font-semibold uppercase text-amber-800/80 hidden xs:inline">
-                  Tasa BCV
-                </span>
-                <span className="font-mono text-xs font-bold text-gray-900 whitespace-nowrap">
-                  {tasaBcv > 0 ? formatBs(tasaBcv) : '...'}
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={cargarTasa}
-                disabled={cargandoTasa}
-                title="Actualizar tasa oficial"
-                className="ml-1 rounded-lg p-1 text-amber-800 hover:bg-amber-100 transition"
-              >
-                <RefreshCw className={`h-3 w-3 ${cargandoTasa ? 'animate-spin' : ''}`} />
-              </button>
-            </div>
-
-            {/* Botón Registrar Abono / Saldo a Favor */}
             <button
               type="button"
               onClick={() => handleAbrirAbono(null)}
@@ -1665,186 +1640,260 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
             )}
 
             <form onSubmit={handleConfirmarAbono} className="mt-4 space-y-4">
-              {/* Selección del Cliente si no fue preseleccionado */}
-              {!modalAbono.cliente ? (
-                <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1">
-                    Seleccionar Cliente o Estudiante *
-                  </label>
-                  <select
-                    onChange={(e) => {
-                      const c = todosLosClientes.find((cl) => cl.id === e.target.value) || null;
-                      setModalAbono((prev) => ({ ...prev, cliente: c, error: null }));
-                    }}
-                    defaultValue=""
-                    className="w-full rounded-2xl border border-gray-200 bg-white py-2.5 px-3 text-xs font-bold text-gray-900 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 outline-none"
-                  >
-                    <option value="" disabled>-- Elige un cliente para abonar --</option>
-                    {todosLosClientes.map((cl) => {
-                      const s = saldosClientes[cl.id];
-                      const tieneDeuda = (s?.deudaTotalUsd || 0) > 0;
-                      const tieneSaldo = (s?.saldoAFavorTotalUsd || 0) > 0;
-                      let label = `${cl.nombre_estudiante} (${cl.grado_seccion || 'Sin sección'})`;
-                      if (tieneDeuda) label += ` [Debe: $${s.deudaTotalUsd.toFixed(2)}]`;
-                      if (tieneSaldo) label += ` [A favor: +$${s.saldoAFavorTotalUsd.toFixed(2)}]`;
-                      return (
-                        <option key={cl.id} value={cl.id}>
-                          {label}
-                        </option>
-                      );
-                    })}
-                  </select>
-                </div>
-              ) : (
-                <div className="rounded-2xl border border-gray-200/80 bg-gray-50/70 p-3.5">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs text-gray-500 uppercase font-semibold">Cliente seleccionado</p>
-                      <h4 className="font-bold text-sm text-gray-900">
-                        {modalAbono.cliente.nombre_estudiante}
-                      </h4>
-                      <p className="text-xs text-indigo-700 font-medium">
-                        {modalAbono.cliente.grado_seccion || 'Personal / General'}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setModalAbono((prev) => ({ ...prev, cliente: null }))}
-                      className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 underline"
-                    >
-                      Cambiar
-                    </button>
-                  </div>
-
-                  <div className="mt-2.5 pt-2 border-t border-gray-200/60 grid grid-cols-2 gap-2 text-xs">
-                    <div>
-                      <span className="text-gray-500 text-[11px]">Deuda Actual:</span>
-                      <p className="font-bold text-gray-900">
-                        {formatUSD(saldosClientes[modalAbono.cliente.id]?.deudaTotalUsd || 0)}
-                      </p>
-                    </div>
-                    <div>
-                      <span className="text-gray-500 text-[11px]">Saldo a Favor Actual:</span>
-                      <p className="font-bold text-emerald-700">
-                        +{formatUSD(saldosClientes[modalAbono.cliente.id]?.saldoAFavorTotalUsd || 0)}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Monto a Abonar */}
+              {/* Selección del Cliente con ModernClientSelect */}
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">
-                  Monto a Abonar (en $ USD) *
+                <label className="block text-xs font-semibold text-gray-700 dark:text-slate-300 mb-1.5">
+                  Seleccionar Cliente o Estudiante *
                 </label>
-                <div className="relative">
-                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-bold text-gray-400">
-                    $
-                  </span>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={modalAbono.montoUsd}
-                    onChange={(e) =>
-                      setModalAbono((prev) => ({ ...prev, montoUsd: e.target.value, error: null }))
-                    }
-                    placeholder="0.00 (ej: 5.00 o 10.00)"
-                    className="w-full rounded-2xl border border-gray-200 bg-white py-2.5 pl-8 pr-3 text-sm font-bold text-gray-900 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 outline-none"
-                    autoFocus
-                  />
-                </div>
-                {modalAbono.montoUsd && parseFloat(modalAbono.montoUsd.replace(',', '.')) > 0 && (
-                  <p className="mt-1 text-[11px] font-mono text-gray-500">
-                    Equivalente en Bs: {formatBs(calcularConversionBs(parseFloat(modalAbono.montoUsd.replace(',', '.')), tasaBcv))} (Tasa BCV {formatBs(tasaBcv)})
-                  </p>
-                )}
+                <ModernClientSelect
+                  clientes={todosLosClientes}
+                  clienteSeleccionado={modalAbono.cliente}
+                  onSeleccionarCliente={(c) =>
+                    setModalAbono((prev) => ({ ...prev, cliente: c, error: null }))
+                  }
+                  saldosClientes={saldosClientes}
+                  placeholder="-- Elige un cliente para abonar --"
+                />
               </div>
 
-              {/* Selector de Método de Pago */}
+              {/* Selector de Método de Pago con Autodetección de Divisa */}
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">
-                  Método de Pago Entregado *
-                </label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-semibold text-gray-700 dark:text-slate-300">
+                    Método de Pago Entregado *
+                  </label>
+                  <span className="text-[10px] text-gray-500 dark:text-slate-400 font-mono">
+                    Tasa: {formatBs(tasaBcv)}
+                  </span>
+                </div>
                 <div className="grid grid-cols-2 gap-2">
                   {[
-                    { id: 'efectivo_usd', label: 'Efectivo USD ($)' },
-                    { id: 'pago_movil', label: 'Pago Móvil (Bs)' },
-                    { id: 'zelle', label: 'Zelle ($)' },
-                    { id: 'punto_debito', label: 'Punto de Venta (Bs)' },
-                  ].map((met) => (
-                    <button
-                      key={met.id}
-                      type="button"
-                      onClick={() => setModalAbono((prev) => ({ ...prev, metodoPago: met.id }))}
-                      className={`p-2.5 rounded-xl border text-xs font-bold text-left transition ${
-                        modalAbono.metodoPago === met.id
-                          ? 'border-indigo-600 bg-indigo-50/70 text-indigo-950 ring-1 ring-indigo-600'
-                          : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
-                      }`}
-                    >
-                      {met.label}
-                    </button>
-                  ))}
+                    { id: 'efectivo_usd', label: 'Efectivo USD', sub: 'Cobro en $', moneda: 'USD', icono: DollarSign },
+                    { id: 'pago_movil', label: 'Pago Móvil', sub: 'Bolívares (Bs)', moneda: 'Bs', icono: Smartphone },
+                    { id: 'punto_debito', label: 'Punto de Venta', sub: 'Tarjeta Débito (Bs)', moneda: 'Bs', icono: CreditCard },
+                    { id: 'zelle', label: 'Zelle', sub: 'Transferencia $', moneda: 'USD', icono: Wallet },
+                  ].map((met) => {
+                    const seleccionado = modalAbono.metodoPago === met.id;
+                    const Icono = met.icono;
+                    return (
+                      <button
+                        key={met.id}
+                        type="button"
+                        onClick={() => {
+                          setModalAbono((prev) => {
+                            let nuevoBs = prev.montoBs;
+                            let nuevoUsd = prev.montoUsd;
+                            if (met.moneda === 'Bs' && (!nuevoBs || nuevoBs === '0') && nuevoUsd) {
+                              const val = parseFloat(nuevoUsd.replace(',', '.'));
+                              if (val > 0) nuevoBs = (val * tasaBcv).toFixed(2);
+                            } else if (met.moneda === 'USD' && (!nuevoUsd || nuevoUsd === '0') && nuevoBs) {
+                              const val = parseFloat(nuevoBs.replace(',', '.'));
+                              if (val > 0) nuevoUsd = (val / tasaBcv).toFixed(2);
+                            }
+                            return { ...prev, metodoPago: met.id, montoBs: nuevoBs, montoUsd: nuevoUsd, error: null };
+                          });
+                        }}
+                        className={`flex items-center gap-2 p-2.5 rounded-2xl border text-left transition-all ${
+                          seleccionado
+                            ? 'border-indigo-600 bg-indigo-50/80 dark:bg-indigo-950/40 text-indigo-950 dark:text-indigo-200 ring-2 ring-indigo-500/20 shadow-xs'
+                            : 'border-gray-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 text-gray-700 dark:text-slate-300 hover:border-gray-300 dark:hover:border-slate-700 hover:bg-gray-50/50'
+                        }`}
+                      >
+                        <div
+                          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${
+                            seleccionado
+                              ? 'bg-indigo-600 text-white'
+                              : met.moneda === 'Bs'
+                              ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400'
+                              : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400'
+                          }`}
+                        >
+                          <Icono className="h-4 w-4" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold truncate">{met.label}</span>
+                            <span
+                              className={`text-[9px] font-bold px-1.5 py-0.2 rounded-full uppercase ${
+                                met.moneda === 'Bs'
+                                  ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300'
+                                  : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300'
+                              }`}
+                            >
+                              {met.moneda}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-gray-500 dark:text-slate-400 truncate">{met.sub}</p>
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
-              {/* Vista Previa de Liquidación Prioritaria de Negocio */}
+              {/* Inputs de Monto Bimoneda con Validación Numérica Estricta */}
               {(() => {
-                const montoNum = parseFloat(modalAbono.montoUsd.replace(',', '.')) || 0;
-                if (montoNum <= 0 || !modalAbono.cliente) return null;
-                const deudaActual = saldosClientes[modalAbono.cliente.id]?.deudaTotalUsd || 0;
+                const esMetodoBs = modalAbono.metodoPago === 'pago_movil' || modalAbono.metodoPago === 'punto_debito';
 
-                if (deudaActual > 0) {
-                  if (montoNum >= deudaActual) {
-                    const sobrante = Math.round((montoNum - deudaActual) * 100) / 100;
-                    return (
-                      <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-3 text-xs text-emerald-900 space-y-1">
-                        <p className="font-bold flex items-center gap-1.5 text-emerald-800">
-                          <Check className="h-4 w-4 text-emerald-600" />
-                          Regla de Liquidación Prioritaria:
-                        </p>
-                        <p className="text-[11px]">
-                          ✓ Se liquidarán prioritariamente los <strong>{formatUSD(deudaActual)}</strong> de deuda pendiente.
-                        </p>
-                        {sobrante > 0 ? (
-                          <p className="text-[11px] font-semibold text-emerald-800">
-                            ✓ El excedente de <strong>+{formatUSD(sobrante)}</strong> se acreditará automáticamente como <strong>Saldo a Favor</strong> disponible.
-                          </p>
-                        ) : (
-                          <p className="text-[11px]">
-                            ✓ La cuenta quedará 100% solvente ($0.00).
-                          </p>
-                        )}
-                      </div>
-                    );
-                  } else {
-                    const restante = Math.round((deudaActual - montoNum) * 100) / 100;
-                    return (
-                      <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-3 text-xs text-amber-900 space-y-1">
-                        <p className="font-bold text-amber-800">Abono Parcial a Deuda:</p>
-                        <p className="text-[11px]">
-                          ✓ Se abonarán los <strong>{formatUSD(montoNum)}</strong> a la deuda pendiente.
-                        </p>
-                        <p className="text-[11px]">
-                          ✓ La deuda restante será de <strong>{formatUSD(restante)}</strong>.
-                        </p>
-                      </div>
-                    );
-                  }
-                } else {
-                  return (
-                    <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-3 text-xs text-emerald-900 space-y-1">
-                      <p className="font-bold flex items-center gap-1.5 text-emerald-800">
-                        <Sparkles className="h-4 w-4 text-emerald-600" />
-                        Abono sin Deuda Previa:
-                      </p>
-                      <p className="text-[11px]">
-                        ✓ El cliente no posee deuda pendiente. El monto total de <strong>+{formatUSD(montoNum)}</strong> se guardará directamente como <strong>Saldo a Favor</strong> disponible.
-                      </p>
+                return (
+                  <div className="rounded-2xl border border-gray-200/90 dark:border-slate-800 bg-gray-50/60 dark:bg-slate-900/60 p-3 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-gray-800 dark:text-slate-200">
+                        {esMetodoBs ? 'Monto a Abonar (Bolívares / Dólares)' : 'Monto a Abonar (Dólares / Bolívares)'}
+                      </label>
+                      <span className="text-[10px] font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 px-2 py-0.5 rounded-full">
+                        {esMetodoBs ? '🇻🇪 Entrada en Bs. detectada' : '💵 Entrada en USD'}
+                      </span>
                     </div>
-                  );
-                }
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      {/* Campo Bolívares (Bs.) */}
+                      <div>
+                        <span className="text-[11px] font-semibold text-gray-600 dark:text-slate-400 block mb-1">
+                          Monto en Bolívares (Bs.)
+                        </span>
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-amber-600 dark:text-amber-400">
+                            Bs.
+                          </span>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={modalAbono.montoBs}
+                            onKeyDown={(e) => handleDecimalKeyDown(e, modalAbono.montoBs)}
+                            onChange={(e) => {
+                              const sanitized = sanitizeDecimalInput(e.target.value);
+                              const numBs = parseFloat(sanitized);
+                              const usd = sanitized && !isNaN(numBs) && numBs > 0 && tasaBcv > 0
+                                ? (numBs / tasaBcv).toFixed(2)
+                                : '';
+                              setModalAbono((prev) => ({
+                                ...prev,
+                                montoBs: sanitized,
+                                montoUsd: usd,
+                                error: null,
+                              }));
+                            }}
+                            placeholder="0,00"
+                            className="w-full rounded-xl border border-gray-200 dark:border-slate-800 bg-white dark:bg-[#111726] py-2 pl-9 pr-3 text-xs font-mono font-bold text-gray-900 dark:text-slate-100 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 dark:focus:ring-indigo-950 outline-none"
+                            autoFocus={esMetodoBs}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Campo Dólares ($ USD) */}
+                      <div>
+                        <span className="text-[11px] font-semibold text-gray-600 dark:text-slate-400 block mb-1">
+                          Equivalente en Dólares ($ USD)
+                        </span>
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                            $
+                          </span>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={modalAbono.montoUsd}
+                            onKeyDown={(e) => handleDecimalKeyDown(e, modalAbono.montoUsd)}
+                            onChange={(e) => {
+                              const sanitized = sanitizeDecimalInput(e.target.value);
+                              const numUsd = parseFloat(sanitized);
+                              const bs = sanitized && !isNaN(numUsd) && numUsd > 0 && tasaBcv > 0
+                                ? (numUsd * tasaBcv).toFixed(2)
+                                : '';
+                              setModalAbono((prev) => ({
+                                ...prev,
+                                montoUsd: sanitized,
+                                montoBs: bs,
+                                error: null,
+                              }));
+                            }}
+                            placeholder="0.00"
+                            className="w-full rounded-xl border border-gray-200 dark:border-slate-800 bg-white dark:bg-[#111726] py-2 pl-7 pr-3 text-xs font-mono font-bold text-gray-900 dark:text-slate-100 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 dark:focus:ring-indigo-950 outline-none"
+                            autoFocus={!esMetodoBs}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Desglose Multimoneda Transparente y Validación de Reglas Financieras */}
+              {(() => {
+                const montoNumUsd = parseFloat(modalAbono.montoUsd.replace(',', '.')) || 0;
+                const montoNumBs = parseFloat(modalAbono.montoBs.replace(',', '.')) || (montoNumUsd > 0 ? calcularConversionBs(montoNumUsd, tasaBcv) : 0);
+                if (montoNumUsd <= 0 || !modalAbono.cliente) return null;
+
+                const deudaActualUsd = saldosClientes[modalAbono.cliente.id]?.deudaTotalUsd || 0;
+                const deudaActualBs = calcularConversionBs(deudaActualUsd, tasaBcv);
+
+                return (
+                  <div className="rounded-2xl border border-indigo-200/90 dark:border-indigo-900/60 bg-gradient-to-br from-indigo-50/70 via-white to-blue-50/40 dark:from-slate-900 dark:via-[#111726] dark:to-slate-900 p-3.5 space-y-2.5 text-xs shadow-xs">
+                    <div className="flex items-center justify-between border-b border-indigo-100/80 dark:border-indigo-950 pb-2">
+                      <span className="font-bold text-indigo-900 dark:text-indigo-300 flex items-center gap-1.5">
+                        <Sparkles className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                        Desglose Multimoneda de la Transacción:
+                      </span>
+                      <span className="font-mono text-[10px] text-gray-500 dark:text-slate-400">
+                        1 USD = {formatBs(tasaBcv)}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <span className="text-[10px] text-gray-500 dark:text-slate-400 block">Total en USD:</span>
+                        <span className="font-mono font-black text-sm text-gray-900 dark:text-slate-100">
+                          {formatUSD(montoNumUsd)}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-gray-500 dark:text-slate-400 block">Total en Bolívares:</span>
+                        <span className="font-mono font-black text-sm text-amber-700 dark:text-amber-400">
+                          {formatBs(montoNumBs)}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Explicación de Liquidación */}
+                    <div className="pt-2 border-t border-indigo-100/60 dark:border-indigo-950/60 space-y-1">
+                      {deudaActualUsd > 0 ? (
+                        montoNumUsd >= deudaActualUsd ? (
+                          <>
+                            <p className="text-[11px] text-emerald-800 dark:text-emerald-300 font-semibold flex items-center gap-1">
+                              <Check className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                              Se liquida el 100% de la deuda: {formatUSD(deudaActualUsd)} ({formatBs(deudaActualBs)}).
+                            </p>
+                            {montoNumUsd > deudaActualUsd ? (
+                              <p className="text-[11px] text-emerald-700 dark:text-emerald-400 font-bold flex items-center gap-1">
+                                <PiggyBank className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                                Sobrante a Saldo a Favor: +{formatUSD(Math.round((montoNumUsd - deudaActualUsd) * 100) / 100)} (+{formatBs(calcularConversionBs(montoNumUsd - deudaActualUsd, tasaBcv))}).
+                              </p>
+                            ) : (
+                              <p className="text-[11px] text-gray-600 dark:text-slate-400">
+                                La cuenta quedará totalmente solvente ($0.00 / Bs. 0,00).
+                              </p>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            <p className="text-[11px] text-amber-800 dark:text-amber-300 font-semibold">
+                              Abono parcial a deuda: Se descuentan {formatUSD(montoNumUsd)} ({formatBs(montoNumBs)}).
+                            </p>
+                            <p className="text-[11px] text-gray-600 dark:text-slate-400">
+                              Deuda restante: {formatUSD(Math.round((deudaActualUsd - montoNumUsd) * 100) / 100)} ({formatBs(calcularConversionBs(deudaActualUsd - montoNumUsd, tasaBcv))}).
+                            </p>
+                          </>
+                        )
+                      ) : (
+                        <p className="text-[11px] text-emerald-800 dark:text-emerald-300 font-semibold flex items-center gap-1">
+                          <Check className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                          Sin deuda previa: El 100% (+{formatUSD(montoNumUsd)} / +{formatBs(montoNumBs)}) se acreditará como Saldo a Favor disponible.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                );
               })()}
 
               {/* Botones de acción */}

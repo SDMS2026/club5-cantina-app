@@ -458,3 +458,139 @@ html.dark .border-amber-300 {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-y: contain;
 }
+
+/* ========================================================
+ * ANIMACIONES FLUIDAS EN MODALES A 60 FPS (HARDWARE ACCELERATED)
+ * Fade-In + Scale-Up suave con cubic-bezier(0.16, 1, 0.3, 1)
+ * Sin alterar propiedades de layout (height, width, top, margin)
+ * ======================================================== */
+
+@keyframes modalDesktopEnter {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.95);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@keyframes modalDesktopExit {
+  0% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.95);
+  }
+}
+
+@keyframes bottomSheetEnter {
+  0% {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes bottomSheetExit {
+  0% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+}
+
+@keyframes modalOverlayEnter {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes modalOverlayExit {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes popoverEnter {
+  0% {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes popoverExit {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+/* Diálogos centrados en Desktop (≥ 640px) */
+@media screen and (min-width: 640px) {
+  [data-radix-dialog-content][data-state="open"] {
+    animation: modalDesktopEnter 220ms cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+    will-change: transform, opacity !important;
+  }
+  [data-radix-dialog-content][data-state="closed"] {
+    animation: modalDesktopExit 160ms cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+    will-change: transform, opacity !important;
+  }
+}
+
+/* Bottom sheets en Móviles (< 640px) */
+@media screen and (max-width: 639px) {
+  [data-radix-dialog-content][data-state="open"] {
+    animation: bottomSheetEnter 260ms cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+    will-change: transform, opacity !important;
+  }
+  [data-radix-dialog-content][data-state="closed"] {
+    animation: bottomSheetExit 180ms cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+    will-change: transform, opacity !important;
+  }
+}
+
+/* Fondos Overlay */
+[data-radix-dialog-overlay][data-state="open"] {
+  animation: modalOverlayEnter 200ms cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+  will-change: opacity !important;
+}
+
+[data-radix-dialog-overlay][data-state="closed"] {
+  animation: modalOverlayExit 160ms cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+  will-change: opacity !important;
+}
+
+/* Popovers de Radix */
+[data-radix-popover-content][data-state="open"] {
+  animation: popoverEnter 180ms cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+  will-change: transform, opacity !important;
+}
+
+[data-radix-popover-content][data-state="closed"] {
+  animation: popoverExit 140ms cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+  will-change: transform, opacity !important;
+}

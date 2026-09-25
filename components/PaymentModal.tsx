@@ -20,7 +20,14 @@ import {
 } from 'lucide-react';
 import { Cliente, ItemCarrito, MetodoPagoId, MetodoPagoOpcion } from '@/types/pos';
 import { supabase } from '@/lib/supabaseClient';
-import { formatUSD, formatBs, calcularConversionBs } from '@/lib/utils';
+import {
+  formatUSD,
+  formatBs,
+  calcularConversionBs,
+  calcularConversionUSD,
+  sanitizeDecimalInput,
+  handleDecimalKeyDown,
+} from '@/lib/utils';
 import { useModalDragScroll } from '@/lib/useModalDragScroll';
 import { obtenerSaldoCliente, procesarAbonoCliente, ResumenSaldoCliente } from '@/lib/clientBalance';
 
@@ -129,16 +136,44 @@ export function PaymentModal({
     }
   }, [abierto, cliente]);
 
+  // Moneda activa de la calculadora (USD o Bs) con autodetección inteligente
+  const [monedaCalculadora, setMonedaCalculadora] = useState<'USD' | 'Bs'>('USD');
+
   useEffect(() => {
     if (abierto && metodoInicial) {
       setMetodoSeleccionado(metodoInicial);
     }
   }, [abierto, metodoInicial]);
 
-  // Vuelto calculado
+  // Autodetección automática de divisa según el método de pago seleccionado
+  useEffect(() => {
+    if (metodoSeleccionado === 'pago_movil' || metodoSeleccionado === 'punto_debito') {
+      setMonedaCalculadora('Bs');
+      setMontoEntregadoInput('');
+    } else if (metodoSeleccionado === 'efectivo_usd') {
+      setMonedaCalculadora('USD');
+      setMontoEntregadoInput('');
+    }
+  }, [metodoSeleccionado]);
+
+  // Vuelto y desglose dinámico según divisa ingresada
   const montoEntregadoNum = parseFloat(montoEntregadoInput.replace(',', '.')) || 0;
-  const vueltoUsd = montoEntregadoNum > totalUsd ? Math.round((montoEntregadoNum - totalUsd) * 100) / 100 : 0;
-  const vueltoBs = vueltoUsd > 0 ? calcularConversionBs(vueltoUsd, tasaBcv) : 0;
+  let vueltoUsd = 0;
+  let vueltoBs = 0;
+  let montoEntregadoUsdEquiv = 0;
+  let montoEntregadoBsEquiv = 0;
+
+  if (monedaCalculadora === 'Bs') {
+    montoEntregadoBsEquiv = montoEntregadoNum;
+    montoEntregadoUsdEquiv = montoEntregadoNum > 0 && tasaBcv > 0 ? Math.round((montoEntregadoNum / tasaBcv) * 100) / 100 : 0;
+    vueltoBs = montoEntregadoNum > totalBs ? Math.round((montoEntregadoNum - totalBs) * 100) / 100 : 0;
+    vueltoUsd = vueltoBs > 0 && tasaBcv > 0 ? Math.round((vueltoBs / tasaBcv) * 100) / 100 : 0;
+  } else {
+    montoEntregadoUsdEquiv = montoEntregadoNum;
+    montoEntregadoBsEquiv = montoEntregadoNum > 0 ? calcularConversionBs(montoEntregadoNum, tasaBcv) : 0;
+    vueltoUsd = montoEntregadoNum > totalUsd ? Math.round((montoEntregadoNum - totalUsd) * 100) / 100 : 0;
+    vueltoBs = vueltoUsd > 0 ? calcularConversionBs(vueltoUsd, tasaBcv) : 0;
+  }
 
   // Manejo de confirmación de venta
   const handleConfirmarVenta = async () => {
@@ -583,79 +618,174 @@ export function PaymentModal({
                 </div>
               )}
 
-              {/* Calculadora de Vuelto para Efectivo USD o Pago Móvil */}
-              {(metodoSeleccionado === 'efectivo_usd' || metodoSeleccionado === 'pago_movil') && (
-                <div className="mt-3 rounded-2xl border border-gray-200/80 bg-gray-50/80 p-3 text-xs">
-                  <div className="flex items-center justify-between mb-2">
-                    <label className="font-bold text-gray-700 flex items-center gap-1.5">
-                      <DollarSign className="h-3.5 w-3.5 text-gray-500" />
+              {/* Calculadora de Vuelto Multimoneda (Efectivo USD, Pago Móvil o Punto) */}
+              {(metodoSeleccionado === 'efectivo_usd' ||
+                metodoSeleccionado === 'pago_movil' ||
+                metodoSeleccionado === 'punto_debito') && (
+                <div className="mt-3 rounded-2xl border border-gray-200/90 dark:border-slate-800 bg-gray-50/80 dark:bg-slate-900/60 p-3 text-xs space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <label className="font-bold text-gray-800 dark:text-slate-200 flex items-center gap-1.5">
+                      <DollarSign className="h-3.5 w-3.5 text-gray-500 dark:text-slate-400" />
                       Calculadora de Vuelto (Opcional):
                     </label>
-                    <span className="text-[11px] text-gray-500">
-                      Total a pagar: <strong>{formatUSD(totalUsd)}</strong>
-                    </span>
+
+                    {/* Selector de Divisa de Entrada */}
+                    <div className="flex items-center rounded-xl bg-gray-200/80 dark:bg-slate-800 p-0.5 text-[11px] font-bold">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMonedaCalculadora('Bs');
+                          setMontoEntregadoInput('');
+                        }}
+                        className={`px-2 py-0.5 rounded-lg transition ${
+                          monedaCalculadora === 'Bs'
+                            ? 'bg-white dark:bg-amber-950 text-amber-800 dark:text-amber-300 shadow-2xs'
+                            : 'text-gray-600 dark:text-slate-400 hover:text-gray-900'
+                        }`}
+                      >
+                        🇻🇪 Bs.
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMonedaCalculadora('USD');
+                          setMontoEntregadoInput('');
+                        }}
+                        className={`px-2 py-0.5 rounded-lg transition ${
+                          monedaCalculadora === 'USD'
+                            ? 'bg-white dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 shadow-2xs'
+                            : 'text-gray-600 dark:text-slate-400 hover:text-gray-900'
+                        }`}
+                      >
+                        💵 USD
+                      </button>
+                    </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center justify-between text-[11px] text-gray-500 dark:text-slate-400">
+                    <span>
+                      Total de la orden:{' '}
+                      <strong className="text-gray-900 dark:text-slate-100 font-mono">
+                        {formatUSD(totalUsd)}
+                      </strong>{' '}
+                      ({formatBs(totalBs)})
+                    </span>
+                    <span className="font-mono text-[10px]">Tasa: {formatBs(tasaBcv)}</span>
+                  </div>
+
+                  <div className="relative">
+                    <span
+                      className={`absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold ${
+                        monedaCalculadora === 'Bs'
+                          ? 'text-amber-600 dark:text-amber-400'
+                          : 'text-emerald-600 dark:text-emerald-400'
+                      }`}
+                    >
+                      {monedaCalculadora === 'Bs' ? 'Bs.' : '$'}
+                    </span>
                     <input
                       type="text"
                       inputMode="decimal"
                       value={montoEntregadoInput}
-                      onChange={(e) => setMontoEntregadoInput(e.target.value)}
-                      placeholder="Monto entregado en $ (ej: 5.00)"
-                      className="flex-1 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-800 placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none"
+                      onKeyDown={(e) => handleDecimalKeyDown(e, montoEntregadoInput)}
+                      onChange={(e) => setMontoEntregadoInput(sanitizeDecimalInput(e.target.value))}
+                      placeholder={
+                        monedaCalculadora === 'Bs'
+                          ? `Monto entregado en Bs. (ej: ${Math.ceil(totalBs)})`
+                          : `Monto entregado en $ (ej: ${Math.ceil(totalUsd)})`
+                      }
+                      className="w-full rounded-xl border border-gray-200 dark:border-slate-800 bg-white dark:bg-[#111726] py-2 pl-9 pr-8 text-xs font-mono font-bold text-gray-900 dark:text-slate-100 placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none"
                     />
                     {montoEntregadoInput && (
                       <button
                         type="button"
                         onClick={() => setMontoEntregadoInput('')}
-                        className="rounded-lg p-1.5 text-gray-400 hover:text-gray-600 transition"
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-lg p-1 text-gray-400 hover:text-gray-600 transition"
                       >
-                        <X className="h-3.5 w-3.5" />
+                        <X className="h-3 w-3" />
                       </button>
                     )}
                   </div>
 
-                  {/* Resultado del Vuelto */}
-                  {vueltoUsd > 0 && (
-                    <div className="mt-2.5 rounded-xl bg-white border border-emerald-200 p-2.5 space-y-2">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="font-semibold text-gray-600">Vuelto o cambio:</span>
-                        <div className="text-right">
-                          <span className="font-black text-emerald-700 text-sm">
-                            {formatUSD(vueltoUsd)}
-                          </span>
-                          <span className="text-[10px] text-gray-500 ml-1.5 font-mono font-bold">
-                            ({formatBs(vueltoBs)})
+                  {/* Equivalente en tiempo real */}
+                  {montoEntregadoNum > 0 && (
+                    <p className="text-[11px] font-mono text-gray-500 dark:text-slate-400">
+                      {monedaCalculadora === 'Bs' ? (
+                        <>
+                          Equivalente en divisas:{' '}
+                          <strong className="text-gray-800 dark:text-slate-200">
+                            {formatUSD(montoEntregadoUsdEquiv)}
+                          </strong>
+                        </>
+                      ) : (
+                        <>
+                          Equivalente en bolívares:{' '}
+                          <strong className="text-gray-800 dark:text-slate-200">
+                            {formatBs(montoEntregadoBsEquiv)}
+                          </strong>
+                        </>
+                      )}
+                    </p>
+                  )}
+
+                  {/* Desglose Multimoneda del Vuelto / Cambio */}
+                  {montoEntregadoNum > 0 && (
+                    <div className="mt-2 rounded-xl bg-white dark:bg-[#111726] border border-gray-200/90 dark:border-slate-800 p-2.5 space-y-2">
+                      {vueltoUsd > 0 ? (
+                        <>
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="font-semibold text-gray-600 dark:text-slate-400">
+                              Vuelto o cambio a entregar:
+                            </span>
+                            <div className="text-right">
+                              <span className="font-mono font-black text-emerald-700 dark:text-emerald-400 text-sm">
+                                {formatUSD(vueltoUsd)}
+                              </span>
+                              <span className="text-[10px] text-gray-500 dark:text-slate-400 ml-1.5 font-mono font-bold">
+                                ({formatBs(vueltoBs)})
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Botón interactivo para guardar vuelto como saldo a favor */}
+                          {cliente ? (
+                            <button
+                              type="button"
+                              onClick={() => setGuardarVueltoComoSaldo(!guardarVueltoComoSaldo)}
+                              className={`w-full flex items-center justify-between rounded-xl px-2.5 py-2 text-xs font-bold transition border ${
+                                guardarVueltoComoSaldo
+                                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
+                                  : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900 hover:bg-emerald-100/70'
+                              }`}
+                            >
+                              <span className="flex items-center gap-1.5">
+                                <PiggyBank className="h-4 w-4 shrink-0" />
+                                {guardarVueltoComoSaldo
+                                  ? '✓ Guardando vuelto como saldo a favor'
+                                  : `Guardar vuelto (${formatUSD(vueltoUsd)}) como Saldo a Favor`}
+                              </span>
+                              <span className="text-[10px] uppercase tracking-wider underline">
+                                {guardarVueltoComoSaldo ? 'Cancelar' : 'Aplicar'}
+                              </span>
+                            </button>
+                          ) : (
+                            <p className="text-[10px] text-gray-500 dark:text-slate-400 italic">
+                              (Para guardar el vuelto como saldo a favor, selecciona un cliente en la pantalla principal).
+                            </p>
+                          )}
+                        </>
+                      ) : montoEntregadoUsdEquiv < totalUsd ? (
+                        <div className="flex items-center justify-between text-xs text-amber-700 dark:text-amber-400">
+                          <span className="font-medium">Monto pendiente por cobrar:</span>
+                          <span className="font-mono font-bold">
+                            {formatUSD(Math.max(0, Math.round((totalUsd - montoEntregadoUsdEquiv) * 100) / 100))} (
+                            {formatBs(Math.max(0, Math.round((totalBs - montoEntregadoBsEquiv) * 100) / 100))})
                           </span>
                         </div>
-                      </div>
-
-                      {/* Botón interactivo para guardar vuelto como saldo a favor */}
-                      {cliente ? (
-                        <button
-                          type="button"
-                          onClick={() => setGuardarVueltoComoSaldo(!guardarVueltoComoSaldo)}
-                          className={`w-full flex items-center justify-between rounded-xl px-2.5 py-2 text-xs font-bold transition border ${
-                            guardarVueltoComoSaldo
-                              ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
-                              : 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100/70'
-                          }`}
-                        >
-                          <span className="flex items-center gap-1.5">
-                            <PiggyBank className="h-4 w-4 shrink-0" />
-                            {guardarVueltoComoSaldo
-                              ? '✓ Guardando vuelto como saldo a favor'
-                              : `Guardar vuelto (${formatUSD(vueltoUsd)}) como Saldo a Favor`}
-                          </span>
-                          <span className="text-[10px] uppercase tracking-wider underline">
-                            {guardarVueltoComoSaldo ? 'Cancelar' : 'Aplicar'}
-                          </span>
-                        </button>
                       ) : (
-                        <p className="text-[10px] text-gray-500 italic">
-                          (Para guardar el vuelto como saldo a favor, selecciona un cliente en la pantalla principal).
-                        </p>
+                        <div className="text-center text-xs text-emerald-700 dark:text-emerald-400 font-bold py-1">
+                          ✓ Pago exacto recibido. Sin vuelto pendiente ($0.00 / Bs. 0,00).
+                        </div>
                       )}
                     </div>
                   )}

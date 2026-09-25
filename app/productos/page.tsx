@@ -515,41 +515,6 @@ export default function ProductosPage() {
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
-            {/* Mini Burbuja Tasa BCV en Móviles (< sm) */}
-            <button
-              type="button"
-              onClick={cargarTasa}
-              disabled={cargandoTasa}
-              title="Actualizar tasa oficial BCV"
-              className="flex sm:hidden items-center gap-1 rounded-full border border-amber-200/90 bg-amber-50/90 px-2 py-1 text-[11px] font-mono font-bold text-amber-900 shadow-2xs active:scale-95 transition"
-            >
-              <TrendingUp className="h-3 w-3 text-amber-700 shrink-0" />
-              <span>{tasaBcv > 0 ? formatBs(tasaBcv) : '...'}</span>
-              {cargandoTasa && <RefreshCw className="h-2.5 w-2.5 animate-spin text-amber-700" />}
-            </button>
-
-            {/* Tasa BCV Completa en Pantallas Mayores (≥ sm) */}
-            <div className="hidden sm:flex items-center gap-2 rounded-2xl border border-amber-200/80 bg-gradient-to-r from-amber-50/70 to-yellow-50/60 px-3 py-1.5 shadow-xs">
-              <TrendingUp className="h-4 w-4 text-amber-700 shrink-0" />
-              <div className="flex flex-col">
-                <span className="text-[10px] font-semibold uppercase text-amber-800/80 hidden xs:inline">
-                  Tasa BCV
-                </span>
-                <span className="font-mono text-xs font-bold text-gray-900 whitespace-nowrap">
-                  {tasaBcv > 0 ? formatBs(tasaBcv) : '...'}
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={cargarTasa}
-                disabled={cargandoTasa}
-                title="Actualizar tasa"
-                className="ml-1 rounded-lg p-1 text-amber-800 hover:bg-amber-100 transition"
-              >
-                <RefreshCw className={`h-3 w-3 ${cargandoTasa ? 'animate-spin' : ''}`} />
-              </button>
-            </div>
-
             {/* Centro de Notificaciones y Alertas */}
             <NotificationBell />
 

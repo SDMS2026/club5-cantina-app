@@ -74,69 +74,8 @@ export function Header({
           </Link>
         </div>
 
-        {/* Lado Derecho: Badge de Tasa BCV + Campana de Notificaciones + Status */}
+        {/* Lado Derecho: Campana de Notificaciones + Status */}
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-          {/* Mini Burbuja Tasa BCV en Móviles (< sm) */}
-          <button
-            type="button"
-            onClick={onRefrescarTasa}
-            disabled={cargandoTasa}
-            title={
-              ultimaActualizacion
-                ? `Tasa BCV: ${formatBs(tasaBcv)} (Click para actualizar)`
-                : 'Actualizar tasa oficial BCV'
-            }
-            className="flex sm:hidden items-center gap-1 rounded-full border border-amber-200/90 dark:border-amber-900/50 bg-amber-50/90 dark:bg-amber-950/40 px-2 py-1 text-[11px] font-mono font-bold text-amber-900 dark:text-amber-300 shadow-2xs active:scale-95 transition"
-          >
-            <TrendingUp className="h-3 w-3 text-amber-700 dark:text-amber-400 shrink-0" />
-            <span>{tasaBcv > 0 ? formatBs(tasaBcv) : '...'}</span>
-            {cargandoTasa && <RefreshCw className="h-2.5 w-2.5 animate-spin text-amber-700 dark:text-amber-400" />}
-          </button>
-
-          {/* Badge Tasa BCV Completo en Pantallas Mayores (≥ sm) */}
-          <div className="hidden sm:flex items-center gap-2.5 rounded-2xl border border-amber-200/80 dark:border-amber-900/40 bg-gradient-to-r from-amber-50/80 via-orange-50/50 to-yellow-50/70 dark:from-amber-950/30 dark:via-orange-950/20 dark:to-yellow-950/20 px-3.5 py-1.5 shadow-2xs transition hover:border-amber-300 dark:hover:border-amber-700">
-            <div className="flex h-7 w-7 items-center justify-center rounded-xl bg-amber-500/15 dark:bg-amber-500/25 text-amber-700 dark:text-amber-400 shrink-0">
-              <TrendingUp className="h-4 w-4" />
-            </div>
-            <div className="flex flex-col">
-              <div className="flex items-center gap-1">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-800/80 dark:text-amber-400">
-                  Tasa BCV
-                </span>
-                <span className="flex h-1.5 w-1.5 rounded-full bg-emerald-500 ring-2 ring-emerald-200 dark:ring-emerald-900" />
-              </div>
-              <span
-                className="font-mono text-xs sm:text-sm font-bold text-gray-900 dark:text-amber-100 whitespace-nowrap"
-                suppressHydrationWarning
-              >
-                {tasaBcv > 0 ? (
-                  <>
-                    <span className="hidden md:inline">1 USD = </span>
-                    {formatBs(tasaBcv)}
-                  </>
-                ) : (
-                  'Cargando...'
-                )}
-              </span>
-            </div>
-
-            <button
-              type="button"
-              onClick={onRefrescarTasa}
-              disabled={cargandoTasa}
-              title={
-                ultimaActualizacion
-                  ? `Sincronizado: ${ultimaActualizacion.toLocaleTimeString()}`
-                  : 'Actualizar tasa oficial BCV'
-              }
-              className="ml-1 rounded-lg p-1 text-amber-800/70 dark:text-amber-400 hover:bg-amber-100/60 dark:hover:bg-amber-900/40 hover:text-amber-900 dark:hover:text-amber-200 transition disabled:opacity-40"
-            >
-              <RefreshCw
-                className={`h-3.5 w-3.5 ${cargandoTasa ? 'animate-spin' : ''}`}
-              />
-            </button>
-          </div>
-
           {/* Botón de Notificaciones Globales */}
           <NotificationBell />
 
