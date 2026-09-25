@@ -17,6 +17,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useModalDragScroll } from '@/lib/useModalDragScroll';
 
 export interface PedidoVozResultado {
+  accion?: 'orden_pos' | 'abono_saldo_favor' | 'guardar_vuelto';
+  monto_abono_usd?: number;
+  metodo_pago_sugerido?: 'efectivo_usd' | 'pago_movil' | 'punto_debito' | 'pendiente' | 'saldo_favor';
   cliente_id: string | null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   cliente_creado?: any;
@@ -26,6 +29,11 @@ export interface PedidoVozResultado {
   }[];
   pagado: boolean;
   resumen_interpretado?: string;
+  detalle_abono?: {
+    deudaLiquidadaUsd: number;
+    saldoAFavorAcreditadoUsd: number;
+    mensaje: string;
+  } | null;
 }
 
 interface VoiceOrderModalProps {
@@ -34,9 +42,11 @@ interface VoiceOrderModalProps {
 }
 
 const EJEMPLOS_PEDIDOS = [
-  'Añade al sistema al estudiante Mario Gómez, 5to grado, representante Penélope Patterson y teléfono +58 424 936 9950',
+  'Abona $5 a favor del alumno Mateo Rivas',
+  'Carga dos empanadas a la cuenta de Sebastián Martínez y paga usando su saldo a favor',
+  'Registra un pago adelantado de $10 para la profesora Sofía Martínez',
+  'Guarda el vuelto de $0.50 como saldo a favor de Alejandro Pérez',
   'Una empanada de queso, una malta y anótalo a la cuenta de Sofía Martínez de 5to A',
-  'Dos tequeños y un jugo de naranja para Alejandro Pérez, pagó en efectivo',
 ];
 
 export function VoiceOrderModal({ onPedidoProcesado, className = '' }: VoiceOrderModalProps) {

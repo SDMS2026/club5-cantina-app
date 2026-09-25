@@ -5,6 +5,8 @@ export interface Cliente {
   nombre_representante?: string | null;
   telefono_whatsapp?: string | null;
   created_at?: string;
+  saldo_a_favor?: number;
+  deuda_total?: number;
 }
 
 export interface Producto {
@@ -21,7 +23,7 @@ export interface ItemCarrito {
   cantidad: number;
 }
 
-export type MetodoPagoId = 'efectivo_usd' | 'pago_movil' | 'punto_debito' | 'pendiente';
+export type MetodoPagoId = 'efectivo_usd' | 'pago_movil' | 'punto_debito' | 'pendiente' | 'saldo_favor';
 
 export interface MetodoPagoOpcion {
   id: MetodoPagoId;

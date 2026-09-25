@@ -35,6 +35,8 @@ import {
   obtenerCategoriaDeGrado,
   encontrarVinculosCliente,
 } from '@/lib/constants';
+import { formatUSD } from '@/lib/utils';
+import { ResumenSaldoCliente } from '@/lib/clientBalance';
 
 interface ClientSelectorProps {
   clientes: Cliente[];
@@ -42,6 +44,7 @@ interface ClientSelectorProps {
   onSeleccionarCliente: (cliente: Cliente | null) => void;
   onClienteCreado?: (cliente: Cliente) => void;
   cargando?: boolean;
+  saldosClientes?: Record<string, ResumenSaldoCliente>;
 }
 
 export function ClientSelector({
@@ -50,6 +53,7 @@ export function ClientSelector({
   onSeleccionarCliente,
   onClienteCreado,
   cargando = false,
+  saldosClientes = {},
 }: ClientSelectorProps) {
   const [abierto, setAbierto] = useState(false);
   const [busqueda, setBusqueda] = useState('');
@@ -301,9 +305,21 @@ export function ClientSelector({
                       ? 'Docente / Personal'
                       : 'Estudiante / Cliente'}
                   </div>
-                  <div className="truncate text-xs sm:text-sm font-semibold text-gray-900">
+                  <div className="flex items-center gap-1.5 truncate text-xs sm:text-sm font-semibold text-gray-900">
                     {clienteSeleccionado ? (
-                      clienteSeleccionado.nombre_estudiante
+                      <>
+                        <span className="truncate">{clienteSeleccionado.nombre_estudiante}</span>
+                        {saldosClientes[clienteSeleccionado.id]?.saldoAFavorTotalUsd > 0 && (
+                          <span className="shrink-0 font-bold text-emerald-700 bg-emerald-50 border border-emerald-200/90 px-2 py-0.5 rounded-full text-[10px]">
+                            +{formatUSD(saldosClientes[clienteSeleccionado.id].saldoAFavorTotalUsd)}
+                          </span>
+                        )}
+                        {saldosClientes[clienteSeleccionado.id]?.deudaTotalUsd > 0 && (
+                          <span className="shrink-0 font-bold text-rose-700 bg-rose-50 border border-rose-200/90 px-2 py-0.5 rounded-full text-[10px]">
+                            -{formatUSD(saldosClientes[clienteSeleccionado.id].deudaTotalUsd)}
+                          </span>
+                        )}
+                      </>
                     ) : (
                       <span className="font-normal text-gray-500 truncate block">
                         Venta General / Ocasional <span className="hidden sm:inline">(Click para asociar)</span>
@@ -539,9 +555,21 @@ export function ClientSelector({
                           )}
                         </div>
 
-                        {estaSeleccionado && (
-                          <Check className="h-4 w-4 shrink-0 text-indigo-600" />
-                        )}
+                        <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                          {saldosClientes[cliente.id]?.saldoAFavorTotalUsd > 0 && (
+                            <span className="font-bold text-emerald-700 bg-emerald-50 border border-emerald-200/90 px-2 py-0.5 rounded-full text-[10px]">
+                              +{formatUSD(saldosClientes[cliente.id].saldoAFavorTotalUsd)}
+                            </span>
+                          )}
+                          {saldosClientes[cliente.id]?.deudaTotalUsd > 0 && (
+                            <span className="font-bold text-rose-700 bg-rose-50 border border-rose-200/90 px-2 py-0.5 rounded-full text-[10px]">
+                              -{formatUSD(saldosClientes[cliente.id].deudaTotalUsd)}
+                            </span>
+                          )}
+                          {estaSeleccionado && (
+                            <Check className="h-4 w-4 shrink-0 text-indigo-600" />
+                          )}
+                        </div>
                       </button>
                     );
                   })

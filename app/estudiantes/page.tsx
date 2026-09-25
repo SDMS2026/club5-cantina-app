@@ -32,6 +32,10 @@ import {
   ArrowLeft,
   PlusCircle,
   Menu,
+  Wallet,
+  PiggyBank,
+  Coins,
+  Sparkles,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import { obtenerTasaBCV, TASA_BCV_FALLBACK_DEFAULT } from '@/lib/dolarApi';
@@ -56,11 +60,11 @@ import {
 } from '@/lib/constants';
 import { Cliente } from '@/types/pos';
 import { useModalDragScroll } from '@/lib/useModalDragScroll';
-
-interface DeudaResumenEstudiante {
-  totalUsd: number;
-  cantidadConsumos: number;
-}
+import {
+  obtenerSaldosTodosClientes,
+  procesarAbonoCliente,
+  ResumenSaldoCliente,
+} from '@/lib/clientBalance';
 
 export default function EstudiantesPage() {
   const [montado, setMontado] = useState(false);
@@ -70,19 +74,41 @@ export default function EstudiantesPage() {
   const [tasaBcv, setTasaBcv] = useState<number>(TASA_BCV_FALLBACK_DEFAULT);
   const [cargandoTasa, setCargandoTasa] = useState<boolean>(true);
 
-  // Clientes y Deudas desde Supabase
+  // Clientes y Saldos desde Supabase
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [cargandoClientes, setCargandoClientes] = useState<boolean>(true);
-  const [resumenDeudas, setResumenDeudas] = useState<Record<string, DeudaResumenEstudiante>>({});
+  const [saldosClientes, setSaldosClientes] = useState<Record<string, ResumenSaldoCliente>>({});
 
   // Filtros
   const [busqueda, setBusqueda] = useState<string>('');
   const [filtroGrado, setFiltroGrado] = useState<string>('todos');
-  const [filtroEstado, setFiltroEstado] = useState<'todos' | 'con_deuda' | 'solvente'>('todos');
+  const [filtroEstado, setFiltroEstado] = useState<'todos' | 'con_deuda' | 'con_saldo_favor' | 'solvente'>('todos');
   const [popoverGradoAbierto, setPopoverGradoAbierto] = useState<boolean>(false);
 
   // Notificaciones Toast
   const [notificacion, setNotificacion] = useState<{ tipo: 'exito' | 'info' | 'error'; texto: string } | null>(null);
+
+  // Modal para Abonar / Depositar Saldo a Favor
+  const [modalAbono, setModalAbono] = useState<{
+    abierto: boolean;
+    cliente: Cliente | null;
+    montoUsd: string;
+    metodoPago: string;
+    guardando: boolean;
+    error: string | null;
+  }>({
+    abierto: false,
+    cliente: null,
+    montoUsd: '',
+    metodoPago: 'efectivo_usd',
+    guardando: false,
+    error: null,
+  });
+
+  const dragScrollAbono = useModalDragScroll({
+    isOpen: modalAbono.abierto,
+    onDismiss: () => setModalAbono((prev) => ({ ...prev, abierto: false })),
+  });
 
   // Modal Crear / Editar
   const [modalForm, setModalForm] = useState<{
@@ -231,7 +257,7 @@ export default function EstudiantesPage() {
     }
   }, []);
 
-  // 2. Cargar Clientes y Consumos Pendientes
+  // 2. Cargar Clientes y Saldos Consolidados
   const cargarDatos = useCallback(async () => {
     setCargandoClientes(true);
     try {
@@ -243,25 +269,10 @@ export default function EstudiantesPage() {
       if (errClientes) throw errClientes;
       setClientes(clientesDb || []);
 
-      const { data: consumosPendientes, error: errConsumos } = await supabase
-        .from('consumos')
-        .select('cliente_id, monto_total_usd')
-        .eq('pagado', false);
-
-      if (!errConsumos && consumosPendientes) {
-        const mapa: Record<string, DeudaResumenEstudiante> = {};
-        for (const item of consumosPendientes) {
-          if (!item.cliente_id) continue;
-          if (!mapa[item.cliente_id]) {
-            mapa[item.cliente_id] = { totalUsd: 0, cantidadConsumos: 0 };
-          }
-          mapa[item.cliente_id].totalUsd += Number(item.monto_total_usd || 0);
-          mapa[item.cliente_id].cantidadConsumos += 1;
-        }
-        setResumenDeudas(mapa);
-      }
+      const saldos = await obtenerSaldosTodosClientes();
+      setSaldosClientes(saldos);
     } catch (err) {
-      console.error('Error cargando estudiantes y deudas:', err);
+      console.error('Error cargando estudiantes y saldos:', err);
       setNotificacion({
         tipo: 'error',
         texto: 'Error al conectar con la base de datos de Supabase.',
@@ -332,33 +343,89 @@ export default function EstudiantesPage() {
     }
 
     if (filtroEstado === 'con_deuda') {
-      lista = lista.filter((c) => {
-        const deuda = resumenDeudas[c.id];
-        return deuda && deuda.totalUsd > 0;
-      });
+      lista = lista.filter((c) => (saldosClientes[c.id]?.deudaTotalUsd || 0) > 0);
+    } else if (filtroEstado === 'con_saldo_favor') {
+      lista = lista.filter((c) => (saldosClientes[c.id]?.saldoAFavorTotalUsd || 0) > 0);
     } else if (filtroEstado === 'solvente') {
-      lista = lista.filter((c) => {
-        const deuda = resumenDeudas[c.id];
-        return !deuda || deuda.totalUsd === 0;
-      });
+      lista = lista.filter((c) => (saldosClientes[c.id]?.deudaTotalUsd || 0) === 0);
     }
 
     return lista;
-  }, [clientes, busqueda, filtroGrado, filtroEstado, resumenDeudas]);
+  }, [clientes, busqueda, filtroGrado, filtroEstado, saldosClientes]);
 
   // Métricas
   const totalEstudiantes = clientes.length;
   const estudiantesConDeuda = useMemo(() => {
-    return clientes.filter((c) => (resumenDeudas[c.id]?.totalUsd || 0) > 0).length;
-  }, [clientes, resumenDeudas]);
+    return clientes.filter((c) => (saldosClientes[c.id]?.deudaTotalUsd || 0) > 0).length;
+  }, [clientes, saldosClientes]);
+
+  const estudiantesConSaldoFavor = useMemo(() => {
+    return clientes.filter((c) => (saldosClientes[c.id]?.saldoAFavorTotalUsd || 0) > 0).length;
+  }, [clientes, saldosClientes]);
 
   const totalDeudaGlobalUsd = useMemo(() => {
-    return Object.values(resumenDeudas).reduce((acc, curr) => acc + curr.totalUsd, 0);
-  }, [resumenDeudas]);
+    return Object.values(saldosClientes).reduce((acc, curr) => acc + curr.deudaTotalUsd, 0);
+  }, [saldosClientes]);
 
   const totalDeudaGlobalBs = useMemo(() => {
     return calcularConversionBs(totalDeudaGlobalUsd, tasaBcv);
   }, [totalDeudaGlobalUsd, tasaBcv]);
+
+  const totalSaldoAFavorGlobalUsd = useMemo(() => {
+    return Object.values(saldosClientes).reduce((acc, curr) => acc + curr.saldoAFavorTotalUsd, 0);
+  }, [saldosClientes]);
+
+  const totalSaldoAFavorGlobalBs = useMemo(() => {
+    return calcularConversionBs(totalSaldoAFavorGlobalUsd, tasaBcv);
+  }, [totalSaldoAFavorGlobalUsd, tasaBcv]);
+
+  // Abrir Modal de Abono
+  const handleAbrirAbono = (c: Cliente) => {
+    setModalAbono({
+      abierto: true,
+      cliente: c,
+      montoUsd: '',
+      metodoPago: 'efectivo_usd',
+      guardando: false,
+      error: null,
+    });
+  };
+
+  // Confirmar Abono
+  const handleConfirmarAbono = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!modalAbono.cliente) return;
+    const monto = parseFloat(modalAbono.montoUsd.replace(',', '.'));
+    if (!monto || monto <= 0) {
+      setModalAbono((prev) => ({ ...prev, error: 'Ingresa un monto válido mayor a 0.' }));
+      return;
+    }
+
+    setModalAbono((prev) => ({ ...prev, guardando: true, error: null }));
+    try {
+      const res = await procesarAbonoCliente({
+        clienteId: modalAbono.cliente.id,
+        montoUsd: monto,
+        metodoPago: modalAbono.metodoPago,
+        tasaBcv,
+      });
+
+      setModalAbono((prev) => ({ ...prev, abierto: false }));
+      setNotificacion({
+        tipo: 'exito',
+        texto: res.mensaje,
+      });
+      setTimeout(() => setNotificacion(null), 4500);
+      await cargarDatos();
+    } catch (err: unknown) {
+      console.error('Error registrando abono:', err);
+      setModalAbono((prev) => ({
+        ...prev,
+        guardando: false,
+        error: err instanceof Error ? err.message : 'Error al registrar el abono.',
+      }));
+    }
+  };
 
   // Abrir Modal Crear
   const handleAbrirCrear = () => {
@@ -544,12 +611,13 @@ export default function EstudiantesPage() {
 
   // Abrir Modal Eliminar
   const handleAbrirEliminar = (c: Cliente) => {
-    const deuda = resumenDeudas[c.id];
+    const saldo = saldosClientes[c.id];
+    const tieneDeuda = !!(saldo && saldo.deudaTotalUsd > 0);
     setModalEliminar({
       abierto: true,
       cliente: c,
-      tieneDeuda: !!(deuda && deuda.totalUsd > 0),
-      totalDeudaUsd: deuda ? deuda.totalUsd : 0,
+      tieneDeuda,
+      totalDeudaUsd: saldo ? saldo.deudaTotalUsd : 0,
       eliminando: false,
       error: null,
     });
@@ -611,12 +679,15 @@ export default function EstudiantesPage() {
     const sujeto = esProf
       ? `su cuenta de cantina (${c.grado_seccion})`
       : `el estudiante *${c.nombre_estudiante}* (${c.grado_seccion || 'Cantina'})`;
-    const deuda = resumenDeudas[c.id];
+    const saldo = saldosClientes[c.id];
 
-    let textoDeuda = 'Actualmente su cuenta se encuentra completamente al dia y solvente.';
-    if (deuda && deuda.totalUsd > 0) {
-      const bs = calcularConversionBs(deuda.totalUsd, tasaBcv);
-      textoDeuda = `Le recordamos amablemente que presenta un saldo pendiente de ${formatUSD(deuda.totalUsd)} (${formatBs(bs)} a tasa oficial BCV: ${formatBs(tasaBcv)}).`;
+    let textoDeuda = 'Actualmente su cuenta se encuentra completamente al dia y solvente ($0.00).';
+    if (saldo && saldo.deudaTotalUsd > 0) {
+      const bs = calcularConversionBs(saldo.deudaTotalUsd, tasaBcv);
+      textoDeuda = `Le recordamos amablemente que presenta un saldo pendiente de ${formatUSD(saldo.deudaTotalUsd)} (${formatBs(bs)} a tasa oficial BCV: ${formatBs(tasaBcv)}).`;
+    } else if (saldo && saldo.saldoAFavorTotalUsd > 0) {
+      const bs = calcularConversionBs(saldo.saldoAFavorTotalUsd, tasaBcv);
+      textoDeuda = `Le informamos cordialmente que cuenta con un saldo a favor disponible de +${formatUSD(saldo.saldoAFavorTotalUsd)} (+${formatBs(bs)} a tasa oficial BCV).`;
     }
 
     const mensaje = `Hola, *${destinatario}*.
@@ -789,10 +860,10 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
       {/* Contenido Principal */}
       <main className="mx-auto flex-1 w-full max-w-7xl px-3 sm:px-6 lg:px-8 py-5 sm:py-6 overflow-x-hidden">
         {/* Tarjetas KPI */}
-        <div className="grid grid-cols-1 gap-3 sm:gap-4 sm:grid-cols-3 mb-6">
+        <div className="grid grid-cols-1 gap-3 sm:gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-6">
           <div className="rounded-3xl border border-gray-200/80 bg-white p-4 sm:p-5 shadow-xs">
             <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-              Total Personas Registradas
+              Total Registrados
             </span>
             <div className="mt-2 flex items-baseline justify-between">
               <span className="text-2xl sm:text-3xl font-black tracking-tight text-gray-900">
@@ -803,7 +874,7 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
               </div>
             </div>
             <p className="mt-1 text-xs text-gray-400">
-              {gradosDisponibles.length} salas, grados, años y personal escolar
+              {gradosDisponibles.length} salas, grados y personal
             </p>
           </div>
 
@@ -817,7 +888,7 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
                   {estudiantesConDeuda}
                 </span>
                 <span className="text-xs text-amber-800 ml-1.5 font-semibold">
-                  ({formatUSD(totalDeudaGlobalUsd)})
+                  (-{formatUSD(totalDeudaGlobalUsd)})
                 </span>
               </div>
               <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-amber-500/15 text-amber-800">
@@ -825,13 +896,35 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
               </div>
             </div>
             <p className="mt-1 text-xs text-amber-800/80 font-mono">
-              Equivalente: {formatBs(totalDeudaGlobalBs)}
+              Equivalente: -{formatBs(totalDeudaGlobalBs)}
+            </p>
+          </div>
+
+          <div className="rounded-3xl border border-emerald-200/90 bg-gradient-to-br from-emerald-50/60 to-teal-50/30 p-4 sm:p-5 shadow-xs">
+            <span className="text-xs font-semibold uppercase tracking-wider text-emerald-800">
+              Saldos a Favor (Crédito)
+            </span>
+            <div className="mt-2 flex items-baseline justify-between">
+              <div>
+                <span className="text-2xl sm:text-3xl font-black tracking-tight text-emerald-950">
+                  +{formatUSD(totalSaldoAFavorGlobalUsd)}
+                </span>
+                <span className="text-xs text-emerald-700 ml-1.5 font-semibold">
+                  ({estudiantesConSaldoFavor} clientes)
+                </span>
+              </div>
+              <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-emerald-500/15 text-emerald-700">
+                <PiggyBank className="h-5 w-5" />
+              </div>
+            </div>
+            <p className="mt-1 text-xs text-emerald-800/80 font-mono">
+              Equivalente: +{formatBs(totalSaldoAFavorGlobalBs)}
             </p>
           </div>
 
           <div className="rounded-3xl border border-gray-200/80 bg-white p-4 sm:p-5 shadow-xs">
             <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-              Clientes Solventes (Al Día)
+              Clientes Solventes
             </span>
             <div className="mt-2 flex items-baseline justify-between">
               <span className="text-2xl sm:text-3xl font-black tracking-tight text-emerald-600">
@@ -842,7 +935,7 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
               </div>
             </div>
             <p className="mt-1 text-xs text-gray-400">
-              Sin consumos pendientes de cobro
+              Al día sin saldos deudores
             </p>
           </div>
         </div>
@@ -978,6 +1071,22 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
               </button>
               <button
                 type="button"
+                onClick={() => setFiltroEstado('con_saldo_favor')}
+                className={`flex items-center gap-1 rounded-xl px-3 py-1 text-xs font-bold transition ${
+                  filtroEstado === 'con_saldo_favor'
+                    ? 'bg-emerald-100 text-emerald-950 shadow-2xs'
+                    : 'text-gray-500 hover:text-gray-900'
+                }`}
+              >
+                <span>A Favor</span>
+                {estudiantesConSaldoFavor > 0 && (
+                  <span className="rounded-full bg-emerald-200 px-1.5 py-0.2 text-[10px] text-emerald-900 font-extrabold">
+                    {estudiantesConSaldoFavor}
+                  </span>
+                )}
+              </button>
+              <button
+                type="button"
                 onClick={() => setFiltroEstado('solvente')}
                 className={`rounded-xl px-3 py-1 text-xs font-bold transition ${
                   filtroEstado === 'solvente'
@@ -1041,8 +1150,9 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <AnimatePresence>
               {clientesFiltrados.map((cliente) => {
-                const deuda = resumenDeudas[cliente.id];
-                const tieneDeuda = !!(deuda && deuda.totalUsd > 0);
+                const saldo = saldosClientes[cliente.id];
+                const tieneDeuda = !!(saldo && saldo.deudaTotalUsd > 0);
+                const tieneSaldoFavor = !!(saldo && saldo.saldoAFavorTotalUsd > 0);
                 const iniciales = getIniciales(cliente.nombre_estudiante);
                 const esProf = esProfesorOPersonal(cliente.grado_seccion);
                 const esPadre = esRepresentante(cliente.grado_seccion);
@@ -1195,20 +1305,45 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
                         </div>
                       )}
 
-                      {/* Estado de Deuda / Solvencia */}
+                      {/* Estado de Cuenta: Saldo a Favor / Deuda / Solvencia */}
                       <div className="mt-3">
-                        {tieneDeuda ? (
+                        {tieneSaldoFavor && saldo ? (
+                          <div className="rounded-2xl border border-emerald-300 bg-gradient-to-r from-emerald-50 via-teal-50/70 to-emerald-50/50 p-2.5 flex items-center justify-between shadow-2xs">
+                            <div className="flex items-center gap-2">
+                              <Wallet className="h-4 w-4 text-emerald-600 shrink-0" />
+                              <div className="flex flex-col">
+                                <span className="text-[10px] font-bold uppercase text-emerald-800 flex items-center gap-1">
+                                  <span>Saldo a Favor Disponible</span>
+                                  {saldo.cantidadAbonos > 0 && (
+                                    <span className="font-normal text-[9px] text-emerald-600">
+                                      ({saldo.cantidadAbonos} abono{saldo.cantidadAbonos === 1 ? '' : 's'})
+                                    </span>
+                                  )}
+                                </span>
+                                <span className="font-mono text-xs font-black text-emerald-700">
+                                  +{formatUSD(saldo.saldoAFavorTotalUsd)} a favor
+                                  <span className="font-normal text-[10px] text-emerald-600 ml-1">
+                                    (+{formatBs(calcularConversionBs(saldo.saldoAFavorTotalUsd, tasaBcv))})
+                                  </span>
+                                </span>
+                              </div>
+                            </div>
+                            <span className="rounded-full bg-emerald-100 border border-emerald-200 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
+                              Disponible
+                            </span>
+                          </div>
+                        ) : tieneDeuda && saldo ? (
                           <div className="rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50/80 to-yellow-50/50 p-2.5 flex items-center justify-between">
                             <div className="flex items-center gap-2">
                               <Receipt className="h-4 w-4 text-amber-700 shrink-0" />
                               <div className="flex flex-col">
                                 <span className="text-[10px] font-bold uppercase text-amber-900">
-                                  Saldo Pendiente ({deuda.cantidadConsumos}{' '}
-                                  {deuda.cantidadConsumos === 1 ? 'consumo' : 'consumos'})
+                                  Saldo Pendiente ({saldo.cantidadConsumosPendientes}{' '}
+                                  {saldo.cantidadConsumosPendientes === 1 ? 'consumo' : 'consumos'})
                                 </span>
                                 <span className="font-mono text-xs font-bold text-amber-950">
-                                  {formatUSD(deuda.totalUsd)} &bull;{' '}
-                                  {formatBs(calcularConversionBs(deuda.totalUsd, tasaBcv))}
+                                  -{formatUSD(saldo.deudaTotalUsd)} &bull;{' '}
+                                  {formatBs(calcularConversionBs(saldo.deudaTotalUsd, tasaBcv))}
                                 </span>
                               </div>
                             </div>
@@ -1224,28 +1359,40 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
                           <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-2.5 flex items-center gap-2 text-emerald-800">
                             <ShieldCheck className="h-4 w-4 text-emerald-600 shrink-0" />
                             <span className="text-xs font-semibold">
-                              Solvente &bull; Sin deudas pendientes
+                              Solvente &bull; Sin deudas pendientes ($0.00)
                             </span>
                           </div>
                         )}
                       </div>
                     </div>
 
-                    {/* Botón WhatsApp */}
-                    <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between gap-2">
+                    {/* Acciones de la Tarjeta */}
+                    <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between gap-1.5 flex-wrap">
                       <button
                         type="button"
                         onClick={() => handleAbrirWhatsApp(cliente)}
-                        className="flex-1 flex items-center justify-center gap-1.5 rounded-2xl border border-emerald-200/90 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800 shadow-2xs hover:bg-emerald-100 hover:border-emerald-300 transition active:scale-95"
+                        className="flex-1 min-w-[130px] flex items-center justify-center gap-1.5 rounded-2xl border border-emerald-200/90 bg-emerald-50 px-2.5 py-2 text-xs font-bold text-emerald-800 shadow-2xs hover:bg-emerald-100 hover:border-emerald-300 transition active:scale-95"
                       >
                         <MessageCircle className="h-3.5 w-3.5 text-emerald-600" />
-                        <span>Contactar por WhatsApp</span>
+                        <span>WhatsApp</span>
+                      </button>
+
+                      {/* Botón Abonar / Depositar Saldo a Favor */}
+                      <button
+                        type="button"
+                        onClick={() => handleAbrirAbono(cliente)}
+                        className="flex items-center justify-center gap-1.5 rounded-2xl border border-indigo-200/90 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700 shadow-2xs hover:bg-indigo-100 hover:border-indigo-300 transition active:scale-95"
+                        title="Registrar abono o pago adelantado para este cliente"
+                      >
+                        <PiggyBank className="h-3.5 w-3.5 text-indigo-600" />
+                        <span>Abonar</span>
                       </button>
 
                       {tieneDeuda && (
                         <Link
                           href="/deudas"
-                          className="flex items-center justify-center gap-1 rounded-2xl bg-gray-900 px-3.5 py-2 text-xs font-bold text-white shadow-xs hover:bg-black transition active:scale-95"
+                          className="flex items-center justify-center gap-1 rounded-2xl bg-gray-900 px-3 py-2 text-xs font-bold text-white shadow-xs hover:bg-black transition active:scale-95"
+                          title="Cobrar deudas en Cuentas por Cobrar"
                         >
                           <Receipt className="h-3.5 w-3.5" />
                           <span>Cobrar</span>
@@ -1921,6 +2068,228 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
+
+      {/* Modal para Registrar Abono / Pago Adelantado / Saldo a Favor */}
+      <Dialog.Root
+        open={modalAbono.abierto}
+        onOpenChange={(abierto) => setModalAbono((prev) => ({ ...prev, abierto }))}
+      >
+        <Dialog.Portal>
+          <Dialog.Overlay
+            {...dragScrollAbono.overlayProps}
+            className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs transition-opacity animate-in fade-in"
+          />
+          <Dialog.Content
+            style={dragScrollAbono.style}
+            {...dragScrollAbono.dragProps}
+            className="fixed inset-x-0 bottom-0 z-50 max-h-[90dvh] sm:max-h-[90vh] overflow-y-auto overscroll-contain touch-scroll-ios rounded-t-3xl sm:rounded-3xl border-t sm:border border-gray-200/90 bg-white p-4 sm:p-6 pb-28 sm:pb-6 shadow-2xl outline-none duration-300 animate-in slide-in-from-bottom sm:slide-in-from-bottom-0 sm:fade-in-0 sm:zoom-in-95 sm:inset-auto sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:w-[95vw] sm:max-w-md cursor-grab active:cursor-grabbing"
+          >
+            {/* Manija táctil para móviles */}
+            <div
+              className="mx-auto mb-3 -mt-1 flex h-6 w-full cursor-grab active:cursor-grabbing items-center justify-center sm:hidden touch-none"
+              title="Deslizar hacia abajo para cerrar"
+            >
+              <div className="h-1.5 w-12 rounded-full bg-gray-300 active:bg-gray-400 transition-colors" />
+            </div>
+
+            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+              <div>
+                <Dialog.Title className="text-base sm:text-lg font-bold text-gray-900 flex items-center gap-2">
+                  <PiggyBank className="h-5 w-5 text-indigo-600" />
+                  <span>Abono o Pago Adelantado</span>
+                </Dialog.Title>
+                <Dialog.Description className="text-xs text-gray-500">
+                  {modalAbono.cliente?.nombre_estudiante} ({modalAbono.cliente?.grado_seccion || 'Cliente'})
+                </Dialog.Description>
+              </div>
+              <Dialog.Close asChild>
+                <button
+                  type="button"
+                  disabled={modalAbono.guardando}
+                  className="rounded-xl p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </Dialog.Close>
+            </div>
+
+            {/* Error si ocurre */}
+            {modalAbono.error && (
+              <div className="mt-3 flex items-start gap-2 rounded-2xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">
+                <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                <span>{modalAbono.error}</span>
+              </div>
+            )}
+
+            {/* Estado actual del cliente */}
+            {modalAbono.cliente && (
+              <div className="mt-3 rounded-2xl border border-gray-200/80 bg-gray-50/70 p-3 text-xs space-y-1">
+                <div className="flex justify-between text-gray-600">
+                  <span>Deuda pendiente actual:</span>
+                  <span className={`font-bold ${
+                    (saldosClientes[modalAbono.cliente.id]?.deudaTotalUsd || 0) > 0 ? 'text-amber-800' : 'text-gray-700'
+                  }`}>
+                    {formatUSD(saldosClientes[modalAbono.cliente.id]?.deudaTotalUsd || 0)}
+                  </span>
+                </div>
+                <div className="flex justify-between text-gray-600">
+                  <span>Saldo a favor disponible:</span>
+                  <span className={`font-bold ${
+                    (saldosClientes[modalAbono.cliente.id]?.saldoAFavorTotalUsd || 0) > 0 ? 'text-emerald-700' : 'text-gray-700'
+                  }`}>
+                    +{(formatUSD(saldosClientes[modalAbono.cliente.id]?.saldoAFavorTotalUsd || 0))}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            <form onSubmit={handleConfirmarAbono} className="mt-4 space-y-3.5">
+              {/* Input Monto a Abonar */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">
+                  Monto a Abonar (en $ USD) *
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-bold text-gray-400">
+                    $
+                  </span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={modalAbono.montoUsd}
+                    onChange={(e) =>
+                      setModalAbono((prev) => ({ ...prev, montoUsd: e.target.value, error: null }))
+                    }
+                    placeholder="0.00 (ej: 5.00 o 10.00)"
+                    className="w-full rounded-2xl border border-gray-200 bg-white py-2.5 pl-8 pr-3 text-sm font-bold text-gray-900 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 outline-none"
+                    autoFocus
+                  />
+                </div>
+                {modalAbono.montoUsd && parseFloat(modalAbono.montoUsd.replace(',', '.')) > 0 && (
+                  <p className="mt-1 text-[11px] font-mono text-gray-500">
+                    Equivalente en Bs: {formatBs(calcularConversionBs(parseFloat(modalAbono.montoUsd.replace(',', '.')), tasaBcv))} (Tasa BCV {formatBs(tasaBcv)})
+                  </p>
+                )}
+              </div>
+
+              {/* Selector de Método de Pago */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">
+                  Método de Pago Entregado *
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { id: 'efectivo_usd', label: 'Efectivo USD ($)' },
+                    { id: 'pago_movil', label: 'Pago Móvil (Bs)' },
+                    { id: 'zelle', label: 'Zelle ($)' },
+                    { id: 'punto_debito', label: 'Punto de Venta (Bs)' },
+                  ].map((met) => (
+                    <button
+                      key={met.id}
+                      type="button"
+                      onClick={() => setModalAbono((prev) => ({ ...prev, metodoPago: met.id }))}
+                      className={`p-2.5 rounded-xl border text-xs font-bold text-left transition ${
+                        modalAbono.metodoPago === met.id
+                          ? 'border-indigo-600 bg-indigo-50/70 text-indigo-950 ring-1 ring-indigo-600'
+                          : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                      }`}
+                    >
+                      {met.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Vista Previa de Liquidación Prioritaria de Negocio */}
+              {(() => {
+                const montoNum = parseFloat(modalAbono.montoUsd.replace(',', '.')) || 0;
+                if (montoNum <= 0 || !modalAbono.cliente) return null;
+                const deudaActual = saldosClientes[modalAbono.cliente.id]?.deudaTotalUsd || 0;
+
+                if (deudaActual > 0) {
+                  if (montoNum >= deudaActual) {
+                    const sobrante = Math.round((montoNum - deudaActual) * 100) / 100;
+                    return (
+                      <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-3 text-xs text-emerald-900 space-y-1">
+                        <p className="font-bold flex items-center gap-1.5 text-emerald-800">
+                          <Check className="h-4 w-4 text-emerald-600" />
+                          Regla de Liquidación Prioritaria:
+                        </p>
+                        <p className="text-[11px]">
+                          ✓ Se liquidarán prioritariamente los <strong>{formatUSD(deudaActual)}</strong> de deuda pendiente.
+                        </p>
+                        {sobrante > 0 ? (
+                          <p className="text-[11px] font-semibold text-emerald-800">
+                            ✓ El excedente de <strong>+{formatUSD(sobrante)}</strong> se acreditará automáticamente como <strong>Saldo a Favor</strong> disponible.
+                          </p>
+                        ) : (
+                          <p className="text-[11px]">
+                            ✓ La cuenta quedará 100% solvente ($0.00).
+                          </p>
+                        )}
+                      </div>
+                    );
+                  } else {
+                    const restante = Math.round((deudaActual - montoNum) * 100) / 100;
+                    return (
+                      <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-3 text-xs text-amber-900 space-y-1">
+                        <p className="font-bold text-amber-800">Abono Parcial a Deuda:</p>
+                        <p className="text-[11px]">
+                          ✓ Se abonarán los <strong>{formatUSD(montoNum)}</strong> a la deuda pendiente.
+                        </p>
+                        <p className="text-[11px]">
+                          ✓ La deuda restante será de <strong>{formatUSD(restante)}</strong>.
+                        </p>
+                      </div>
+                    );
+                  }
+                } else {
+                  return (
+                    <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-3 text-xs text-emerald-900 space-y-1">
+                      <p className="font-bold flex items-center gap-1.5 text-emerald-800">
+                        <Sparkles className="h-4 w-4 text-emerald-600" />
+                        Abono sin Deuda Previa:
+                      </p>
+                      <p className="text-[11px]">
+                        ✓ El cliente no debe nada. El monto total de <strong>+{formatUSD(montoNum)}</strong> se guardará directamente como <strong>Saldo a Favor</strong> disponible.
+                      </p>
+                    </div>
+                  );
+                }
+              })()}
+
+              {/* Botones de acción */}
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-gray-100">
+                <Dialog.Close asChild>
+                  <button
+                    type="button"
+                    disabled={modalAbono.guardando}
+                    className="rounded-xl border border-gray-200 px-4 py-2.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition"
+                  >
+                    Cancelar
+                  </button>
+                </Dialog.Close>
+
+                <button
+                  type="submit"
+                  disabled={modalAbono.guardando || !(parseFloat(modalAbono.montoUsd.replace(',', '.')) > 0)}
+                  className="flex items-center gap-2 rounded-2xl bg-indigo-600 px-5 py-2.5 text-xs font-bold text-white shadow-xs hover:bg-indigo-700 transition disabled:opacity-50"
+                >
+                  {modalAbono.guardando ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <span>Registrando en Supabase...</span>
+                    </>
+                  ) : (
+                    <span>Confirmar Abono</span>
+                  )}
+                </button>
+              </div>
+            </form>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
     </div>
   );
 }
+

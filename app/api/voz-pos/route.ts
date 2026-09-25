@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabaseClient';
+import { procesarAbonoCliente } from '@/lib/clientBalance';
+import { obtenerTasaBCV, TASA_BCV_FALLBACK_DEFAULT } from '@/lib/dolarApi';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,6 +19,9 @@ interface NuevoClienteExtraido {
 }
 
 interface RespuestaVozPos {
+  accion: 'orden_pos' | 'abono_saldo_favor' | 'guardar_vuelto';
+  monto_abono_usd?: number;
+  metodo_pago_sugerido?: 'efectivo_usd' | 'pago_movil' | 'punto_debito' | 'pendiente' | 'saldo_favor';
   cliente_id: string | null;
   cliente_creado?: {
     id: string;
@@ -29,6 +34,11 @@ interface RespuestaVozPos {
   items: ItemProcesado[];
   pagado: boolean;
   resumen_interpretado?: string;
+  detalle_abono?: {
+    deudaLiquidadaUsd: number;
+    saldoAFavorAcreditadoUsd: number;
+    mensaje: string;
+  } | null;
 }
 
 export async function POST(req: NextRequest) {
@@ -95,9 +105,9 @@ export async function POST(req: NextRequest) {
       representante: c.nombre_representante || '',
     }));
 
-    // 3. System Prompt estructurado para Inteligencia Artificial
+    // 3. System Prompt estructurado para Gemini 1.5 Flash
     const systemPrompt = `Eres el asistente inteligente de caja de "Club 5 Cantina Escolar".
-Tu misión es interpretar la transcripción en lenguaje natural dictada por voz por el cajero o cliente y convertirla en una orden o registro estructurado en formato JSON estricto.
+Tu misión es interpretar la transcripción en lenguaje natural dictada por voz por el cajero o cliente y convertirla en una orden, abono financiero o registro estructurado en formato JSON estricto.
 
 CONTEXTO DE PRODUCTOS DISPONIBLES EN LA CANTINA:
 ${JSON.stringify(catalogoContexto, null, 2)}
@@ -105,36 +115,44 @@ ${JSON.stringify(catalogoContexto, null, 2)}
 CONTEXTO DE CLIENTES Y ESTUDIANTES YA REGISTRADOS:
 ${JSON.stringify(clientesContexto, null, 2)}
 
-INSTRUCCIONES CLAVE:
-1. Mapeo de Productos ("items"):
-   - Analiza las palabras del usuario en español venezolano (ej: "empanada de queso", "tequeños", "malta", "jugo de naranja", "pastelito", "brownie").
-   - Relaciona cada producto mencionado con el "id" más apropiado del catálogo disponible.
-   - Extrae la cantidad mencionada (ej: "una" = 1, "dos" = 2, "3", "media docena" = 6, "una ración" = 1). Si no se menciona cantidad, asume 1.
-   - Si no se mencionan productos (por ejemplo, si solo pide registrar a alguien), retorna "items": [].
+INSTRUCCIONES CLAVE DE INTERPRETACIÓN:
+1. Determinación de la Acción Financiera ("accion"):
+   - "abono_saldo_favor": Si la instrucción pide abonar dinero, hacer un depósito o registrar un pago adelantado para un estudiante, profesor o cliente.
+     Ejemplos:
+     * "Abona $5 a favor del alumno Mateo Rivas" -> accion: "abono_saldo_favor", monto_abono_usd: 5.0, cliente: Mateo Rivas, items: []
+     * "Registra un pago adelantado de $10 para la profesora Sofía Martínez" -> accion: "abono_saldo_favor", monto_abono_usd: 10.0, cliente: Sofía Martínez, items: []
+     * "Abono de 3 dólares a Juan" -> accion: "abono_saldo_favor", monto_abono_usd: 3.0, items: []
+   - "guardar_vuelto": Si la frase pide guardar o acreditar el vuelto o cambio como saldo a favor.
+     Ejemplos:
+     * "Guarda el vuelto de $0.50 como saldo a favor de Alejandro Pérez" -> accion: "guardar_vuelto", monto_abono_usd: 0.50, cliente: Alejandro Pérez, items: []
+     * "Acredita el vuelto de 1 dólar a la cuenta de Mateo" -> accion: "guardar_vuelto", monto_abono_usd: 1.0, items: []
+   - "orden_pos": Si se piden productos para consumir en el punto de venta.
+     Ejemplos:
+     * "Una empanada de queso y una malta"
+     * "Carga dos empanadas a la cuenta de Sebastián Martínez y paga usando su saldo a favor" -> accion: "orden_pos", metodo_pago_sugerido: "saldo_favor", pagado: true
 
-2. Mapeo de Cliente Existente ("cliente_id"):
-   - Si se menciona un cliente que YA está registrado, coloca su "id" exacto de la base de datos.
-   - Si no está registrado o no se menciona, coloca null.
+2. Método de Pago Sugerido ("metodo_pago_sugerido"):
+   - "saldo_favor": Si la orden indica expresamente pagar con su saldo a favor, crédito a favor o dinero disponible (ej: "paga usando su saldo a favor", "cóbralo de su crédito a favor", "de su saldo"). pagado = true.
+   - "pendiente": Si se indica fiado, anotado a la cuenta, etc. pagado = false.
+   - "pago_movil": Si menciona pagar con pago móvil o transferencia.
+   - "efectivo_usd": Cobro en efectivo o no especificado.
 
-3. Registro de Nuevo Estudiante / Profesor / Representante ("nuevo_cliente"):
-   - Si la frase indica una instrucción para añadir o registrar a alguien al sistema (ej: "Añade al sistema al estudiante Mario Gómez, cursa quinto grado, representante Penélope Patterson...", "Registra al profesor de matemáticas Sebastián Martínez...", "Añade a este representante..."):
-     Extrae el objeto:
-     {
-       "nombre_estudiante": "Nombre y apellido de la persona",
-       "grado_seccion": "Nivel escolar, grado o rol (ej: '5to Grado A', 'Profesor / Docente', 'Representante / Padre de Familia', '3er Año B')",
-       "nombre_representante": "Para estudiantes: Nombre del representante. Para profesores o personal: El cargo, materia o área (ej: 'Profesor de Matemáticas', 'Coordinador de Ciencias', 'Docente de Biología') o null",
-       "cargo": "Materia, especialidad o cargo si es profesor/docente (ej: 'Profesor de Matemáticas') o null",
-       "telefono_whatsapp": "Número telefónico en formato estándar (ej: '+58 424 936 9950') o null"
-     }
-   - Si no se solicita registrar a nadie nuevo, coloca "nuevo_cliente": null.
+3. Mapeo de Productos ("items"):
+   - Para pedidos de productos, relaciona cada ítem con el "id" más apropiado del catálogo.
+   - Si la acción es "abono_saldo_favor" o "guardar_vuelto", "items" debe ser una lista vacía [].
 
-4. Estado de Pago ("pagado"):
-   - Coloca false si la frase indica que queda pendiente, fiado, anotado a la cuenta, o que se pagará después (ej: "anótalo", "a la cuenta de", "fiado", "lo paga luego", "anótaselo a").
-   - Coloca true si se indica explícitamente que ya pagó o si es una venta regular de mostrador sin indicación de crédito.
+4. Mapeo de Cliente ("cliente_id"):
+   - Identifica el cliente mencionado y coloca su "id" exacto de la base de datos. Si no existe, null.
 
-ESQUEMA OBLIGATORIO DE RESPUESTA:
-Debes responder ÚNICAMENTE un objeto JSON válido con la siguiente estructura (sin bloques markdown adicionales ni texto previo):
+5. Registro de Nuevo Cliente ("nuevo_cliente"):
+   - Si la frase indica agregar a una persona al sistema (ej: "Añade al sistema al estudiante Mario Gómez, 5to grado..."):
+     Extrae su nombre_estudiante, grado_seccion, nombre_representante, cargo, telefono_whatsapp. Si no, null.
+
+ESQUEMA OBLIGATORIO DE RESPUESTA JSON:
 {
+  "accion": "orden_pos" | "abono_saldo_favor" | "guardar_vuelto",
+  "monto_abono_usd": 0.0,
+  "metodo_pago_sugerido": "efectivo_usd" | "pago_movil" | "punto_debito" | "pendiente" | "saldo_favor",
   "cliente_id": "string_id_o_null",
   "nuevo_cliente": {
     "nombre_estudiante": "Nombre",
@@ -142,7 +160,7 @@ Debes responder ÚNICAMENTE un objeto JSON válido con la siguiente estructura (
     "nombre_representante": "Representante o Cargo del Profesor",
     "cargo": "Cargo o Materia si es Docente o null",
     "telefono_whatsapp": "Teléfono o null"
-  },
+  } | null,
   "items": [
     {
       "producto_id": "string_id_del_producto",
@@ -153,7 +171,7 @@ Debes responder ÚNICAMENTE un objeto JSON válido con la siguiente estructura (
   "resumen_interpretado": "Breve explicación en 1 frase de lo detectado"
 }`;
 
-    const userPrompt = `Transcripción del pedido por voz: "${texto}"`;
+    const userPrompt = `Transcripción dictada por voz: "${texto}"`;
 
     // 4. Llamar a la API REST de Gemini (con fallback dinámico de modelos)
     const modelosCandidatos = ['gemini-3.6-flash', 'gemini-flash-latest', 'gemini-1.5-flash'];
@@ -172,6 +190,7 @@ Debes responder ÚNICAMENTE un objeto JSON válido con la siguiente estructura (
       },
     };
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let data: any = null;
     let ultimoError = '';
 
@@ -192,7 +211,6 @@ Debes responder ÚNICAMENTE un objeto JSON válido con la siguiente estructura (
         const errText = await response.text();
         ultimoError = `[${modelo}] (${response.status}): ${errText}`;
         console.warn(`Intento con ${modelo} falló:`, response.status, errText);
-        // Si no es 404 (error de modelo inexistente), no seguir probando en vano si es auth error
         if (response.status === 400 || response.status === 403) {
           return NextResponse.json(
             {
@@ -227,11 +245,10 @@ Debes responder ÚNICAMENTE un objeto JSON válido con la siguiente estructura (
       );
     }
 
-    let parsedResult: RespuestaVozPos;
+    let parsedResult: any;
     try {
       parsedResult = JSON.parse(rawContent);
     } catch {
-      // Limpieza por si Gemini incluye marcas de código markdown ```json ... ```
       const cleaned = rawContent
         .replace(/```json/gi, '')
         .replace(/```/g, '')
@@ -241,19 +258,26 @@ Debes responder ÚNICAMENTE un objeto JSON válido con la siguiente estructura (
 
     // Normalizar y validar estructura
     const resultadoLimpio: RespuestaVozPos = {
+      accion:
+        parsedResult.accion === 'abono_saldo_favor' || parsedResult.accion === 'guardar_vuelto'
+          ? parsedResult.accion
+          : 'orden_pos',
+      monto_abono_usd: Number(parsedResult.monto_abono_usd) || 0,
+      metodo_pago_sugerido: parsedResult.metodo_pago_sugerido || (parsedResult.pagado === false ? 'pendiente' : 'efectivo_usd'),
       cliente_id: typeof parsedResult.cliente_id === 'string' ? parsedResult.cliente_id : null,
       cliente_creado: null,
       nuevo_cliente: parsedResult.nuevo_cliente || null,
       items: Array.isArray(parsedResult.items)
         ? parsedResult.items
-            .filter((item) => item && typeof item.producto_id === 'string' && Number(item.cantidad) > 0)
-            .map((item) => ({
+            .filter((item: any) => item && typeof item.producto_id === 'string' && Number(item.cantidad) > 0)
+            .map((item: any) => ({
               producto_id: item.producto_id,
               cantidad: Math.max(1, Math.round(Number(item.cantidad))),
             }))
         : [],
       pagado: typeof parsedResult.pagado === 'boolean' ? parsedResult.pagado : true,
       resumen_interpretado: parsedResult.resumen_interpretado || 'Procesado con éxito',
+      detalle_abono: null,
     };
 
     // Si se dictó registrar a un nuevo estudiante, profesor o representante:
@@ -268,7 +292,6 @@ Debes responder ÚNICAMENTE un objeto JSON válido con la siguiente estructura (
       const tel = parsedResult.nuevo_cliente.telefono_whatsapp?.trim() || null;
 
       if (nom) {
-        // Verificar si ya existe en Supabase
         const { data: existente } = await supabase
           .from('clientes')
           .select('*')
@@ -277,7 +300,6 @@ Debes responder ÚNICAMENTE un objeto JSON válido con la siguiente estructura (
 
         if (existente && existente.length > 0) {
           let clienteActualizado = existente[0];
-          // Si el cliente ya existía pero ahora se suministró su cargo y estaba vacío, actualizarlo
           if (cargoOrep && !existente[0].nombre_representante) {
             const { data: upd } = await supabase
               .from('clientes')
@@ -290,7 +312,6 @@ Debes responder ÚNICAMENTE un objeto JSON válido con la siguiente estructura (
           resultadoLimpio.cliente_id = clienteActualizado.id;
           resultadoLimpio.cliente_creado = clienteActualizado;
         } else {
-          // Registrar nuevo cliente en Supabase
           const { data: insertado, error: errIns } = await supabase
             .from('clientes')
             .insert([
@@ -311,6 +332,32 @@ Debes responder ÚNICAMENTE un objeto JSON válido con la siguiente estructura (
           }
         }
       }
+    }
+
+    // Si la acción es "abono_saldo_favor" o "guardar_vuelto", procesar el abono directamente en Supabase
+    if (
+      (resultadoLimpio.accion === 'abono_saldo_favor' || resultadoLimpio.accion === 'guardar_vuelto') &&
+      resultadoLimpio.cliente_id &&
+      resultadoLimpio.monto_abono_usd &&
+      resultadoLimpio.monto_abono_usd > 0
+    ) {
+      let tasaBcvActual = TASA_BCV_FALLBACK_DEFAULT;
+      try {
+        tasaBcvActual = await obtenerTasaBCV();
+      } catch (e) {
+        console.warn('Fallback a tasa por defecto para abono:', e);
+      }
+
+      const resAbono = await procesarAbonoCliente({
+        clienteId: resultadoLimpio.cliente_id,
+        montoUsd: resultadoLimpio.monto_abono_usd,
+        metodoPago: resultadoLimpio.accion === 'guardar_vuelto' ? 'vuelto_saldo_favor' : 'abono_saldo_favor',
+        tasaBcv: tasaBcvActual,
+        esVuelto: resultadoLimpio.accion === 'guardar_vuelto',
+      });
+
+      resultadoLimpio.detalle_abono = resAbono;
+      resultadoLimpio.resumen_interpretado = resAbono.mensaje;
     }
 
     return NextResponse.json(resultadoLimpio);

@@ -17,6 +17,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { motion, AnimatePresence } from 'framer-motion';
 import { refrescarNotificacionesGlobales } from '@/components/NotificationsContext';
 import { useModalDragScroll } from '@/lib/useModalDragScroll';
+import { obtenerSaldosTodosClientes, ResumenSaldoCliente } from '@/lib/clientBalance';
 
 const PRODUCTOS_MUESTRA_SEMILLA: Omit<Producto, 'id'>[] = [
   { nombre: 'Empanada de Queso Blanco', precio_usd: 1.5, activo: true, categoria: 'Desayunos' },
@@ -70,6 +71,7 @@ export default function PosPage() {
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [cargandoClientes, setCargandoClientes] = useState<boolean>(true);
   const [clienteSeleccionado, setClienteSeleccionado] = useState<Cliente | null>(null);
+  const [saldosClientes, setSaldosClientes] = useState<Record<string, ResumenSaldoCliente>>({});
 
   const [productos, setProductos] = useState<Producto[]>([]);
   const [cargandoProductos, setCargandoProductos] = useState<boolean>(true);
@@ -103,7 +105,7 @@ export default function PosPage() {
     }
   }, []);
 
-  // 2. Cargar Clientes desde Supabase
+  // 2. Cargar Clientes y Saldos desde Supabase
   const cargarClientes = useCallback(async () => {
     setCargandoClientes(true);
     try {
@@ -117,8 +119,12 @@ export default function PosPage() {
       } else {
         setClientes(data || []);
       }
+
+      // Cargar saldos consolidados
+      const saldos = await obtenerSaldosTodosClientes();
+      setSaldosClientes(saldos);
     } catch (err) {
-      console.error('Excepción al consultar clientes:', err);
+      console.error('Excepción al consultar clientes y saldos:', err);
     } finally {
       setCargandoClientes(false);
     }
@@ -168,6 +174,13 @@ export default function PosPage() {
         { event: '*', schema: 'public', table: 'clientes' },
         () => {
           cargarClientes();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'consumos' },
+        () => {
+          obtenerSaldosTodosClientes().then(setSaldosClientes).catch(console.error);
         }
       )
       .subscribe();
@@ -220,6 +233,18 @@ export default function PosPage() {
 
   // Manejador del resultado de Pedido y Registro por Voz
   const handlePedidoPorVoz = (resultado: PedidoVozResultado) => {
+    // Si la acción fue un abono financiero o guardar vuelto:
+    if (resultado.accion === 'abono_saldo_favor' || resultado.accion === 'guardar_vuelto') {
+      obtenerSaldosTodosClientes().then(setSaldosClientes).catch(console.error);
+      refrescarNotificacionesGlobales();
+      setNotificacion({
+        tipo: 'exito',
+        texto: resultado.resumen_interpretado || '¡Abono registrado con éxito!',
+      });
+      setTimeout(() => setNotificacion(null), 5000);
+      return;
+    }
+
     // 1. Si se creó o detectó un nuevo cliente:
     if (resultado.cliente_creado) {
       setClientes((prev) => {
@@ -260,15 +285,20 @@ export default function PosPage() {
       });
     }
 
-    // 3. Si pagado es false, se entiende que es fiado / a la cuenta de la cantina
-    if (resultado.pagado === false) {
+    // 3. Método de pago sugerido (saldo_favor, pendiente, efectivo_usd, etc.)
+    if (resultado.metodo_pago_sugerido) {
+      setMetodoPagoSugerido(resultado.metodo_pago_sugerido);
+      if (resultado.metodo_pago_sugerido === 'saldo_favor' && tieneItems) {
+        setModalPagoAbierto(true);
+      }
+    } else if (resultado.pagado === false) {
       setMetodoPagoSugerido('pendiente');
     } else {
       setMetodoPagoSugerido('efectivo_usd');
     }
 
     // 4. Muestra un feedback visual o toast:
-    let mensajeToast = '¡Pedido cargado por Inteligencia Artificial!';
+    let mensajeToast = resultado.resumen_interpretado || '¡Pedido cargado por Inteligencia Artificial!';
     if (resultado.cliente_creado && tieneItems) {
       mensajeToast = `¡"${resultado.cliente_creado.nombre_estudiante}" registrado y orden cargada con IA!`;
     } else if (resultado.cliente_creado && !tieneItems) {
@@ -290,6 +320,7 @@ export default function PosPage() {
     setModalPagoAbierto(false);
     setModalOrdenMovilAbierto(false);
     setMetodoPagoSugerido('efectivo_usd');
+    obtenerSaldosTodosClientes().then(setSaldosClientes).catch(console.error);
     setNotificacion({
       tipo: 'exito',
       texto: '¡Venta registrada con éxito en Supabase!',
@@ -466,6 +497,7 @@ export default function PosPage() {
                   setTimeout(() => setNotificacion(null), 4000);
                 }}
                 cargando={cargandoClientes}
+                saldosClientes={saldosClientes}
               />
             </div>
 

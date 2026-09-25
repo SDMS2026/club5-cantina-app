@@ -31,6 +31,9 @@ import {
   Info,
   Briefcase,
   Menu,
+  Wallet,
+  PiggyBank,
+  Sparkles,
 } from 'lucide-react';
 import { obtenerTasaBCV, TASA_BCV_FALLBACK_DEFAULT } from '@/lib/dolarApi';
 import { supabase } from '@/lib/supabaseClient';
@@ -41,6 +44,11 @@ import { NotificationBell } from '@/components/NotificationBell';
 import { refrescarNotificacionesGlobales } from '@/components/NotificationsContext';
 import { useSidebar } from '@/components/SidebarContext';
 import { useModalDragScroll } from '@/lib/useModalDragScroll';
+import {
+  obtenerSaldosTodosClientes,
+  procesarAbonoCliente,
+  ResumenSaldoCliente,
+} from '@/lib/clientBalance';
 
 interface ConsumoDetalleExtendido {
   id: string;
@@ -72,7 +80,7 @@ interface CuentaEstudianteAgrupada {
   fechaMasAntigua: string;
 }
 
-type MetodoCancelacionId = 'pago_movil' | 'efectivo_usd' | 'zelle' | 'punto_debito';
+type MetodoCancelacionId = 'pago_movil' | 'efectivo_usd' | 'zelle' | 'punto_debito' | 'saldo_favor';
 
 const METODOS_CANCELACION = [
   {
@@ -103,6 +111,13 @@ const METODOS_CANCELACION = [
     descripcion: 'Tarjeta de débito en bolívares en caja',
     moneda: 'Bs',
   },
+  {
+    id: 'saldo_favor' as MetodoCancelacionId,
+    nombre: 'Saldo a Favor (+)',
+    icono: PiggyBank,
+    descripcion: 'Usar crédito positivo prepagado del cliente',
+    moneda: 'USD',
+  },
 ];
 
 type CriterioOrden = 'recientes' | 'antiguos' | 'mayor_monto' | 'menor_monto';
@@ -123,8 +138,10 @@ export default function DeudasPage() {
   const [cargandoTasa, setCargandoTasa] = useState<boolean>(true);
   const [ultimaActualizacionTasa, setUltimaActualizacionTasa] = useState<Date | null>(null);
 
-  // Deudas desde Supabase
+  // Deudas y saldos desde Supabase
   const [deudas, setDeudas] = useState<DeudaRegistro[]>([]);
+  const [saldosClientes, setSaldosClientes] = useState<Record<string, ResumenSaldoCliente>>({});
+  const [todosLosClientes, setTodosLosClientes] = useState<Cliente[]>([]);
   const [cargandoDeudas, setCargandoDeudas] = useState<boolean>(true);
 
   // Filtros
@@ -147,6 +164,7 @@ export default function DeudasPage() {
     montoUsd: number;
     idsConsumos: string[];
     nombreEstudiante: string;
+    clienteId?: string | null;
   }>({
     abierto: false,
     titulo: '',
@@ -154,6 +172,7 @@ export default function DeudasPage() {
     montoUsd: 0,
     idsConsumos: [],
     nombreEstudiante: '',
+    clienteId: null,
   });
 
   // Deslizamiento vertical y arrastre (drag-to-scroll) para móviles y emuladores con Body Scroll Lock
@@ -169,6 +188,28 @@ export default function DeudasPage() {
   const [metodoPago, setMetodoPago] = useState<MetodoCancelacionId>('pago_movil');
   const [procesandoPago, setProcesandoPago] = useState<boolean>(false);
   const [errorPago, setErrorPago] = useState<string | null>(null);
+
+  // Modal para Abonar / Depositar Saldo a Favor
+  const [modalAbono, setModalAbono] = useState<{
+    abierto: boolean;
+    cliente: Cliente | null;
+    montoUsd: string;
+    metodoPago: string;
+    guardando: boolean;
+    error: string | null;
+  }>({
+    abierto: false,
+    cliente: null,
+    montoUsd: '',
+    metodoPago: 'efectivo_usd',
+    guardando: false,
+    error: null,
+  });
+
+  const dragScrollAbono = useModalDragScroll({
+    isOpen: modalAbono.abierto,
+    onDismiss: () => setModalAbono((prev) => ({ ...prev, abierto: false })),
+  });
 
   // Notificación toast
   const [notificacion, setNotificacion] = useState<{ tipo: 'exito' | 'info'; texto: string } | null>(null);
@@ -188,50 +229,58 @@ export default function DeudasPage() {
     }
   }, []);
 
-  // Cargar Deudas desde Supabase
+  // Cargar Deudas y Saldos desde Supabase
   const cargarDeudas = useCallback(async () => {
     setCargandoDeudas(true);
     try {
-      const { data, error } = await supabase
-        .from('consumos')
-        .select(`
-          id,
-          cliente_id,
-          monto_total_usd,
-          tasa_bcv_historica,
-          fecha,
-          pagado,
-          metodo_pago,
-          clientes (
+      const [{ data, error }, saldos, { data: clientesData }] = await Promise.all([
+        supabase
+          .from('consumos')
+          .select(`
             id,
-            nombre_estudiante,
-            grado_seccion,
-            nombre_representante,
-            telefono_whatsapp
-          ),
-          consumo_detalles (
-            id,
-            cantidad,
-            precio_unitario_usd,
-            productos (
+            cliente_id,
+            monto_total_usd,
+            tasa_bcv_historica,
+            fecha,
+            pagado,
+            metodo_pago,
+            clientes (
               id,
-              nombre,
-              imagen_url,
-              precio_usd,
-              activo
+              nombre_estudiante,
+              grado_seccion,
+              nombre_representante,
+              telefono_whatsapp
+            ),
+            consumo_detalles (
+              id,
+              cantidad,
+              precio_unitario_usd,
+              productos (
+                id,
+                nombre,
+                imagen_url,
+                precio_usd,
+                activo
+              )
             )
-          )
-        `)
-        .eq('pagado', false)
-        .order('fecha', { ascending: false });
+          `)
+          .eq('pagado', false)
+          .order('fecha', { ascending: false }),
+        obtenerSaldosTodosClientes(),
+        supabase.from('clientes').select('*').order('nombre_estudiante', { ascending: true }),
+      ]);
 
       if (error) {
         console.error('Error al consultar deudas en Supabase:', error);
       } else {
         setDeudas((data as unknown as DeudaRegistro[]) || []);
       }
+      setSaldosClientes(saldos);
+      if (clientesData) {
+        setTodosLosClientes(clientesData);
+      }
     } catch (e) {
-      console.error('Excepción cargando consumos pendientes:', e);
+      console.error('Excepción cargando consumos pendientes y saldos:', e);
     } finally {
       setCargandoDeudas(false);
     }
@@ -365,7 +414,7 @@ export default function DeudasPage() {
     return lista;
   }, [cuentasAgrupadas, busqueda, filtroGrado, criterioOrden]);
 
-  // Totales globales
+  // Totales globales de deudas
   const granTotalUsd = useMemo(() => {
     return deudas.reduce((acc, d) => acc + (d.monto_total_usd || 0), 0);
   }, [deudas]);
@@ -373,6 +422,18 @@ export default function DeudasPage() {
   const granTotalBs = useMemo(() => {
     return calcularConversionBs(granTotalUsd, tasaBcv);
   }, [granTotalUsd, tasaBcv]);
+
+  // Total global de saldos a favor (créditos positivos disponibles de todos los clientes)
+  const totalSaldoAFavorGlobalUsd = useMemo(() => {
+    return Object.values(saldosClientes).reduce(
+      (acc, s) => acc + (s.saldoAFavorTotalUsd || 0),
+      0
+    );
+  }, [saldosClientes]);
+
+  const totalSaldoAFavorGlobalBs = useMemo(() => {
+    return calcularConversionBs(totalSaldoAFavorGlobalUsd, tasaBcv);
+  }, [totalSaldoAFavorGlobalUsd, tasaBcv]);
 
   // Toggle de acordeón por estudiante
   const toggleEstudiante = (key: string) => {
@@ -392,6 +453,7 @@ export default function DeudasPage() {
       montoUsd: cuenta.totalDeudaUsd,
       idsConsumos: cuenta.consumos.map((c) => c.id),
       nombreEstudiante: nombre,
+      clienteId: cuenta.cliente?.id || null,
     });
     setMetodoPago('pago_movil');
     setErrorPago(null);
@@ -400,7 +462,8 @@ export default function DeudasPage() {
   // Abrir modal para cancelar un consumo específico
   const handleAbrirPagoConsumoIndividual = (
     deuda: DeudaRegistro,
-    nombreEstudiante: string
+    nombreEstudiante: string,
+    clienteId?: string | null
   ) => {
     let fechaTxt = deuda.fecha;
     try {
@@ -418,6 +481,7 @@ export default function DeudasPage() {
       montoUsd: deuda.monto_total_usd,
       idsConsumos: [deuda.id],
       nombreEstudiante,
+      clienteId: clienteId || deuda.cliente_id || null,
     });
     setMetodoPago('pago_movil');
     setErrorPago(null);
@@ -430,6 +494,19 @@ export default function DeudasPage() {
     setErrorPago(null);
 
     try {
+      // Si el método seleccionado es saldo a favor, verificar que el cliente posea crédito suficiente
+      if (metodoPago === 'saldo_favor') {
+        const saldoDisponible = modalLiquidacion.clienteId
+          ? saldosClientes[modalLiquidacion.clienteId]?.saldoAFavorTotalUsd || 0
+          : 0;
+
+        if (saldoDisponible < modalLiquidacion.montoUsd) {
+          throw new Error(
+            `Saldo a favor insuficiente (+${formatUSD(saldoDisponible)} disponible vs ${formatUSD(modalLiquidacion.montoUsd)} a liquidar). Usa la opción 'Abonar' para realizar un pago mixto o abonar la diferencia.`
+          );
+        }
+      }
+
       const { error } = await supabase
         .from('consumos')
         .update({
@@ -459,6 +536,58 @@ export default function DeudasPage() {
       );
     } finally {
       setProcesandoPago(false);
+    }
+  };
+
+  // Abrir Modal de Abono / Anticipo
+  const handleAbrirAbono = (c: Cliente | null) => {
+    setModalAbono({
+      abierto: true,
+      cliente: c,
+      montoUsd: '',
+      metodoPago: 'efectivo_usd',
+      guardando: false,
+      error: null,
+    });
+  };
+
+  // Confirmar Abono aplicando reglas de negocio estrictas
+  const handleConfirmarAbono = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!modalAbono.cliente) {
+      setModalAbono((prev) => ({ ...prev, error: 'Por favor selecciona un cliente.' }));
+      return;
+    }
+    const monto = parseFloat(modalAbono.montoUsd.replace(',', '.'));
+    if (!monto || monto <= 0) {
+      setModalAbono((prev) => ({ ...prev, error: 'Ingresa un monto válido mayor a 0.' }));
+      return;
+    }
+
+    setModalAbono((prev) => ({ ...prev, guardando: true, error: null }));
+    try {
+      const res = await procesarAbonoCliente({
+        clienteId: modalAbono.cliente.id,
+        montoUsd: monto,
+        metodoPago: modalAbono.metodoPago,
+        tasaBcv,
+      });
+
+      setModalAbono((prev) => ({ ...prev, abierto: false }));
+      setNotificacion({
+        tipo: 'exito',
+        texto: res.mensaje,
+      });
+      setTimeout(() => setNotificacion(null), 4500);
+      await cargarDeudas();
+      refrescarNotificacionesGlobales();
+    } catch (err: unknown) {
+      console.error('Error registrando abono:', err);
+      setModalAbono((prev) => ({
+        ...prev,
+        guardando: false,
+        error: err instanceof Error ? err.message : 'Error al registrar el abono.',
+      }));
     }
   };
 
@@ -702,6 +831,18 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
               </button>
             </div>
 
+            {/* Botón Registrar Abono / Saldo a Favor */}
+            <button
+              type="button"
+              onClick={() => handleAbrirAbono(null)}
+              className="flex items-center gap-1.5 rounded-2xl bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-emerald-700 transition active:scale-95"
+              title="Registrar abono de deuda o pago adelantado de saldo a favor"
+            >
+              <PiggyBank className="h-4 w-4" />
+              <span className="hidden sm:inline">Nuevo Abono / Saldo</span>
+              <span className="sm:hidden">Abonar</span>
+            </button>
+
             {/* Centro de Notificaciones y Alertas */}
             <NotificationBell />
           </div>
@@ -719,7 +860,7 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
       {/* Contenido Principal */}
       <main className="mx-auto flex-1 w-full max-w-7xl px-3 sm:px-6 lg:px-8 py-5 sm:py-6 overflow-x-hidden">
         {/* Tarjetas KPI de Resumen */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 mb-6">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-6">
           <div className="rounded-3xl border border-gray-200/80 bg-white p-5 shadow-xs">
             <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
               Total por Cobrar (USD)
@@ -751,6 +892,29 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
             </div>
             <p className="mt-1 text-xs text-amber-800/70">
               Calculado a {formatBs(tasaBcv)} por dólar
+            </p>
+          </div>
+
+          <div className="rounded-3xl border border-emerald-200/80 bg-gradient-to-br from-emerald-50/50 to-teal-50/30 p-5 shadow-xs">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold uppercase tracking-wider text-emerald-800">
+                Saldos a Favor (Crédito)
+              </span>
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
+                <Sparkles className="h-2.5 w-2.5 text-emerald-600" />
+                Prepagado
+              </span>
+            </div>
+            <div className="mt-2 flex items-baseline justify-between">
+              <span className="text-3xl font-black tracking-tight text-emerald-700">
+                +{formatUSD(totalSaldoAFavorGlobalUsd)}
+              </span>
+              <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-700">
+                <PiggyBank className="h-5 w-5" />
+              </div>
+            </div>
+            <p className="mt-1 font-mono text-xs font-semibold text-emerald-800/80">
+              +{formatBs(totalSaldoAFavorGlobalBs)} disponible
             </p>
           </div>
 
@@ -957,6 +1121,9 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
                 const esProf = esProfesorOPersonal(cuenta.cliente?.grado_seccion);
                 const rep = cuenta.cliente?.nombre_representante;
                 const tel = cuenta.cliente?.telefono_whatsapp;
+                const saldoAFavorEstudiante = cuenta.cliente?.id
+                  ? saldosClientes[cuenta.cliente.id]?.saldoAFavorTotalUsd || 0
+                  : 0;
 
                 let fechaRecienteTxt = cuenta.fechaMasReciente;
                 try {
@@ -1012,6 +1179,13 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
                             <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-900">
                               {cuenta.consumos.length} {cuenta.consumos.length === 1 ? 'consumo' : 'consumos'}
                             </span>
+                            {/* Saldo a Favor en verde con signo positivo */}
+                            {saldoAFavorEstudiante > 0 && (
+                              <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-800 shadow-2xs">
+                                <PiggyBank className="h-3 w-3 text-emerald-600" />
+                                <span>+{formatUSD(saldoAFavorEstudiante)} a favor</span>
+                              </span>
+                            )}
                           </div>
 
                           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
@@ -1051,7 +1225,7 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
                         </div>
 
                         {/* Botones de acción */}
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
                           {/* Botón WhatsApp Consolidado */}
                           <button
                             type="button"
@@ -1063,14 +1237,25 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
                             <span>WhatsApp</span>
                           </button>
 
-                          {/* Botón Abonar / Cancelar Cuenta Total */}
+                          {/* Botón Abonar / Anticipo */}
+                          <button
+                            type="button"
+                            onClick={() => handleAbrirAbono(cuenta.cliente)}
+                            className="flex items-center gap-1.5 rounded-2xl border border-emerald-300 bg-emerald-50 px-3.5 py-2 text-xs font-bold text-emerald-800 shadow-2xs hover:bg-emerald-100 transition active:scale-95"
+                            title="Registrar abono de deuda o anticipo"
+                          >
+                            <PiggyBank className="h-3.5 w-3.5 text-emerald-600" />
+                            <span>Abonar</span>
+                          </button>
+
+                          {/* Botón Liquidar Cuenta Total */}
                           <button
                             type="button"
                             onClick={() => handleAbrirPagoTotalEstudiante(cuenta)}
                             className="flex items-center gap-1.5 rounded-2xl bg-gray-900 px-4 py-2 text-xs font-bold text-white shadow-xs hover:bg-black transition active:scale-95"
                           >
                             <CreditCard className="h-3.5 w-3.5" />
-                            <span>Abonar Cuenta Total</span>
+                            <span>Liquidar Total</span>
                           </button>
                         </div>
                       </div>
@@ -1178,7 +1363,11 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
                                 <button
                                   type="button"
                                   onClick={() =>
-                                    handleAbrirPagoConsumoIndividual(consumo, estudiante)
+                                    handleAbrirPagoConsumoIndividual(
+                                      consumo,
+                                      estudiante,
+                                      cuenta.cliente?.id
+                                    )
                                   }
                                   className="flex items-center gap-1 rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-800 shadow-2xs hover:bg-gray-100 hover:border-gray-300 transition active:scale-95"
                                   title="Liquidar únicamente este consumo"
@@ -1273,12 +1462,38 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
               </div>
 
               <div className="mt-2.5 pt-2 border-t border-gray-200/60 flex items-center justify-between text-xs text-gray-600">
-                <span>Estudiante:</span>
+                <span>Estudiante / Cliente:</span>
                 <span className="font-bold text-indigo-900">
                   {modalLiquidacion.nombreEstudiante}
                 </span>
               </div>
             </div>
+
+            {/* Aviso de Saldo a Favor disponible si el cliente posee crédito */}
+            {(() => {
+              const saldoDisp = modalLiquidacion.clienteId
+                ? saldosClientes[modalLiquidacion.clienteId]?.saldoAFavorTotalUsd || 0
+                : 0;
+              if (saldoDisp <= 0) return null;
+              return (
+                <div className="mb-3 rounded-2xl border border-emerald-200 bg-emerald-50/80 p-3 text-xs text-emerald-900 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <PiggyBank className="h-4 w-4 text-emerald-600 shrink-0" />
+                    <div>
+                      <p className="font-bold">Saldo a favor disponible del cliente:</p>
+                      <p className="text-[11px] text-emerald-700">
+                        {saldoDisp >= modalLiquidacion.montoUsd
+                          ? 'Cubre el 100% de esta liquidación'
+                          : 'Cubre parcialmente esta deuda'}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="font-mono font-bold text-sm text-emerald-800">
+                    +{formatUSD(saldoDisp)}
+                  </span>
+                </div>
+              );
+            })()}
 
             {/* Métodos de Pago */}
             <div className="space-y-2">
@@ -1289,14 +1504,22 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
                 {METODOS_CANCELACION.map((metodo) => {
                   const seleccionado = metodoPago === metodo.id;
                   const Icono = metodo.icono;
+                  const saldoDisp = modalLiquidacion.clienteId
+                    ? saldosClientes[modalLiquidacion.clienteId]?.saldoAFavorTotalUsd || 0
+                    : 0;
+                  const esSaldoFavor = metodo.id === 'saldo_favor';
+                  const sinSaldo = esSaldoFavor && saldoDisp <= 0;
 
                   return (
                     <button
                       key={metodo.id}
                       type="button"
+                      disabled={sinSaldo}
                       onClick={() => setMetodoPago(metodo.id)}
                       className={`flex flex-col items-start rounded-2xl border p-3 text-left transition ${
-                        seleccionado
+                        sinSaldo
+                          ? 'opacity-40 cursor-not-allowed bg-gray-50 border-gray-200'
+                          : seleccionado
                           ? 'border-indigo-600 bg-indigo-50/60 ring-2 ring-indigo-600/20 shadow-xs'
                           : 'border-gray-200/80 bg-white hover:border-gray-300'
                       }`}
@@ -1324,6 +1547,11 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
                       <span className="text-xs font-bold text-gray-900 leading-tight">
                         {metodo.nombre}
                       </span>
+                      {esSaldoFavor && (
+                        <span className="text-[10px] font-medium text-emerald-700 mt-0.5">
+                          {saldoDisp > 0 ? `Disp: +${formatUSD(saldoDisp)}` : 'Sin saldo'}
+                        </span>
+                      )}
                     </button>
                   );
                 })}
@@ -1374,6 +1602,276 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
                 )}
               </button>
             </div>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+
+      {/* Modal para Registrar Abono / Depósito de Saldo a Favor */}
+      <Dialog.Root
+        open={modalAbono.abierto}
+        onOpenChange={(abierto) => setModalAbono((prev) => ({ ...prev, abierto }))}
+      >
+        <Dialog.Portal>
+          <Dialog.Overlay
+            {...dragScrollAbono.overlayProps}
+            className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs transition-opacity animate-in fade-in"
+          />
+          <Dialog.Content
+            style={dragScrollAbono.style}
+            {...dragScrollAbono.dragProps}
+            className="fixed inset-x-0 bottom-0 z-50 max-h-[92dvh] sm:max-h-[90vh] overflow-y-auto overscroll-contain touch-scroll-ios rounded-t-3xl sm:rounded-3xl border-t sm:border border-gray-200/90 bg-white p-4 sm:p-6 pb-28 sm:pb-6 shadow-2xl outline-none duration-300 animate-in slide-in-from-bottom sm:slide-in-from-bottom-0 sm:fade-in-0 sm:zoom-in-95 sm:inset-auto sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:w-[95vw] sm:max-w-lg cursor-grab active:cursor-grabbing"
+          >
+            {/* Manija táctil móvil */}
+            <div
+              className="mx-auto mb-3 -mt-1 flex h-6 w-full cursor-grab active:cursor-grabbing items-center justify-center sm:hidden touch-none"
+              title="Deslizar hacia abajo para cerrar"
+            >
+              <div className="h-1.5 w-12 rounded-full bg-gray-300 active:bg-gray-400 transition-colors" />
+            </div>
+
+            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-700">
+                  <PiggyBank className="h-5 w-5" />
+                </div>
+                <div>
+                  <Dialog.Title className="text-base sm:text-lg font-bold text-gray-900">
+                    Abono / Saldo a Favor
+                  </Dialog.Title>
+                  <Dialog.Description className="text-xs text-gray-500">
+                    Liquidación de deuda prioritaria y depósito de saldo a favor
+                  </Dialog.Description>
+                </div>
+              </div>
+              <Dialog.Close asChild>
+                <button
+                  type="button"
+                  disabled={modalAbono.guardando}
+                  className="rounded-xl p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </Dialog.Close>
+            </div>
+
+            {modalAbono.error && (
+              <div className="mt-3 flex items-start gap-2 rounded-2xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">
+                <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                <span>{modalAbono.error}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleConfirmarAbono} className="mt-4 space-y-4">
+              {/* Selección del Cliente si no fue preseleccionado */}
+              {!modalAbono.cliente ? (
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">
+                    Seleccionar Cliente o Estudiante *
+                  </label>
+                  <select
+                    onChange={(e) => {
+                      const c = todosLosClientes.find((cl) => cl.id === e.target.value) || null;
+                      setModalAbono((prev) => ({ ...prev, cliente: c, error: null }));
+                    }}
+                    defaultValue=""
+                    className="w-full rounded-2xl border border-gray-200 bg-white py-2.5 px-3 text-xs font-bold text-gray-900 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 outline-none"
+                  >
+                    <option value="" disabled>-- Elige un cliente para abonar --</option>
+                    {todosLosClientes.map((cl) => {
+                      const s = saldosClientes[cl.id];
+                      const tieneDeuda = (s?.deudaTotalUsd || 0) > 0;
+                      const tieneSaldo = (s?.saldoAFavorTotalUsd || 0) > 0;
+                      let label = `${cl.nombre_estudiante} (${cl.grado_seccion || 'Sin sección'})`;
+                      if (tieneDeuda) label += ` [Debe: $${s.deudaTotalUsd.toFixed(2)}]`;
+                      if (tieneSaldo) label += ` [A favor: +$${s.saldoAFavorTotalUsd.toFixed(2)}]`;
+                      return (
+                        <option key={cl.id} value={cl.id}>
+                          {label}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-gray-200/80 bg-gray-50/70 p-3.5">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs text-gray-500 uppercase font-semibold">Cliente seleccionado</p>
+                      <h4 className="font-bold text-sm text-gray-900">
+                        {modalAbono.cliente.nombre_estudiante}
+                      </h4>
+                      <p className="text-xs text-indigo-700 font-medium">
+                        {modalAbono.cliente.grado_seccion || 'Personal / General'}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setModalAbono((prev) => ({ ...prev, cliente: null }))}
+                      className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 underline"
+                    >
+                      Cambiar
+                    </button>
+                  </div>
+
+                  <div className="mt-2.5 pt-2 border-t border-gray-200/60 grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <span className="text-gray-500 text-[11px]">Deuda Actual:</span>
+                      <p className="font-bold text-gray-900">
+                        {formatUSD(saldosClientes[modalAbono.cliente.id]?.deudaTotalUsd || 0)}
+                      </p>
+                    </div>
+                    <div>
+                      <span className="text-gray-500 text-[11px]">Saldo a Favor Actual:</span>
+                      <p className="font-bold text-emerald-700">
+                        +{formatUSD(saldosClientes[modalAbono.cliente.id]?.saldoAFavorTotalUsd || 0)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Monto a Abonar */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">
+                  Monto a Abonar (en $ USD) *
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-bold text-gray-400">
+                    $
+                  </span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={modalAbono.montoUsd}
+                    onChange={(e) =>
+                      setModalAbono((prev) => ({ ...prev, montoUsd: e.target.value, error: null }))
+                    }
+                    placeholder="0.00 (ej: 5.00 o 10.00)"
+                    className="w-full rounded-2xl border border-gray-200 bg-white py-2.5 pl-8 pr-3 text-sm font-bold text-gray-900 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 outline-none"
+                    autoFocus
+                  />
+                </div>
+                {modalAbono.montoUsd && parseFloat(modalAbono.montoUsd.replace(',', '.')) > 0 && (
+                  <p className="mt-1 text-[11px] font-mono text-gray-500">
+                    Equivalente en Bs: {formatBs(calcularConversionBs(parseFloat(modalAbono.montoUsd.replace(',', '.')), tasaBcv))} (Tasa BCV {formatBs(tasaBcv)})
+                  </p>
+                )}
+              </div>
+
+              {/* Selector de Método de Pago */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">
+                  Método de Pago Entregado *
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { id: 'efectivo_usd', label: 'Efectivo USD ($)' },
+                    { id: 'pago_movil', label: 'Pago Móvil (Bs)' },
+                    { id: 'zelle', label: 'Zelle ($)' },
+                    { id: 'punto_debito', label: 'Punto de Venta (Bs)' },
+                  ].map((met) => (
+                    <button
+                      key={met.id}
+                      type="button"
+                      onClick={() => setModalAbono((prev) => ({ ...prev, metodoPago: met.id }))}
+                      className={`p-2.5 rounded-xl border text-xs font-bold text-left transition ${
+                        modalAbono.metodoPago === met.id
+                          ? 'border-indigo-600 bg-indigo-50/70 text-indigo-950 ring-1 ring-indigo-600'
+                          : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                      }`}
+                    >
+                      {met.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Vista Previa de Liquidación Prioritaria de Negocio */}
+              {(() => {
+                const montoNum = parseFloat(modalAbono.montoUsd.replace(',', '.')) || 0;
+                if (montoNum <= 0 || !modalAbono.cliente) return null;
+                const deudaActual = saldosClientes[modalAbono.cliente.id]?.deudaTotalUsd || 0;
+
+                if (deudaActual > 0) {
+                  if (montoNum >= deudaActual) {
+                    const sobrante = Math.round((montoNum - deudaActual) * 100) / 100;
+                    return (
+                      <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-3 text-xs text-emerald-900 space-y-1">
+                        <p className="font-bold flex items-center gap-1.5 text-emerald-800">
+                          <Check className="h-4 w-4 text-emerald-600" />
+                          Regla de Liquidación Prioritaria:
+                        </p>
+                        <p className="text-[11px]">
+                          ✓ Se liquidarán prioritariamente los <strong>{formatUSD(deudaActual)}</strong> de deuda pendiente.
+                        </p>
+                        {sobrante > 0 ? (
+                          <p className="text-[11px] font-semibold text-emerald-800">
+                            ✓ El excedente de <strong>+{formatUSD(sobrante)}</strong> se acreditará automáticamente como <strong>Saldo a Favor</strong> disponible.
+                          </p>
+                        ) : (
+                          <p className="text-[11px]">
+                            ✓ La cuenta quedará 100% solvente ($0.00).
+                          </p>
+                        )}
+                      </div>
+                    );
+                  } else {
+                    const restante = Math.round((deudaActual - montoNum) * 100) / 100;
+                    return (
+                      <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-3 text-xs text-amber-900 space-y-1">
+                        <p className="font-bold text-amber-800">Abono Parcial a Deuda:</p>
+                        <p className="text-[11px]">
+                          ✓ Se abonarán los <strong>{formatUSD(montoNum)}</strong> a la deuda pendiente.
+                        </p>
+                        <p className="text-[11px]">
+                          ✓ La deuda restante será de <strong>{formatUSD(restante)}</strong>.
+                        </p>
+                      </div>
+                    );
+                  }
+                } else {
+                  return (
+                    <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-3 text-xs text-emerald-900 space-y-1">
+                      <p className="font-bold flex items-center gap-1.5 text-emerald-800">
+                        <Sparkles className="h-4 w-4 text-emerald-600" />
+                        Abono sin Deuda Previa:
+                      </p>
+                      <p className="text-[11px]">
+                        ✓ El cliente no posee deuda pendiente. El monto total de <strong>+{formatUSD(montoNum)}</strong> se guardará directamente como <strong>Saldo a Favor</strong> disponible.
+                      </p>
+                    </div>
+                  );
+                }
+              })()}
+
+              {/* Botones de acción */}
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-gray-100">
+                <Dialog.Close asChild>
+                  <button
+                    type="button"
+                    disabled={modalAbono.guardando}
+                    className="rounded-xl border border-gray-200 px-4 py-2.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition"
+                  >
+                    Cancelar
+                  </button>
+                </Dialog.Close>
+
+                <button
+                  type="submit"
+                  disabled={modalAbono.guardando || !(parseFloat(modalAbono.montoUsd.replace(',', '.')) > 0)}
+                  className="flex items-center gap-2 rounded-2xl bg-indigo-600 px-5 py-2.5 text-xs font-bold text-white shadow-xs hover:bg-indigo-700 transition disabled:opacity-50"
+                >
+                  {modalAbono.guardando ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <span>Registrando en Supabase...</span>
+                    </>
+                  ) : (
+                    <span>Confirmar Abono</span>
+                  )}
+                </button>
+              </div>
+            </form>
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
