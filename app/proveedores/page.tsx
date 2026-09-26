@@ -1126,33 +1126,55 @@ export default function ProveedoresPage() {
                     </div>
 
                     {/* Acciones del Footer */}
-                    <div className="mt-4 pt-3 border-t border-gray-100">
+                    <div className="mt-4 pt-3 border-t border-gray-100 flex items-center gap-2">
                       {cuenta.pagado ? (
-                        <div className="flex items-center justify-between">
-                          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700">
-                            <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                        <>
+                          <div className="flex-1 flex items-center gap-1.5 text-xs font-semibold text-emerald-700">
+                            <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
                             <span>Factura Liquidada</span>
-                          </span>
+                          </div>
 
                           <button
                             type="button"
                             onClick={() => handleRevertirPago(cuenta)}
-                            className="inline-flex items-center gap-1 text-[11px] font-semibold text-gray-400 hover:text-gray-700 transition"
+                            className="inline-flex items-center gap-1 rounded-xl border border-gray-200 bg-white px-2 py-1.5 text-[11px] font-semibold text-gray-500 hover:bg-gray-50 transition"
                             title="Revertir estado a Pendiente"
                           >
                             <RotateCcw className="h-3 w-3" />
                             <span>Revertir</span>
                           </button>
-                        </div>
+
+                          <button
+                            type="button"
+                            onClick={() => handleAbrirEliminar(cuenta)}
+                            className="inline-flex items-center gap-1 rounded-xl border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[11px] font-bold text-rose-700 hover:bg-rose-100 transition active:scale-95"
+                            title="Eliminar esta cuenta por pagar"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                            <span>Eliminar</span>
+                          </button>
+                        </>
                       ) : (
-                        <button
-                          type="button"
-                          onClick={() => handleAbrirLiquidar(cuenta)}
-                          className="w-full flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 py-2.5 px-4 text-xs font-bold text-white shadow-xs hover:bg-emerald-700 transition active:scale-98"
-                        >
-                          <CheckCircle2 className="h-4 w-4" />
-                          <span>Marcar como Pagado</span>
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => handleAbrirLiquidar(cuenta)}
+                            className="flex-1 flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 py-2.5 px-3 text-xs font-bold text-white shadow-xs hover:bg-emerald-700 transition active:scale-98"
+                          >
+                            <CheckCircle2 className="h-4 w-4" />
+                            <span>Marcar como Pagado</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleAbrirEliminar(cuenta)}
+                            className="flex items-center justify-center gap-1 rounded-2xl border border-rose-200/90 bg-rose-50/80 hover:bg-rose-100 px-3 py-2.5 text-xs font-bold text-rose-700 transition active:scale-95"
+                            title="Eliminar cuenta cargada por error"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            <span>Eliminar</span>
+                          </button>
+                        </>
                       )}
                     </div>
                   </motion.div>
@@ -1479,22 +1501,44 @@ export default function ProveedoresPage() {
               )}
 
               {/* Botones de Acción */}
-              <div className="flex items-center justify-end gap-2 border-t border-gray-100 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setModalForm((prev) => ({ ...prev, abierto: false }))}
-                  className="rounded-2xl border border-gray-200 bg-white px-4 py-2.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={modalForm.guardando}
-                  className="flex items-center gap-2 rounded-2xl bg-indigo-600 px-5 py-2.5 text-xs font-bold text-white shadow-xs hover:bg-indigo-700 transition disabled:opacity-60"
-                >
-                  {modalForm.guardando && <Loader2 className="h-4 w-4 animate-spin" />}
-                  <span>{modalForm.modo === 'crear' ? 'Registrar Factura' : 'Guardar Cambios'}</span>
-                </button>
+              <div className="flex items-center justify-between gap-2 border-t border-gray-100 pt-4">
+                {modalForm.modo === 'editar' && modalForm.id ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const c = cuentas.find((x) => x.id === modalForm.id);
+                      if (c) {
+                        setModalForm((prev) => ({ ...prev, abierto: false }));
+                        handleAbrirEliminar(c);
+                      }
+                    }}
+                    className="flex items-center gap-1 rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100 transition active:scale-95"
+                    title="Eliminar esta cuenta"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    <span>Eliminar Cuenta</span>
+                  </button>
+                ) : (
+                  <div />
+                )}
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setModalForm((prev) => ({ ...prev, abierto: false }))}
+                    className="rounded-2xl border border-gray-200 bg-white px-4 py-2.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={modalForm.guardando}
+                    className="flex items-center gap-2 rounded-2xl bg-indigo-600 px-5 py-2.5 text-xs font-bold text-white shadow-xs hover:bg-indigo-700 transition disabled:opacity-60"
+                  >
+                    {modalForm.guardando && <Loader2 className="h-4 w-4 animate-spin" />}
+                    <span>{modalForm.modo === 'crear' ? 'Registrar Factura' : 'Guardar Cambios'}</span>
+                  </button>
+                </div>
               </div>
             </form>
           </Dialog.Content>
@@ -1654,12 +1698,12 @@ export default function ProveedoresPage() {
                 <AlertTriangle className="h-5 w-5" />
               </div>
               <Dialog.Title className="text-base font-bold text-gray-900">
-                Eliminar Registro
+                Eliminar Cuenta por Pagar
               </Dialog.Title>
             </div>
 
             <Dialog.Description className="text-xs text-gray-500 leading-relaxed">
-              ¿Estás seguro de que deseas eliminar la factura de{' '}
+              ¿Estás seguro de que deseas eliminar la cuenta por pagar de{' '}
               <strong className="text-gray-900">
                 {modalEliminar.cuenta?.nombre_proveedor}
               </strong>{' '}
@@ -1667,7 +1711,7 @@ export default function ProveedoresPage() {
               <strong className="text-gray-900">
                 {modalEliminar.cuenta && formatUSD(modalEliminar.cuenta.monto_usd)}
               </strong>
-              ? Esta acción no se puede deshacer.
+              ? Esta acción borrará el registro del historial de proveedores (ideal para corregir cuentas cargadas por error) y no se puede deshacer.
             </Dialog.Description>
 
             {modalEliminar.error && (

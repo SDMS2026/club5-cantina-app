@@ -16,6 +16,7 @@ import {
   CreditCard,
   DollarSign,
   Smartphone,
+  Phone,
   Landmark,
   X,
   RefreshCw,
@@ -34,6 +35,7 @@ import {
   Wallet,
   PiggyBank,
   Sparkles,
+  Banknote,
 } from 'lucide-react';
 import { obtenerTasaBCV, TASA_BCV_FALLBACK_DEFAULT } from '@/lib/dolarApi';
 import { supabase } from '@/lib/supabaseClient';
@@ -88,7 +90,7 @@ interface CuentaEstudianteAgrupada {
   fechaMasAntigua: string;
 }
 
-type MetodoCancelacionId = 'pago_movil' | 'efectivo_usd' | 'zelle' | 'punto_debito' | 'saldo_favor';
+type MetodoCancelacionId = 'pago_movil' | 'efectivo_usd' | 'efectivo_bs' | 'zelle' | 'punto_debito' | 'saldo_favor';
 
 const METODOS_CANCELACION = [
   {
@@ -104,6 +106,13 @@ const METODOS_CANCELACION = [
     icono: DollarSign,
     descripcion: 'Pago directo en billetes divisa en cantina',
     moneda: 'USD',
+  },
+  {
+    id: 'efectivo_bs' as MetodoCancelacionId,
+    nombre: 'Efectivo Bs.',
+    icono: Banknote,
+    descripcion: 'Cobro en billetes bolívares en caja',
+    moneda: 'Bs',
   },
   {
     id: 'zelle' as MetodoCancelacionId,
@@ -1211,8 +1220,9 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
                               </span>
                             )}
                             {tel && (
-                              <span className="font-mono text-emerald-700 font-semibold">
-                                📞 {tel}
+                              <span className="inline-flex items-center gap-1 font-mono text-emerald-700 font-semibold">
+                                <Phone className="h-3 w-3 shrink-0 text-emerald-600" />
+                                <span>{tel}</span>
                               </span>
                             )}
                             <span className="flex items-center gap-1 text-gray-400">
@@ -1704,6 +1714,7 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
                 <div className="grid grid-cols-2 gap-2">
                   {[
                     { id: 'efectivo_usd', label: 'Efectivo USD', sub: 'Cobro en $', moneda: 'USD', icono: DollarSign },
+                    { id: 'efectivo_bs', label: 'Efectivo Bs.', sub: 'Billetes (Bs)', moneda: 'Bs', icono: Banknote },
                     { id: 'pago_movil', label: 'Pago Móvil', sub: 'Bolívares (Bs)', moneda: 'Bs', icono: Smartphone },
                     { id: 'punto_debito', label: 'Punto de Venta', sub: 'Tarjeta Débito (Bs)', moneda: 'Bs', icono: CreditCard },
                     { id: 'zelle', label: 'Zelle', sub: 'Transferencia $', moneda: 'USD', icono: Wallet },
@@ -1768,7 +1779,7 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
 
               {/* Inputs de Monto Bimoneda con Validación Numérica Estricta */}
               {(() => {
-                const esMetodoBs = modalAbono.metodoPago === 'pago_movil' || modalAbono.metodoPago === 'punto_debito';
+                const esMetodoBs = modalAbono.metodoPago === 'pago_movil' || modalAbono.metodoPago === 'punto_debito' || modalAbono.metodoPago === 'efectivo_bs';
 
                 return (
                   <div className="rounded-2xl border border-gray-200/90 dark:border-slate-800 bg-gray-50/60 dark:bg-slate-900/60 p-3 space-y-3">

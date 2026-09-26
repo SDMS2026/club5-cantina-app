@@ -22,6 +22,7 @@ import {
   Loader2,
   Star,
   Sparkles,
+  History,
 } from 'lucide-react';
 import { formatBs } from '@/lib/utils';
 import { supabase } from '@/lib/supabaseClient';
@@ -43,6 +44,12 @@ const NAV_ITEMS: NavItem[] = [
     href: '/',
     icono: Store,
     descripcion: 'Cobro rápido y catálogo',
+  },
+  {
+    nombre: 'Historial de Transacciones',
+    href: '/transacciones',
+    icono: History,
+    descripcion: 'Auditoría, cobros y anulaciones',
   },
   {
     nombre: 'Inventario / Productos',

@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabaseClient';
-import { procesarAbonoCliente } from '@/lib/clientBalance';
-import { obtenerTasaBCV, TASA_BCV_FALLBACK_DEFAULT } from '@/lib/dolarApi';
 import { isMaintenanceMode } from '@/lib/maintenance';
 
 export const dynamic = 'force-dynamic';
@@ -22,8 +20,11 @@ interface NuevoClienteExtraido {
 interface RespuestaVozPos {
   accion: 'orden_pos' | 'abono_saldo_favor' | 'guardar_vuelto';
   monto_abono_usd?: number;
-  metodo_pago_sugerido?: 'efectivo_usd' | 'pago_movil' | 'punto_debito' | 'pendiente' | 'saldo_favor';
+  metodo_pago_sugerido?: 'efectivo_usd' | 'efectivo_bs' | 'pago_movil' | 'punto_debito' | 'pendiente' | 'saldo_favor';
   cliente_id: string | null;
+  cliente_mencionado?: string | null;
+  cliente_no_encontrado?: string | null;
+  error_validacion?: string | null;
   cliente_creado?: {
     id: string;
     nombre_estudiante: string;
@@ -143,24 +144,27 @@ INSTRUCCIONES CLAVE DE INTERPRETACIÓN:
    - "saldo_favor": Si la orden indica expresamente pagar con su saldo a favor, crédito a favor o dinero disponible (ej: "paga usando su saldo a favor", "cóbralo de su crédito a favor", "de su saldo"). pagado = true.
    - "pendiente": Si se indica fiado, anotado a la cuenta, etc. pagado = false.
    - "pago_movil": Si menciona pagar con pago móvil o transferencia.
-   - "efectivo_usd": Cobro en efectivo o no especificado.
+   - "efectivo_bs": Si menciona pagar en efectivo bolívares (Bs.).
+   - "efectivo_usd": Cobro en efectivo dólares o no especificado.
 
 3. Mapeo de Productos ("items"):
    - Para pedidos de productos, relaciona cada ítem con el "id" más apropiado del catálogo.
    - Si la acción es "abono_saldo_favor" o "guardar_vuelto", "items" debe ser una lista vacía [].
 
-4. Mapeo de Cliente ("cliente_id"):
-   - Identifica el cliente mencionado y coloca su "id" exacto de la base de datos. Si no existe, null.
+4. Detección y Mapeo de Cliente:
+   - "cliente_mencionado": Si la frase menciona el nombre, apellido o referencia de una persona a quien va dirigida la operación (ej: "Felipe", "Alexis Real", "Mateo Rivas", "profesora Sofía"), extrae exactamente ese nombre como texto (ej: "Felipe"). Si la orden fue anónima o genérica (ej: "una empanada y una malta"), coloca null.
+   - "cliente_id": Si "cliente_mencionado" coincide con alguno de los clientes registrados en CONTEXTO DE CLIENTES Y ESTUDIANTES YA REGISTRADOS, coloca su "id" exacto de la base de datos. Si no coincide con ninguno registrado, DEBES colocar null.
 
-5. Registro de Nuevo Cliente ("nuevo_cliente"):
-   - Si la frase indica agregar a una persona al sistema (ej: "Añade al sistema al estudiante Mario Gómez, 5to grado..."):
-     Extrae su nombre_estudiante, grado_seccion, nombre_representante, cargo, telefono_whatsapp. Si no, null.
+5. Registro Expreso de Nuevo Cliente ("nuevo_cliente"):
+   - Coloca objeto nuevo_cliente ÚNICAMENTE si la frase pide explícitamente agregar o registrar a una persona al sistema (ej: "Añade al sistema al estudiante Mario Gómez, 5to grado...", "Registra al alumno...").
+   - Si la persona solo dice "abona 10$ a Felipe" o "anótale a Felipe", NO es un registro nuevo (nuevo_cliente debe ser null, y cliente_mencionado debe ser "Felipe").
 
 ESQUEMA OBLIGATORIO DE RESPUESTA JSON:
 {
   "accion": "orden_pos" | "abono_saldo_favor" | "guardar_vuelto",
   "monto_abono_usd": 0.0,
-  "metodo_pago_sugerido": "efectivo_usd" | "pago_movil" | "punto_debito" | "pendiente" | "saldo_favor",
+  "metodo_pago_sugerido": "efectivo_usd" | "efectivo_bs" | "pago_movil" | "punto_debito" | "pendiente" | "saldo_favor",
+  "cliente_mencionado": "Nombre mencionado o null",
   "cliente_id": "string_id_o_null",
   "nuevo_cliente": {
     "nombre_estudiante": "Nombre",
@@ -264,6 +268,50 @@ ESQUEMA OBLIGATORIO DE RESPUESTA JSON:
       parsedResult = JSON.parse(cleaned);
     }
 
+    const clienteMencionado = typeof parsedResult.cliente_mencionado === 'string' && parsedResult.cliente_mencionado.trim()
+      ? parsedResult.cliente_mencionado.trim()
+      : null;
+
+    let clienteIdResuelto = typeof parsedResult.cliente_id === 'string' && parsedResult.cliente_id.trim()
+      ? parsedResult.cliente_id.trim()
+      : null;
+
+    let clienteNoEncontrado: string | null = null;
+
+    // Normalizar texto para comparaciones robustas (sin acentos, minúsculas)
+    const normalizar = (s: string | null | undefined) =>
+      (s || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+    // Si se mencionó a un cliente específico pero no vino con ID de Gemini,
+    // buscar en los clientes activos para evitar falsos negativos:
+    if (clienteMencionado && !clienteIdResuelto && !parsedResult.nuevo_cliente) {
+      const normMencionado = normalizar(clienteMencionado);
+
+      const coincidencias = (clientes || []).filter((c) => {
+        const nom = normalizar(c.nombre_estudiante);
+        return nom.includes(normMencionado) || normMencionado.includes(nom);
+      });
+
+      if (coincidencias.length >= 1) {
+        const exacta = coincidencias.find((c) => normalizar(c.nombre_estudiante) === normMencionado);
+        clienteIdResuelto = exacta ? exacta.id : coincidencias[0].id;
+      } else {
+        // Búsqueda directa en Supabase con ilike
+        const { data: dbMatches } = await supabase
+          .from('clientes')
+          .select('id, nombre_estudiante')
+          .ilike('nombre_estudiante', `%${clienteMencionado}%`)
+          .limit(1);
+
+        if (dbMatches && dbMatches.length > 0) {
+          clienteIdResuelto = dbMatches[0].id;
+        } else {
+          // El cliente nombrado NO existe en la base de datos
+          clienteNoEncontrado = clienteMencionado;
+        }
+      }
+    }
+
     // Normalizar y validar estructura
     const resultadoLimpio: RespuestaVozPos = {
       accion:
@@ -272,7 +320,12 @@ ESQUEMA OBLIGATORIO DE RESPUESTA JSON:
           : 'orden_pos',
       monto_abono_usd: Number(parsedResult.monto_abono_usd) || 0,
       metodo_pago_sugerido: parsedResult.metodo_pago_sugerido || (parsedResult.pagado === false ? 'pendiente' : 'efectivo_usd'),
-      cliente_id: typeof parsedResult.cliente_id === 'string' ? parsedResult.cliente_id : null,
+      cliente_id: clienteIdResuelto,
+      cliente_mencionado: clienteMencionado,
+      cliente_no_encontrado: clienteNoEncontrado,
+      error_validacion: clienteNoEncontrado
+        ? `No existe ningún cliente llamado "${clienteNoEncontrado}" registrado en la base de datos.`
+        : null,
       cliente_creado: null,
       nuevo_cliente: parsedResult.nuevo_cliente || null,
       items: Array.isArray(parsedResult.items)
@@ -284,11 +337,13 @@ ESQUEMA OBLIGATORIO DE RESPUESTA JSON:
             }))
         : [],
       pagado: typeof parsedResult.pagado === 'boolean' ? parsedResult.pagado : true,
-      resumen_interpretado: parsedResult.resumen_interpretado || 'Procesado con éxito',
+      resumen_interpretado: clienteNoEncontrado
+        ? `Aviso: El cliente "${clienteNoEncontrado}" no existe en la base de datos.`
+        : parsedResult.resumen_interpretado || 'Procesado con éxito',
       detalle_abono: null,
     };
 
-    // Si se dictó registrar a un nuevo estudiante, profesor o representante:
+    // Si se dictó referir o registrar expresamente a un nuevo estudiante, profesor o representante:
     if (parsedResult.nuevo_cliente && typeof parsedResult.nuevo_cliente.nombre_estudiante === 'string') {
       const nom = parsedResult.nuevo_cliente.nombre_estudiante.trim();
       const grado = parsedResult.nuevo_cliente.grado_seccion?.trim() || 'Estudiante';
@@ -296,17 +351,14 @@ ESQUEMA OBLIGATORIO DE RESPUESTA JSON:
         parsedResult.nuevo_cliente.cargo ||
         parsedResult.nuevo_cliente.nombre_representante ||
         ''
-      ).trim() || null;
-      const tel = parsedResult.nuevo_cliente.telefono_whatsapp?.trim() || null;
+      ).trim() || undefined;
+      const tel = parsedResult.nuevo_cliente.telefono_whatsapp?.trim() || undefined;
 
       if (nom) {
-        const normalizar = (s: string | null | undefined) =>
-          (s || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-
         // Consultar clientes que coincidan con el nombre
         const { data: alumnosMismoNombre } = await supabase
           .from('clientes')
-          .select('*')
+          .select('id, nombre_estudiante, grado_seccion, nombre_representante, telefono_whatsapp')
           .ilike('nombre_estudiante', `%${nom}%`);
 
         // Validación estricta: coincide al mismo tiempo nombre_estudiante Y grado_seccion
@@ -317,68 +369,24 @@ ESQUEMA OBLIGATORIO DE RESPUESTA JSON:
         );
 
         if (duplicadoMismaSeccion) {
-          // Si ya coincide en la misma sección, bloquear duplicado y asociar al alumno existente
-          let clienteActualizado = duplicadoMismaSeccion;
-          if (cargoOrep && !duplicadoMismaSeccion.nombre_representante) {
-            const { data: upd } = await supabase
-              .from('clientes')
-              .update({ nombre_representante: cargoOrep })
-              .eq('id', duplicadoMismaSeccion.id)
-              .select()
-              .single();
-            if (upd) clienteActualizado = upd;
-          }
-          resultadoLimpio.cliente_id = clienteActualizado.id;
-          resultadoLimpio.cliente_creado = clienteActualizado;
-          resultadoLimpio.resumen_interpretado = `Aviso: El alumno "${nom}" ya existe en "${grado}". Se asoció su registro existente para evitar duplicados. ${resultadoLimpio.resumen_interpretado}`;
+          resultadoLimpio.cliente_id = duplicadoMismaSeccion.id;
+          resultadoLimpio.cliente_no_encontrado = null;
+          resultadoLimpio.error_validacion = null;
+          resultadoLimpio.nuevo_cliente = null;
+          resultadoLimpio.resumen_interpretado = `Cliente existente detectado: ${duplicadoMismaSeccion.nombre_estudiante} (${duplicadoMismaSeccion.grado_seccion || 'Estudiante'}).`;
         } else {
-          // Si está en sección distinta o no existe, permitir registrar al nuevo alumno
-          const { data: insertado, error: errIns } = await supabase
-            .from('clientes')
-            .insert([
-              {
-                nombre_estudiante: nom,
-                grado_seccion: grado,
-                nombre_representante: cargoOrep,
-                telefono_whatsapp: tel,
-              },
-            ])
-            .select()
-            .single();
-
-          if (!errIns && insertado) {
-            resultadoLimpio.cliente_id = insertado.id;
-            resultadoLimpio.cliente_creado = insertado;
-            resultadoLimpio.resumen_interpretado = `¡${nom} (${grado}) registrado con éxito! ${resultadoLimpio.resumen_interpretado}`;
-          }
+          resultadoLimpio.cliente_id = null;
+          resultadoLimpio.cliente_no_encontrado = null;
+          resultadoLimpio.error_validacion = null;
+          resultadoLimpio.nuevo_cliente = {
+            nombre_estudiante: nom,
+            grado_seccion: grado,
+            nombre_representante: cargoOrep,
+            telefono_whatsapp: tel,
+          };
+          resultadoLimpio.resumen_interpretado = `Nuevo registro sugerido: ${nom} (${grado}).`;
         }
       }
-    }
-
-    // Si la acción es "abono_saldo_favor" o "guardar_vuelto", procesar el abono directamente en Supabase
-    if (
-      (resultadoLimpio.accion === 'abono_saldo_favor' || resultadoLimpio.accion === 'guardar_vuelto') &&
-      resultadoLimpio.cliente_id &&
-      resultadoLimpio.monto_abono_usd &&
-      resultadoLimpio.monto_abono_usd > 0
-    ) {
-      let tasaBcvActual = TASA_BCV_FALLBACK_DEFAULT;
-      try {
-        tasaBcvActual = await obtenerTasaBCV();
-      } catch (e) {
-        console.warn('Fallback a tasa por defecto para abono:', e);
-      }
-
-      const resAbono = await procesarAbonoCliente({
-        clienteId: resultadoLimpio.cliente_id,
-        montoUsd: resultadoLimpio.monto_abono_usd,
-        metodoPago: resultadoLimpio.accion === 'guardar_vuelto' ? 'vuelto_saldo_favor' : 'abono_saldo_favor',
-        tasaBcv: tasaBcvActual,
-        esVuelto: resultadoLimpio.accion === 'guardar_vuelto',
-      });
-
-      resultadoLimpio.detalle_abono = resAbono;
-      resultadoLimpio.resumen_interpretado = resAbono.mensaje;
     }
 
     return NextResponse.json(resultadoLimpio);

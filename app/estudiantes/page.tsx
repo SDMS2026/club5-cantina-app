@@ -39,6 +39,11 @@ import {
   DollarSign,
   Smartphone,
   CreditCard,
+  Banknote,
+  History,
+  RotateCcw,
+  FileText,
+  Hash,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import { obtenerTasaBCV, TASA_BCV_FALLBACK_DEFAULT } from '@/lib/dolarApi';
@@ -74,6 +79,8 @@ import { useModalDragScroll } from '@/lib/useModalDragScroll';
 import {
   obtenerSaldosTodosClientes,
   procesarAbonoCliente,
+  anularConsumo,
+  parseConsumoAudit,
   ResumenSaldoCliente,
 } from '@/lib/clientBalance';
 
@@ -255,6 +262,43 @@ export default function EstudiantesPage() {
   const dragScrollEliminar = useModalDragScroll({
     isOpen: modalEliminar.abierto,
     onDismiss: () => setModalEliminar((prev) => ({ ...prev, abierto: false })),
+  });
+
+  // Modal Ficha del Estudiante e Historial de Consumos
+  const [modalFicha, setModalFicha] = useState<{
+    abierto: boolean;
+    cliente: Cliente | null;
+    consumos: any[];
+    cargando: boolean;
+  }>({
+    abierto: false,
+    cliente: null,
+    consumos: [],
+    cargando: false,
+  });
+
+  // Modal Confirmar Anulación desde la Ficha
+  const [modalAnular, setModalAnular] = useState<{
+    abierto: boolean;
+    consumo: any | null;
+    procesando: boolean;
+    error: string | null;
+  }>({
+    abierto: false,
+    consumo: null,
+    procesando: false,
+    error: null,
+  });
+
+  const dragScrollFicha = useModalDragScroll({
+    isOpen: modalFicha.abierto,
+    onDismiss: () => setModalFicha((prev) => ({ ...prev, abierto: false })),
+  });
+
+  const dragScrollAnular = useModalDragScroll({
+    isOpen: modalAnular.abierto,
+    onDismiss: () =>
+      !modalAnular.procesando && setModalAnular((prev) => ({ ...prev, abierto: false })),
   });
 
   // 1. Cargar Tasa BCV
@@ -460,6 +504,107 @@ export default function EstudiantesPage() {
         guardando: false,
         error: err instanceof Error ? err.message : 'Error al registrar el abono.',
       }));
+    }
+  };
+
+  // Abrir Ficha del Estudiante e Historial de Consumos
+  const handleAbrirFicha = async (cliente: Cliente) => {
+    setModalFicha({
+      abierto: true,
+      cliente,
+      consumos: [],
+      cargando: true,
+    });
+
+    try {
+      const { data, error } = await supabase
+        .from('consumos')
+        .select(`
+          id,
+          cliente_id,
+          monto_total_usd,
+          tasa_bcv_historica,
+          metodo_pago,
+          pagado,
+          fecha,
+          consumo_detalles (
+            id,
+            cantidad,
+            precio_unitario_usd,
+            productos (
+              id,
+              nombre
+            )
+          )
+        `)
+        .eq('cliente_id', cliente.id)
+        .order('fecha', { ascending: false });
+
+      if (!error && data) {
+        setModalFicha((prev) => ({ ...prev, consumos: data, cargando: false }));
+      } else {
+        setModalFicha((prev) => ({ ...prev, cargando: false }));
+      }
+    } catch (e) {
+      console.error('Error cargando consumos de cliente:', e);
+      setModalFicha((prev) => ({ ...prev, cargando: false }));
+    }
+  };
+
+  // Confirmar Anulación de Transacción desde la Ficha
+  const handleConfirmarAnulacionDesdeFicha = async () => {
+    if (!modalAnular.consumo) return;
+    setModalAnular((prev) => ({ ...prev, procesando: true, error: null }));
+
+    try {
+      const res = await anularConsumo({
+        consumoId: modalAnular.consumo.id,
+      });
+
+      setNotificacion({
+        tipo: 'exito',
+        texto: res.mensaje,
+      });
+      setTimeout(() => setNotificacion(null), 4000);
+
+      setModalAnular({
+        abierto: false,
+        consumo: null,
+        procesando: false,
+        error: null,
+      });
+
+      await cargarDatos();
+      if (modalFicha.cliente) {
+        const { data } = await supabase
+          .from('consumos')
+          .select(`
+            id,
+            cliente_id,
+            monto_total_usd,
+            tasa_bcv_historica,
+            metodo_pago,
+            pagado,
+            fecha,
+            consumo_detalles (
+              id,
+              cantidad,
+              precio_unitario_usd,
+              productos (
+                id,
+                nombre
+              )
+            )
+          `)
+          .eq('cliente_id', modalFicha.cliente.id)
+          .order('fecha', { ascending: false });
+
+        setModalFicha((prev) => ({ ...prev, consumos: data || [] }));
+      }
+    } catch (err: unknown) {
+      console.error('Error anulando consumo desde ficha:', err);
+      const msg = err instanceof Error ? err.message : 'Error al anular la transacción.';
+      setModalAnular((prev) => ({ ...prev, procesando: false, error: msg }));
     }
   };
 
@@ -1310,8 +1455,15 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
                         )}
                         <div className="flex items-center justify-between text-gray-600">
                           <span className="text-gray-400 font-medium">Teléfono WhatsApp:</span>
-                          <span className="font-mono font-medium text-gray-800">
-                            {cliente.telefono_whatsapp || 'No registrado'}
+                          <span className="inline-flex items-center gap-1 font-mono font-medium text-gray-800">
+                            {cliente.telefono_whatsapp ? (
+                              <>
+                                <Phone className="h-3 w-3 text-emerald-600 shrink-0" />
+                                <span>{cliente.telefono_whatsapp}</span>
+                              </>
+                            ) : (
+                              'No registrado'
+                            )}
                           </span>
                         </div>
                       </div>
@@ -1413,17 +1565,28 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
                       <button
                         type="button"
                         onClick={() => handleAbrirWhatsApp(cliente)}
-                        className="flex-1 min-w-[130px] flex items-center justify-center gap-1.5 rounded-2xl border border-emerald-200/90 bg-emerald-50 px-2.5 py-2 text-xs font-bold text-emerald-800 shadow-2xs hover:bg-emerald-100 hover:border-emerald-300 transition active:scale-95"
+                        className="flex-1 min-w-[100px] flex items-center justify-center gap-1.5 rounded-2xl border border-emerald-200/90 bg-emerald-50 px-2.5 py-2 text-xs font-bold text-emerald-800 shadow-2xs hover:bg-emerald-100 hover:border-emerald-300 transition active:scale-95"
                       >
                         <MessageCircle className="h-3.5 w-3.5 text-emerald-600" />
                         <span>WhatsApp</span>
+                      </button>
+
+                      {/* Botón Ver Ficha / Historial de Consumos */}
+                      <button
+                        type="button"
+                        onClick={() => handleAbrirFicha(cliente)}
+                        className="flex items-center justify-center gap-1 rounded-2xl border border-gray-200 bg-white px-2.5 py-2 text-xs font-bold text-gray-700 shadow-2xs hover:bg-gray-50 hover:border-gray-300 transition active:scale-95"
+                        title="Ver ficha del estudiante y compras registradas"
+                      >
+                        <History className="h-3.5 w-3.5 text-indigo-600" />
+                        <span>Historial</span>
                       </button>
 
                       {/* Botón Abonar / Depositar Saldo a Favor */}
                       <button
                         type="button"
                         onClick={() => handleAbrirAbono(cliente)}
-                        className="flex items-center justify-center gap-1.5 rounded-2xl border border-indigo-200/90 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700 shadow-2xs hover:bg-indigo-100 hover:border-indigo-300 transition active:scale-95"
+                        className="flex items-center justify-center gap-1.5 rounded-2xl border border-indigo-200/90 bg-indigo-50 px-2.5 py-2 text-xs font-bold text-indigo-700 shadow-2xs hover:bg-indigo-100 hover:border-indigo-300 transition active:scale-95"
                         title="Registrar abono o pago adelantado para este cliente"
                       >
                         <PiggyBank className="h-3.5 w-3.5 text-indigo-600" />
@@ -2202,6 +2365,7 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
                 <div className="grid grid-cols-2 gap-2">
                   {[
                     { id: 'efectivo_usd', label: 'Efectivo USD', sub: 'Cobro en $', moneda: 'USD', icono: DollarSign },
+                    { id: 'efectivo_bs', label: 'Efectivo Bs.', sub: 'Billetes (Bs)', moneda: 'Bs', icono: Banknote },
                     { id: 'pago_movil', label: 'Pago Móvil', sub: 'Bolívares (Bs)', moneda: 'Bs', icono: Smartphone },
                     { id: 'punto_debito', label: 'Punto de Venta', sub: 'Tarjeta Débito (Bs)', moneda: 'Bs', icono: CreditCard },
                     { id: 'zelle', label: 'Zelle', sub: 'Transferencia $', moneda: 'USD', icono: Wallet },
@@ -2266,7 +2430,7 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
 
               {/* Inputs de Monto Bimoneda con Validación Numérica Estricta */}
               {(() => {
-                const esMetodoBs = modalAbono.metodoPago === 'pago_movil' || modalAbono.metodoPago === 'punto_debito';
+                const esMetodoBs = modalAbono.metodoPago === 'pago_movil' || modalAbono.metodoPago === 'punto_debito' || modalAbono.metodoPago === 'efectivo_bs';
 
                 return (
                   <div className="rounded-2xl border border-gray-200/90 dark:border-slate-800 bg-gray-50/60 dark:bg-slate-900/60 p-3 space-y-3">
@@ -2460,6 +2624,329 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
                 </button>
               </div>
             </form>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+
+      {/* Modal Ficha del Estudiante e Historial de Consumos (Radix UI Dialog) */}
+      <Dialog.Root
+        open={modalFicha.abierto}
+        onOpenChange={(abierto) => setModalFicha((prev) => ({ ...prev, abierto }))}
+      >
+        <Dialog.Portal>
+          <Dialog.Overlay
+            {...dragScrollFicha.overlayProps}
+            className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs transition-opacity animate-in fade-in"
+          />
+          <Dialog.Content
+            style={dragScrollFicha.style}
+            {...dragScrollFicha.dragProps}
+            className="fixed inset-x-0 bottom-0 z-50 max-h-[90dvh] overflow-y-auto overscroll-contain touch-scroll-ios rounded-t-3xl sm:rounded-3xl border-t sm:border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#0D111A] p-4 sm:p-6 pb-28 sm:pb-6 shadow-2xl outline-none duration-300 animate-in slide-in-from-bottom sm:slide-in-from-bottom-0 sm:fade-in-0 sm:zoom-in-95 sm:inset-auto sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:w-[95vw] sm:max-w-2xl cursor-grab active:cursor-grabbing"
+          >
+            {/* Manija táctil */}
+            <div className="mx-auto mb-3 -mt-1 flex h-6 w-full cursor-grab active:cursor-grabbing items-center justify-center sm:hidden touch-none">
+              <div className="h-1.5 w-12 rounded-full bg-gray-300 dark:bg-slate-700" />
+            </div>
+
+            {modalFicha.cliente && (() => {
+              const cli = modalFicha.cliente;
+              const s = cli.saldo !== undefined && cli.saldo !== null
+                ? Number(cli.saldo)
+                : (saldosClientes[cli.id]?.saldoNetoUsd || 0);
+              const saldoAFavor = s > 0 ? s : 0;
+              const deuda = s < 0 ? Math.abs(s) : 0;
+
+              return (
+                <div className="space-y-4">
+                  {/* Encabezado de la Ficha */}
+                  <div className="flex items-start justify-between border-b border-gray-100 dark:border-slate-800 pb-3">
+                    <div>
+                      <Dialog.Title className="text-base sm:text-lg font-black text-gray-900 dark:text-slate-100 flex items-center gap-2">
+                        <User className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
+                        <span>Ficha del Alumno / Cliente</span>
+                      </Dialog.Title>
+                      <Dialog.Description className="text-xs text-gray-500 dark:text-slate-400 mt-0.5">
+                        {cli.nombre_estudiante} &bull; {cli.grado_seccion || 'Sin sección'}
+                        {cli.nombre_representante ? ` &bull; Rep: ${cli.nombre_representante}` : ''}
+                      </Dialog.Description>
+                    </div>
+
+                    {/* Insignia de Saldo Actual */}
+                    <div className="text-right">
+                      {saldoAFavor > 0 ? (
+                        <span className="rounded-full bg-emerald-100 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 px-2.5 py-1 text-[11px] font-black text-emerald-800 dark:text-emerald-300">
+                          +{formatUSD(saldoAFavor)} a favor
+                        </span>
+                      ) : deuda > 0 ? (
+                        <span className="rounded-full bg-amber-100 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 px-2.5 py-1 text-[11px] font-black text-amber-800 dark:text-amber-300">
+                          -{formatUSD(deuda)} deudor
+                        </span>
+                      ) : (
+                        <span className="rounded-full bg-gray-100 dark:bg-slate-800 px-2.5 py-1 text-[11px] font-bold text-gray-600 dark:text-slate-300">
+                          Solvente ($0.00)
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Lista de Consumos Registrados */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-bold text-gray-800 dark:text-slate-200 flex items-center gap-1.5">
+                        <History className="h-4 w-4 text-indigo-600" />
+                        <span>Historial de Consumos y Compras</span>
+                      </span>
+                      <span className="text-[10px] text-gray-400">
+                        {modalFicha.consumos.length} registros
+                      </span>
+                    </div>
+
+                    {modalFicha.cargando ? (
+                      <div className="py-8 text-center">
+                        <Loader2 className="h-6 w-6 animate-spin mx-auto text-indigo-600" />
+                        <span className="text-xs text-gray-400 mt-2 block">Cargando compras...</span>
+                      </div>
+                    ) : modalFicha.consumos.length === 0 ? (
+                      <div className="rounded-2xl border border-dashed border-gray-200 dark:border-slate-800 p-6 text-center text-xs text-gray-400">
+                        No hay ventas o consumos registrados para este cliente todavía.
+                      </div>
+                    ) : (
+                      <div className="space-y-2.5 max-h-[50vh] overflow-y-auto pr-1">
+                        {modalFicha.consumos.map((c) => {
+                          const audit = parseConsumoAudit({
+                            metodo_pago: c.metodo_pago,
+                            pagado: c.pagado,
+                          });
+                          const fecha = c.fecha ? new Date(c.fecha).toLocaleDateString('es-VE', {
+                            day: 'numeric',
+                            month: 'short',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          }) : 'Fecha no registrada';
+
+                          return (
+                            <div
+                              key={c.id}
+                              className={`rounded-2xl border p-3 text-xs transition ${
+                                audit.esAnulado
+                                  ? 'border-rose-200 dark:border-rose-950 bg-rose-50/20 opacity-75'
+                                  : audit.esPendiente
+                                  ? 'border-amber-200 dark:border-amber-950 bg-amber-50/20'
+                                  : 'border-gray-200/80 dark:border-slate-800 bg-white dark:bg-[#111726]'
+                              }`}
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <span
+                                      className={`font-mono font-black text-sm ${
+                                        audit.esAnulado
+                                          ? 'line-through text-gray-400'
+                                          : 'text-gray-900 dark:text-slate-100'
+                                      }`}
+                                    >
+                                      {formatUSD(c.monto_total_usd)}
+                                    </span>
+                                    <span className="font-mono text-[10px] text-gray-400">
+                                      ({formatBs(calcularConversionBs(c.monto_total_usd, c.tasa_bcv_historica || tasaBcv))})
+                                    </span>
+
+                                    <span
+                                      className={`rounded-full px-2 py-0.2 text-[9px] font-bold uppercase tracking-wider ${
+                                        audit.esAnulado
+                                          ? 'bg-rose-100 text-rose-800'
+                                          : audit.esPendiente
+                                          ? 'bg-amber-100 text-amber-800'
+                                          : 'bg-emerald-100 text-emerald-800'
+                                      }`}
+                                    >
+                                      {audit.estadoBadge.texto}
+                                    </span>
+                                  </div>
+
+                                  <span className="text-[10px] text-gray-400 mt-0.5 block">
+                                    {fecha} &bull; Método: {audit.nombreLegible}
+                                    {audit.referencia ? ` (#${audit.referencia})` : ''}
+                                  </span>
+                                </div>
+
+                                {/* Botón Anular Venta si no está anulada */}
+                                {!audit.esAnulado && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setModalAnular({
+                                        abierto: true,
+                                        consumo: c,
+                                        procesando: false,
+                                        error: null,
+                                      })
+                                    }
+                                    className="flex items-center gap-1 rounded-xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/40 px-2.5 py-1 text-[11px] font-bold text-rose-700 dark:text-rose-300 hover:bg-rose-100 transition active:scale-95 shrink-0"
+                                    title="Anular venta y revertir deuda o saldo"
+                                  >
+                                    <RotateCcw className="h-3 w-3" />
+                                    <span>Anular Venta</span>
+                                  </button>
+                                )}
+                              </div>
+
+                              {/* Artículos comprados */}
+                              {c.consumo_detalles && c.consumo_detalles.length > 0 && (
+                                <div className="mt-2 pt-2 border-t border-gray-100 dark:border-slate-800/80 text-[11px] text-gray-600 dark:text-slate-300">
+                                  <span className="font-semibold text-gray-400 text-[10px] uppercase block mb-0.5">
+                                    Ítems:
+                                  </span>
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {c.consumo_detalles.map((cd: any, idx: number) => (
+                                      <span
+                                        key={cd.id || idx}
+                                        className="rounded-lg bg-gray-50 dark:bg-[#161D2E] px-2 py-0.5 border border-gray-100 dark:border-slate-800 text-[10px] font-medium"
+                                      >
+                                        {cd.cantidad}x {cd.productos?.nombre || 'Producto'} ({formatUSD(cd.precio_unitario_usd)})
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex justify-end pt-3 border-t border-gray-100 dark:border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => setModalFicha({ abierto: false, cliente: null, consumos: [], cargando: false })}
+                      className="rounded-2xl border border-gray-200 dark:border-slate-800 px-4 py-2 text-xs font-bold text-gray-700 dark:text-slate-300 hover:bg-gray-50 transition"
+                    >
+                      Cerrar Ficha
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+
+      {/* Modal Confirmar Anulación desde Ficha (Radix UI Dialog) */}
+      <Dialog.Root
+        open={modalAnular.abierto}
+        onOpenChange={(abierto) =>
+          !modalAnular.procesando && setModalAnular((prev) => ({ ...prev, abierto }))
+        }
+      >
+        <Dialog.Portal>
+          <Dialog.Overlay
+            {...dragScrollAnular.overlayProps}
+            className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs transition-opacity animate-in fade-in"
+          />
+          <Dialog.Content
+            style={dragScrollAnular.style}
+            {...dragScrollAnular.dragProps}
+            className="fixed inset-x-0 bottom-0 z-50 max-h-[90dvh] overflow-y-auto overscroll-contain touch-scroll-ios rounded-t-3xl sm:rounded-3xl border-t sm:border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#0D111A] p-4 sm:p-6 pb-28 sm:pb-6 shadow-2xl outline-none duration-300 animate-in slide-in-from-bottom sm:slide-in-from-bottom-0 sm:fade-in-0 sm:zoom-in-95 sm:inset-auto sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:w-[95vw] sm:max-w-md cursor-grab active:cursor-grabbing"
+          >
+            {/* Manija táctil */}
+            <div className="mx-auto mb-3 -mt-1 flex h-6 w-full cursor-grab active:cursor-grabbing items-center justify-center sm:hidden touch-none">
+              <div className="h-1.5 w-12 rounded-full bg-gray-300 dark:bg-slate-700" />
+            </div>
+
+            <div className="flex items-center gap-3 text-rose-600 mb-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-rose-50 dark:bg-rose-950/50 border border-rose-100 dark:border-rose-900">
+                <AlertTriangle className="h-5 w-5" />
+              </div>
+              <div>
+                <Dialog.Title className="text-base font-bold text-gray-900 dark:text-slate-100">
+                  Anular Venta / Devolución
+                </Dialog.Title>
+                <Dialog.Description className="text-xs text-gray-500 dark:text-slate-400">
+                  Esta acción reajustará el saldo del cliente automáticamente.
+                </Dialog.Description>
+              </div>
+            </div>
+
+            {modalAnular.consumo && (() => {
+              const c = modalAnular.consumo;
+              const audit = parseConsumoAudit({ metodo_pago: c.metodo_pago, pagado: c.pagado });
+
+              return (
+                <div className="space-y-3 text-xs text-gray-600 dark:text-slate-300">
+                  <div className="rounded-2xl border border-rose-100 dark:border-rose-950 bg-rose-50/60 dark:bg-rose-950/30 p-3 space-y-1.5">
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-500">Monto:</span>
+                      <span className="font-mono font-black text-rose-700 dark:text-rose-400">
+                        {formatUSD(c.monto_total_usd)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-500">Método de Pago:</span>
+                      <span className="font-bold text-gray-800 dark:text-slate-200">
+                        {audit.nombreLegible}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-gray-100 dark:border-slate-800 bg-gray-50/80 dark:bg-[#111726] p-3 text-xs">
+                    <span className="font-bold text-gray-800 dark:text-slate-200 block mb-1">
+                      Efecto Contable:
+                    </span>
+                    {audit.metodoBase === 'pendiente' ? (
+                      <p className="text-amber-800 dark:text-amber-300">
+                        ✓ <strong>Se reversará la deuda</strong> de {formatUSD(c.monto_total_usd)}, sumando +{formatUSD(c.monto_total_usd)} a la cuenta corriente del cliente.
+                      </p>
+                    ) : audit.metodoBase === 'saldo_favor' ? (
+                      <p className="text-emerald-800 dark:text-emerald-300">
+                        ✓ <strong>Se reembolsará el saldo a favor</strong> de {formatUSD(c.monto_total_usd)} a la cuenta del cliente.
+                      </p>
+                    ) : audit.esMixto ? (
+                      <p className="text-indigo-800 dark:text-indigo-300">
+                        ✓ <strong>Pago mixto:</strong> se reembolsará la porción de saldo a favor usada y se cancelará la transacción.
+                      </p>
+                    ) : (
+                      <p className="text-gray-700 dark:text-slate-300">
+                        ✓ <strong>Cobro en caja ({audit.nombreLegible}):</strong> la venta se registrará como anulada/devuelta en caja.
+                      </p>
+                    )}
+                  </div>
+
+                  {modalAnular.error && (
+                    <div className="rounded-2xl border border-rose-200 bg-rose-50 p-2.5 text-xs text-rose-800 font-medium">
+                      {modalAnular.error}
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-gray-100 dark:border-slate-800">
+                    <button
+                      type="button"
+                      disabled={modalAnular.procesando}
+                      onClick={() => setModalAnular((prev) => ({ ...prev, abierto: false }))}
+                      className="rounded-2xl border border-gray-200 dark:border-slate-800 bg-white dark:bg-[#111726] px-4 py-2 text-xs font-semibold text-gray-700 dark:text-slate-300 hover:bg-gray-50 transition"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      disabled={modalAnular.procesando}
+                      onClick={handleConfirmarAnulacionDesdeFicha}
+                      className="flex items-center gap-1.5 rounded-2xl bg-rose-600 px-4 py-2 text-xs font-bold text-white shadow-xs hover:bg-rose-700 transition disabled:opacity-50"
+                    >
+                      {modalAnular.procesando ? (
+                        <>
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          <span>Anulando...</span>
+                        </>
+                      ) : (
+                        <span>Confirmar Anulación</span>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>

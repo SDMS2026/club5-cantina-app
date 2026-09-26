@@ -24,7 +24,7 @@ export interface ItemCarrito {
   cantidad: number;
 }
 
-export type MetodoPagoId = 'efectivo_usd' | 'pago_movil' | 'punto_debito' | 'pendiente' | 'saldo_favor';
+export type MetodoPagoId = 'efectivo_usd' | 'efectivo_bs' | 'pago_movil' | 'punto_debito' | 'pendiente' | 'saldo_favor';
 
 export interface MetodoPagoOpcion {
   id: MetodoPagoId;

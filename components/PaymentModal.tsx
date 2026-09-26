@@ -6,6 +6,7 @@ import {
   X,
   CheckCircle2,
   DollarSign,
+  Banknote,
   Smartphone,
   CreditCard,
   Clock,
@@ -43,7 +44,7 @@ interface PaymentModalProps {
   items: ItemCarrito[];
   cliente: Cliente | null;
   tasaBcv: number;
-  metodoInicial?: MetodoPagoId;
+  metodoInicial?: MetodoPagoId | null;
   onTransaccionExitosa: () => void;
 }
 
@@ -54,6 +55,14 @@ const METODOS_PAGO: MetodoPagoOpcion[] = [
     descripcion: 'Cobro en billetes divisa',
     moneda: 'USD',
     icono: 'dollar',
+    marcarPagado: true,
+  },
+  {
+    id: 'efectivo_bs',
+    nombre: 'Efectivo Bs.',
+    descripcion: 'Cobro en billetes bolívares',
+    moneda: 'Bs',
+    icono: 'banknote',
     marcarPagado: true,
   },
   {
@@ -82,7 +91,7 @@ const METODOS_PAGO: MetodoPagoOpcion[] = [
   },
   {
     id: 'pendiente',
-    nombre: 'Cuenta Cantina (Pendiente)',
+    nombre: 'Fiado / Cuenta por Cobrar',
     descripcion: 'Cargar a la cuenta del estudiante (Por pagar)',
     moneda: 'USD',
     icono: 'clock',
@@ -99,7 +108,9 @@ export function PaymentModal({
   metodoInicial,
   onTransaccionExitosa,
 }: PaymentModalProps) {
-  const [metodoSeleccionado, setMetodoSeleccionado] = useState<MetodoPagoId>(metodoInicial || 'efectivo_usd');
+  // Selección explícita: no auto-completa por defecto para evitar errores de cobro
+  const [metodoSeleccionado, setMetodoSeleccionado] = useState<MetodoPagoId | null>(metodoInicial || null);
+  const [numeroReferencia, setNumeroReferencia] = useState<string>('');
   const [procesando, setProcesando] = useState(false);
   const [errorMensaje, setErrorMensaje] = useState<string | null>(null);
   const [exito, setExito] = useState(false);
@@ -110,7 +121,7 @@ export function PaymentModal({
   const [cargandoSaldo, setCargandoSaldo] = useState(false);
 
   // Pago mixto: si el saldo a favor no alcanza el total de la orden
-  const [subMetodoDiferencia, setSubMetodoDiferencia] = useState<'efectivo_usd' | 'pago_movil' | 'punto_debito'>('efectivo_usd');
+  const [subMetodoDiferencia, setSubMetodoDiferencia] = useState<'efectivo_usd' | 'efectivo_bs' | 'pago_movil' | 'punto_debito'>('efectivo_usd');
 
   // Calculadora de vuelto / cambio recibido
   const [montoEntregadoInput, setMontoEntregadoInput] = useState<string>('');
@@ -146,14 +157,15 @@ export function PaymentModal({
   const [monedaCalculadora, setMonedaCalculadora] = useState<'USD' | 'Bs'>('USD');
 
   useEffect(() => {
-    if (abierto && metodoInicial) {
-      setMetodoSeleccionado(metodoInicial);
+    if (abierto) {
+      setMetodoSeleccionado(metodoInicial || null);
+      setNumeroReferencia('');
     }
   }, [abierto, metodoInicial]);
 
   // Autodetección automática de divisa según el método de pago seleccionado
   useEffect(() => {
-    if (metodoSeleccionado === 'pago_movil' || metodoSeleccionado === 'punto_debito') {
+    if (metodoSeleccionado === 'efectivo_bs' || metodoSeleccionado === 'pago_movil' || metodoSeleccionado === 'punto_debito') {
       setMonedaCalculadora('Bs');
       setMontoEntregadoInput('');
     } else if (metodoSeleccionado === 'efectivo_usd') {
@@ -187,6 +199,13 @@ export function PaymentModal({
     setProcesando(true);
     setErrorMensaje(null);
 
+    // Validación explícita de método de pago seleccionado
+    if (!metodoSeleccionado) {
+      setErrorMensaje('Por favor, selecciona explícitamente el método de pago antes de continuar.');
+      setProcesando(false);
+      return;
+    }
+
     const saldoDisponible = saldoInfo?.saldoAFavorTotalUsd || 0;
 
     // Validación de Saldo a Favor
@@ -206,6 +225,11 @@ export function PaymentModal({
     try {
       let metodoPagoFinal = metodoSeleccionado as string;
       const pagado = metodoSeleccionado !== 'pendiente';
+
+      // Si es Pago Móvil y se ingresó número de referencia, codificarla para auditoría bancaria
+      if (metodoSeleccionado === 'pago_movil' && numeroReferencia.trim()) {
+        metodoPagoFinal = `pago_movil#ref:${numeroReferencia.trim()}`;
+      }
 
       // Determinar monto a descontar del campo clientes.saldo:
       // "Al hacer una Venta/Consumo: Resta el monto total del carrito del campo clientes.saldo (ya sea que pague con su saldo a favor o que quede debiendo/fiado)."
@@ -334,6 +358,8 @@ export function PaymentModal({
         setMontoEntregadoInput('');
         setGuardarVueltoComoSaldo(false);
         setVueltoAcreditadoExito(null);
+        setNumeroReferencia('');
+        setMetodoSeleccionado(null);
       }, 300);
     }
     onOpenChange(open);
@@ -555,6 +581,7 @@ export function PaymentModal({
                             }`}
                           >
                             {metodo.id === 'efectivo_usd' && <DollarSign className="h-4 w-4" />}
+                            {metodo.id === 'efectivo_bs' && <Banknote className="h-4 w-4" />}
                             {metodo.id === 'pago_movil' && <Smartphone className="h-4 w-4" />}
                             {metodo.id === 'punto_debito' && <CreditCard className="h-4 w-4" />}
                             {metodo.id === 'saldo_favor' && <Wallet className="h-4 w-4" />}
@@ -590,6 +617,43 @@ export function PaymentModal({
                 </div>
               </div>
 
+              {/* Campo para Número de Referencia si es Pago Móvil */}
+              {(metodoSeleccionado === 'pago_movil' ||
+                (metodoSeleccionado === 'saldo_favor' && subMetodoDiferencia === 'pago_movil' && esSaldoParcial)) && (
+                <div className="mt-3 rounded-2xl border border-sky-200 bg-sky-50/70 p-3 text-xs text-sky-950 animate-in fade-in space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="font-bold flex items-center gap-1.5 text-sky-900">
+                      <Smartphone className="h-4 w-4 text-sky-600" />
+                      <span>Número de Referencia (Opcional):</span>
+                    </label>
+                    <span className="text-[10px] text-sky-700 bg-sky-100 font-bold px-2 py-0.5 rounded-full">
+                      Pago Móvil
+                    </span>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={numeroReferencia}
+                      onChange={(e) => setNumeroReferencia(e.target.value)}
+                      placeholder="Ej: 123456 o comprobante bancario"
+                      className="w-full rounded-xl border border-sky-300 bg-white py-2 pl-3 pr-8 text-xs font-mono font-bold text-gray-900 placeholder:text-gray-400 focus:border-sky-500 focus:outline-none"
+                    />
+                    {numeroReferencia && (
+                      <button
+                        type="button"
+                        onClick={() => setNumeroReferencia('')}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-0.5"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-sky-700 leading-tight">
+                    Quedará registrado en el historial de transacciones para facilitar la auditoría y conciliación bancaria.
+                  </p>
+                </div>
+              )}
+
               {/* Sub-panel si se selecciona Usar Saldo a Favor */}
               {metodoSeleccionado === 'saldo_favor' && cliente && (
                 <div className="mt-3 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-3.5 text-xs text-emerald-900 animate-in fade-in">
@@ -617,8 +681,8 @@ export function PaymentModal({
                         <label className="font-bold text-gray-700 block mb-1">
                           ¿Cómo pagará la diferencia ({formatUSD(diferenciaAPagar)})?
                         </label>
-                        <div className="grid grid-cols-3 gap-1.5">
-                          {(['efectivo_usd', 'pago_movil', 'punto_debito'] as const).map((sub) => (
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                          {(['efectivo_usd', 'efectivo_bs', 'pago_movil', 'punto_debito'] as const).map((sub) => (
                             <button
                               key={sub}
                               type="button"
@@ -630,6 +694,7 @@ export function PaymentModal({
                               }`}
                             >
                               {sub === 'efectivo_usd' && 'Efectivo $'}
+                              {sub === 'efectivo_bs' && 'Efectivo Bs'}
                               {sub === 'pago_movil' && 'Pago Móvil'}
                               {sub === 'punto_debito' && 'Punto (Bs)'}
                             </button>
@@ -645,8 +710,9 @@ export function PaymentModal({
                 </div>
               )}
 
-              {/* Calculadora de Vuelto Multimoneda (Efectivo USD, Pago Móvil o Punto) */}
+              {/* Calculadora de Vuelto Multimoneda (Efectivo USD, Efectivo Bs, Pago Móvil o Punto) */}
               {(metodoSeleccionado === 'efectivo_usd' ||
+                metodoSeleccionado === 'efectivo_bs' ||
                 metodoSeleccionado === 'pago_movil' ||
                 metodoSeleccionado === 'punto_debito') && (
                 <div className="mt-3 rounded-2xl border border-gray-200/90 dark:border-slate-800 bg-gray-50/80 dark:bg-slate-900/60 p-3 text-xs space-y-2.5">
@@ -834,7 +900,11 @@ export function PaymentModal({
                 <button
                   type="button"
                   onClick={handleConfirmarVenta}
-                  disabled={procesando || (metodoSeleccionado === 'saldo_favor' && (!cliente || saldoDisponible <= 0))}
+                  disabled={
+                    procesando ||
+                    !metodoSeleccionado ||
+                    (metodoSeleccionado === 'saldo_favor' && (!cliente || saldoDisponible <= 0))
+                  }
                   className="flex min-h-[44px] items-center justify-center gap-2 rounded-2xl bg-gray-900 px-5 py-2.5 text-xs font-bold text-white shadow-xs hover:bg-black active:scale-95 transition disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {procesando ? (
@@ -842,6 +912,8 @@ export function PaymentModal({
                       <Loader2 className="h-4 w-4 animate-spin" />
                       <span>Registrando en Supabase...</span>
                     </>
+                  ) : !metodoSeleccionado ? (
+                    <span>Selecciona un método de pago</span>
                   ) : (
                     <span>Confirmar Transacción</span>
                   )}

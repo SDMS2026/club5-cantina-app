@@ -325,3 +325,211 @@ export async function procesarAbonoCliente({
     mensaje,
   };
 }
+
+export interface ConsumoInfoAudit {
+  metodoBase: string;
+  nombreLegible: string;
+  referencia: string | null;
+  esAnulado: boolean;
+  esPendiente: boolean;
+  esMixto: boolean;
+  estadoBadge: {
+    texto: string;
+    color: 'emerald' | 'amber' | 'rose' | 'indigo' | 'gray';
+  };
+}
+
+/**
+ * Parsea el método de pago y estado de una transacción para auditoría contable.
+ * Extrae referencias bancarias, banderas de anulación y clasifica el método.
+ */
+export function parseConsumoAudit(consumo: {
+  metodo_pago?: string | null;
+  pagado?: boolean | null;
+}): ConsumoInfoAudit {
+  const raw = consumo.metodo_pago || '';
+  const esAnulado = raw.toLowerCase().startsWith('anulado');
+  let limpio = esAnulado ? raw.replace(/^anulado:?/i, '').trim() : raw;
+
+  let referencia: string | null = null;
+  if (limpio.includes('#ref:')) {
+    const parts = limpio.split('#ref:');
+    limpio = parts[0];
+    referencia = parts[1]?.trim() || null;
+  } else if (limpio.includes('(Ref:')) {
+    const match = limpio.match(/\(Ref:\s*([^)]+)\)/i);
+    if (match) referencia = match[1]?.trim() || null;
+    limpio = limpio.replace(/\(Ref:[^)]+\)/i, '').trim();
+  }
+
+  const esPendiente = !esAnulado && (consumo.pagado === false || limpio === 'pendiente');
+  const esMixto = limpio.startsWith('mixto:');
+
+  let metodoBase = limpio;
+  let nombreLegible = 'Desconocido';
+
+  if (limpio === 'efectivo_usd') {
+    nombreLegible = 'Efectivo USD ($)';
+  } else if (limpio === 'efectivo_bs') {
+    nombreLegible = 'Efectivo Bs.';
+  } else if (limpio === 'pago_movil') {
+    nombreLegible = 'Pago Móvil';
+  } else if (limpio === 'punto_debito') {
+    nombreLegible = 'Punto de Venta';
+  } else if (limpio === 'saldo_favor') {
+    nombreLegible = 'Saldo a Favor';
+  } else if (limpio === 'pendiente') {
+    nombreLegible = 'Fiado / Por Cobrar';
+  } else if (esMixto) {
+    nombreLegible = 'Pago Mixto';
+  } else if (limpio.startsWith('abono') || limpio.startsWith('vuelto')) {
+    nombreLegible = 'Abono / Vuelto a Cuenta';
+  } else if (limpio) {
+    nombreLegible = limpio;
+  }
+
+  let estadoBadge: ConsumoInfoAudit['estadoBadge'];
+  if (esAnulado) {
+    estadoBadge = { texto: 'Anulada', color: 'rose' };
+  } else if (esPendiente) {
+    estadoBadge = { texto: 'Por Cobrar', color: 'amber' };
+  } else {
+    estadoBadge = { texto: 'Pagado', color: 'emerald' };
+  }
+
+  return {
+    metodoBase,
+    nombreLegible,
+    referencia,
+    esAnulado,
+    esPendiente,
+    esMixto,
+    estadoBadge,
+  };
+}
+
+export interface ResultadoAnulacionConsumo {
+  exito: boolean;
+  mensaje: string;
+  reajusteSaldo: number;
+  nuevoSaldoCliente?: number;
+  consumoId: string;
+}
+
+/**
+ * Anula una transacción de venta/consumo en Supabase.
+ * - Marca la transacción como anulada (metodo_pago: 'anulado:...' y pagado: true).
+ * - Si fue fiado ('pendiente'): reversa la deuda sumando el monto al saldo del cliente (+monto).
+ * - Si fue pagado con saldo a favor ('saldo_favor'): reembolsa el saldo a favor al cliente (+monto).
+ * - Si fue mixto: restituye la porción de saldo a favor usada (+saldoUsado) y cancela la deuda.
+ * - Si fue efectivo/pago móvil en caja: se registra la anulación contable de caja (sin afectar cuenta corriente).
+ */
+export async function anularConsumo({
+  consumoId,
+  motivo,
+}: {
+  consumoId: string;
+  motivo?: string;
+}): Promise<ResultadoAnulacionConsumo> {
+  if (!consumoId) throw new Error('ID de consumo requerido para anular.');
+
+  // 1. Obtener la transacción original
+  const { data: consumo, error: errConsumo } = await supabase
+    .from('consumos')
+    .select(`
+      id,
+      cliente_id,
+      monto_total_usd,
+      tasa_bcv_historica,
+      metodo_pago,
+      pagado
+    `)
+    .eq('id', consumoId)
+    .single();
+
+  if (errConsumo || !consumo) {
+    throw new Error(errConsumo?.message || 'No se encontró la transacción de venta especificada.');
+  }
+
+  // 2. Verificar que no esté ya anulada
+  if (consumo.metodo_pago?.toLowerCase().startsWith('anulado')) {
+    throw new Error('Esta transacción ya se encuentra registrada como anulada.');
+  }
+
+  const metodoOriginal = consumo.metodo_pago || '';
+  const montoTotalUsd = Number(consumo.monto_total_usd || 0);
+  let reajusteSaldo = 0;
+
+  // 3. Determinar reajuste al saldo unificado (clientes.saldo)
+  if (metodoOriginal === 'pendiente') {
+    // Fiado: el cliente acumuló deuda (-monto). Al anular, se reversa la deuda (+monto).
+    reajusteSaldo = montoTotalUsd;
+  } else if (metodoOriginal === 'saldo_favor') {
+    // Saldo a favor: se le debitó su crédito. Al anular, se le reembolsa (+monto).
+    reajusteSaldo = montoTotalUsd;
+  } else if (metodoOriginal.startsWith('mixto:')) {
+    // Mixto: se le debitó la parte de saldo a favor. Al anular, se le reembolsa esa porción.
+    reajusteSaldo = extraerSaldoFavorUsado(metodoOriginal, montoTotalUsd);
+  }
+
+  let nuevoSaldoCliente: number | undefined = undefined;
+
+  // 4. Si hay reajuste y el cliente existe, actualizar clientes.saldo
+  if (reajusteSaldo > 0 && consumo.cliente_id) {
+    const { data: clienteActual, error: errCliente } = await supabase
+      .from('clientes')
+      .select('saldo')
+      .eq('id', consumo.cliente_id)
+      .single();
+
+    if (!errCliente && clienteActual) {
+      const saldoPrevio = Number(clienteActual.saldo || 0);
+      nuevoSaldoCliente = Math.round((saldoPrevio + reajusteSaldo) * 100) / 100;
+
+      const { error: errUpdateCliente } = await supabase
+        .from('clientes')
+        .update({ saldo: nuevoSaldoCliente })
+        .eq('id', consumo.cliente_id);
+
+      if (errUpdateCliente) {
+        console.error('Error actualizando saldo de cliente al anular consumo:', errUpdateCliente);
+        throw new Error('Error al actualizar el saldo de la cuenta del cliente.');
+      }
+    }
+  }
+
+  // 5. Marcar la transacción como anulada en la tabla consumos
+  const nuevoMetodoPago = `anulado:${metodoOriginal}`;
+  const { error: errUpdateConsumo } = await supabase
+    .from('consumos')
+    .update({
+      metodo_pago: nuevoMetodoPago,
+      pagado: true,
+    })
+    .eq('id', consumoId);
+
+  if (errUpdateConsumo) {
+    console.error('Error actualizando consumo a estado anulado:', errUpdateConsumo);
+    throw new Error('No se pudo marcar la transacción como anulada en la base de datos.');
+  }
+
+  // 6. Notificar actualización en tiempo real
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('club5:actualizar-notificaciones'));
+  }
+
+  let mensaje = 'Transacción anulada exitosamente.';
+  if (reajusteSaldo > 0) {
+    mensaje += ` Se reintegraron +$${reajusteSaldo.toFixed(2)} al saldo de la cuenta del cliente.`;
+  } else {
+    mensaje += ' Operación de caja cancelada / devuelta.';
+  }
+
+  return {
+    exito: true,
+    mensaje,
+    reajusteSaldo,
+    nuevoSaldoCliente,
+    consumoId,
+  };
+}

@@ -14,8 +14,9 @@ import {
   ArrowRight,
   TrendingUp,
   Receipt,
-  Sparkles,
-  ExternalLink,
+  X,
+  ShieldCheck,
+  ChevronRight,
 } from 'lucide-react';
 import { useSystemNotifications } from './NotificationsContext';
 import { formatUSD, formatBs } from '@/lib/utils';
@@ -23,7 +24,7 @@ import { formatUSD, formatBs } from '@/lib/utils';
 export function NotificationBell() {
   const { data, cargando, refrescar } = useSystemNotifications();
   const [abierto, setAbierto] = useState<boolean>(false);
-  const [tabActiva, setTabActiva] = useState<'todas' | 'proveedores' | 'deudas' | 'novedades'>('todas');
+  const [tabActiva, setTabActiva] = useState<'todas' | 'deudas' | 'proveedores'>('todas');
   const [refrescando, setRefrescando] = useState<boolean>(false);
 
   const handleRefrescar = async () => {
@@ -45,7 +46,7 @@ export function NotificationBell() {
       <Popover.Trigger asChild>
         <button
           type="button"
-          className="relative flex h-10 w-10 items-center justify-center rounded-2xl border border-gray-200/90 dark:border-slate-800 bg-white/95 dark:bg-slate-900/90 text-gray-700 dark:text-slate-200 shadow-2xs transition hover:border-indigo-300 dark:hover:border-indigo-600 hover:bg-indigo-50/50 dark:hover:bg-indigo-950/40 hover:text-indigo-600 dark:hover:text-indigo-400 active:scale-95"
+          className="relative flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-xl sm:rounded-2xl border border-gray-200/90 dark:border-slate-800 bg-white/95 dark:bg-[#111726] text-gray-700 dark:text-slate-200 shadow-2xs transition hover:border-indigo-300 dark:hover:border-indigo-600 hover:bg-indigo-50/50 dark:hover:bg-indigo-950/40 hover:text-indigo-600 dark:hover:text-indigo-400 active:scale-95"
           title="Centro de notificaciones y alertas"
           aria-label="Notificaciones"
         >
@@ -74,273 +75,232 @@ export function NotificationBell() {
         <Popover.Content
           align="end"
           sideOffset={8}
-          className="z-50 w-88 sm:w-96 rounded-3xl border border-gray-200 bg-white p-4 shadow-2xl outline-none backdrop-blur-xl animate-in fade-in-0 zoom-in-95 max-h-[85vh] overflow-y-auto"
+          collisionPadding={12}
+          className="z-50 w-[calc(100vw-32px)] max-w-[330px] sm:w-[350px] rounded-3xl border border-gray-200/90 dark:border-slate-800 bg-white/95 dark:bg-[#0D111A]/95 p-3.5 shadow-2xl outline-none backdrop-blur-xl animate-in fade-in-0 zoom-in-95 flex flex-col text-gray-900 dark:text-slate-100 max-h-[72vh] sm:max-h-[480px]"
         >
           {/* Header del Popover */}
-          <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+          <div className="flex items-center justify-between border-b border-gray-100 dark:border-slate-800/80 pb-2.5">
             <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 border border-indigo-100">
-                <Bell className="h-4 w-4" />
+              <div className="flex h-7 w-7 items-center justify-center rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/60">
+                <Bell className="h-3.5 w-3.5" />
               </div>
               <div>
-                <h3 className="text-sm font-bold text-gray-900 leading-tight">
+                <h3 className="text-xs font-bold text-gray-900 dark:text-slate-100 leading-tight">
                   Notificaciones y Alertas
                 </h3>
-                <p className="text-[11px] text-gray-500">
+                <p className="text-[10px] text-gray-400">
                   {totalAlertas > 0
                     ? `${totalAlertas} pendientes de cobro y pago`
-                    : 'Todas las cuentas están al día'}
+                    : 'Todo solvente y al día'}
                 </p>
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={handleRefrescar}
-              disabled={refrescando}
-              title="Refrescar notificaciones"
-              className="rounded-xl p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition"
-            >
-              <RefreshCw className={`h-3.5 w-3.5 ${refrescando ? 'animate-spin text-indigo-600' : ''}`} />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={handleRefrescar}
+                disabled={refrescando}
+                title="Refrescar notificaciones"
+                className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-800 hover:text-gray-700 transition"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${refrescando ? 'animate-spin text-indigo-600' : ''}`} />
+              </button>
+              <Popover.Close asChild>
+                <button
+                  type="button"
+                  className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-800 hover:text-gray-700 transition"
+                  title="Cerrar"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </Popover.Close>
+            </div>
           </div>
 
-          {/* Selector de Pestañas */}
-          <div className="mt-3 flex items-center rounded-2xl border border-gray-200/90 bg-gray-50/70 p-1">
+          {/* Selector de Pestañas Compacto */}
+          <div className="mt-2.5 flex items-center rounded-xl border border-gray-200/80 dark:border-slate-800 bg-gray-50/80 dark:bg-[#111726] p-0.5 text-xs font-bold shrink-0">
             <button
               type="button"
               onClick={() => setTabActiva('todas')}
-              className={`flex-1 rounded-xl py-1 text-center text-xs font-bold transition ${
+              className={`flex-1 rounded-lg py-1 text-center text-[11px] transition ${
                 tabActiva === 'todas'
-                  ? 'bg-white text-gray-900 shadow-2xs'
-                  : 'text-gray-500 hover:text-gray-900'
+                  ? 'bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 shadow-2xs'
+                  : 'text-gray-500 hover:text-gray-900 dark:hover:text-slate-200'
               }`}
             >
               Todas
             </button>
             <button
               type="button"
-              onClick={() => setTabActiva('proveedores')}
-              className={`flex-1 flex items-center justify-center gap-1 rounded-xl py-1 text-center text-xs font-bold transition ${
-                tabActiva === 'proveedores'
-                  ? 'bg-white text-indigo-950 shadow-2xs'
-                  : 'text-gray-500 hover:text-gray-900'
-              }`}
-            >
-              <span>Proveedores</span>
-              {data.proveedores.vencidas > 0 && (
-                <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
-              )}
-            </button>
-            <button
-              type="button"
               onClick={() => setTabActiva('deudas')}
-              className={`flex-1 flex items-center justify-center gap-1 rounded-xl py-1 text-center text-xs font-bold transition ${
+              className={`flex-1 flex items-center justify-center gap-1 rounded-lg py-1 text-center text-[11px] transition ${
                 tabActiva === 'deudas'
-                  ? 'bg-white text-indigo-950 shadow-2xs'
-                  : 'text-gray-500 hover:text-gray-900'
+                  ? 'bg-white dark:bg-slate-800 text-amber-700 dark:text-amber-400 shadow-2xs'
+                  : 'text-gray-500 hover:text-gray-900 dark:hover:text-slate-200'
               }`}
             >
               <span>Alumnos</span>
               {data.deudas.clientesConDeuda > 0 && (
-                <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                <span className="h-1.5 w-1.5 rounded-full bg-amber-500 shrink-0" />
               )}
             </button>
             <button
               type="button"
-              onClick={() => setTabActiva('novedades')}
-              className={`flex-1 rounded-xl py-1 text-center text-xs font-bold transition ${
-                tabActiva === 'novedades'
-                  ? 'bg-white text-gray-900 shadow-2xs'
-                  : 'text-gray-500 hover:text-gray-900'
+              onClick={() => setTabActiva('proveedores')}
+              className={`flex-1 flex items-center justify-center gap-1 rounded-lg py-1 text-center text-[11px] transition ${
+                tabActiva === 'proveedores'
+                  ? 'bg-white dark:bg-slate-800 text-indigo-700 dark:text-indigo-400 shadow-2xs'
+                  : 'text-gray-500 hover:text-gray-900 dark:hover:text-slate-200'
               }`}
             >
-              Novedades
+              <span>Proveedores</span>
+              {data.proveedores.vencidas > 0 ? (
+                <span className="h-1.5 w-1.5 rounded-full bg-rose-500 shrink-0" />
+              ) : data.proveedores.pendientes > 0 ? (
+                <span className="h-1.5 w-1.5 rounded-full bg-indigo-500 shrink-0" />
+              ) : null}
             </button>
           </div>
 
-          {/* Contenido según pestaña */}
-          <div className="mt-3 space-y-2.5">
-            {/* Sección: Cuentas por Pagar a Proveedores */}
-            {(tabActiva === 'todas' || tabActiva === 'proveedores') && (
-              <div>
-                <div className="flex items-center justify-between px-1 mb-1.5">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
-                    Proveedores / Cuentas por Pagar
-                  </span>
-                  <Link
-                    href="/proveedores"
-                    onClick={() => setAbierto(false)}
-                    className="text-[10px] font-bold text-indigo-600 hover:underline inline-flex items-center gap-0.5"
-                  >
-                    <span>Ver módulo</span>
-                    <ArrowRight className="h-2.5 w-2.5" />
-                  </Link>
-                </div>
-
-                {data.proveedores.pendientes === 0 ? (
-                  <div className="rounded-2xl border border-emerald-200/80 bg-emerald-50/60 p-3 text-xs flex items-center gap-2.5">
-                    <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-                    <div>
-                      <p className="font-bold text-emerald-950">¡Proveedores al día!</p>
-                      <p className="text-emerald-800 text-[11px]">
-                        No tienes facturas de mercancía pendientes por liquidar.
-                      </p>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-1.5">
-                    {/* Alerta de Vencidas */}
-                    {data.proveedores.vencidas > 0 && (
-                      <div className="rounded-2xl border border-rose-200 bg-rose-50/80 p-3 text-xs flex items-start gap-2.5">
-                        <AlertTriangle className="h-4 w-4 text-rose-600 shrink-0 mt-0.5" />
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between">
-                            <p className="font-bold text-rose-950">
-                              {data.proveedores.vencidas}{' '}
-                              {data.proveedores.vencidas === 1 ? 'Factura Vencida' : 'Facturas Vencidas'}
-                            </p>
-                            <span className="font-mono font-bold text-rose-700">
-                              {formatUSD(data.proveedores.totalPendienteUsd)}
-                            </span>
-                          </div>
-                          <p className="text-[11px] text-rose-800 mt-0.5">
-                            Equivalente: {formatBs(data.proveedores.totalPendienteBs)} a tasa BCV.
-                          </p>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Alerta de Próximas */}
-                    {data.proveedores.proximas > 0 && (
-                      <div className="rounded-2xl border border-amber-200 bg-amber-50/80 p-3 text-xs flex items-start gap-2.5">
-                        <Clock className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-                        <div className="flex-1 min-w-0">
-                          <p className="font-bold text-amber-950">
-                            {data.proveedores.proximas} por vencer en ≤ 3 días
-                          </p>
-                          <p className="text-[11px] text-amber-800 mt-0.5">
-                            Revisa el calendario de pagos antes del vencimiento.
-                          </p>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Resumen Total */}
-                    <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-2.5 text-xs flex items-center justify-between">
-                      <span className="text-gray-500 font-medium">
-                        Total por Pagar ({data.proveedores.pendientes} facturas):
-                      </span>
-                      <span className="font-mono font-bold text-gray-900">
-                        {formatUSD(data.proveedores.totalPendienteUsd)}
-                      </span>
-                    </div>
-                  </div>
-                )}
+          {/* Contenido con Scroll Interno Controlado */}
+          <div className="mt-2.5 space-y-2 overflow-y-auto overscroll-contain pr-0.5 flex-1 text-xs">
+            {/* Si no hay ninguna alerta */}
+            {data.deudas.clientesConDeuda === 0 && data.proveedores.pendientes === 0 ? (
+              <div className="rounded-2xl border border-emerald-200/70 dark:border-emerald-950/60 bg-emerald-50/50 dark:bg-emerald-950/20 p-4 text-center">
+                <CheckCircle2 className="mx-auto h-7 w-7 text-emerald-600 dark:text-emerald-400 mb-1.5" />
+                <p className="font-bold text-emerald-950 dark:text-emerald-200 text-xs">
+                  ¡Cuentas al día!
+                </p>
+                <p className="text-[11px] text-emerald-800 dark:text-emerald-400/90 mt-0.5">
+                  No hay fiados escolares ni facturas pendientes en este momento.
+                </p>
               </div>
-            )}
+            ) : null}
 
-            {/* Sección: Cuentas por Cobrar (Estudiantes / Profesores) */}
-            {(tabActiva === 'todas' || tabActiva === 'deudas') && (
-              <div className="pt-1">
-                <div className="flex items-center justify-between px-1 mb-1.5">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
-                    Estudiantes y Profesores / Fiados
-                  </span>
-                  <Link
-                    href="/deudas"
-                    onClick={() => setAbierto(false)}
-                    className="text-[10px] font-bold text-indigo-600 hover:underline inline-flex items-center gap-0.5"
-                  >
-                    <span>Ver deudas</span>
-                    <ArrowRight className="h-2.5 w-2.5" />
-                  </Link>
-                </div>
-
-                {data.deudas.clientesConDeuda === 0 ? (
-                  <div className="rounded-2xl border border-emerald-200/80 bg-emerald-50/60 p-3 text-xs flex items-center gap-2.5">
-                    <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+            {/* SECCIÓN ALUMNOS / FIADOS (Consolidada: NO LISTA INFINITA) */}
+            {(tabActiva === 'todas' || tabActiva === 'deudas') && data.deudas.clientesConDeuda > 0 && (
+              <div className="rounded-2xl border border-amber-200/90 dark:border-amber-900/60 bg-gradient-to-br from-amber-50/80 to-amber-50/40 dark:from-amber-950/30 dark:to-[#111726] p-3 space-y-2">
+                <div className="flex items-start justify-between gap-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300">
+                      <Receipt className="h-3.5 w-3.5" />
+                    </div>
                     <div>
-                      <p className="font-bold text-emerald-950">¡Todos los clientes al día!</p>
-                      <p className="text-emerald-800 text-[11px]">
-                        No hay consumos escolares pendientes de cobro.
-                      </p>
+                      <span className="font-black text-amber-950 dark:text-amber-200 text-xs block">
+                        Cuentas por Cobrar
+                      </span>
+                      <span className="text-[10px] text-amber-800/80 dark:text-amber-400">
+                        {data.deudas.clientesConDeuda} {data.deudas.clientesConDeuda === 1 ? 'alumno con fiado' : 'alumnos con fiados'}
+                      </span>
                     </div>
                   </div>
-                ) : (
-                  <div className="space-y-1.5">
-                    <div className="rounded-2xl border border-amber-200 bg-amber-50/80 p-3 text-xs flex items-start gap-2.5">
-                      <Receipt className="h-4 w-4 text-amber-700 shrink-0 mt-0.5" />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between">
-                          <p className="font-bold text-amber-950">
-                            {data.deudas.clientesConDeuda} clientes con saldo pendiente
-                          </p>
-                          <span className="font-mono font-bold text-amber-900">
-                            {formatUSD(data.deudas.totalDeudaUsd)}
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-amber-800 mt-0.5">
-                          Equivalente total: {formatBs(data.deudas.totalDeudaBs)}
-                        </p>
-                      </div>
-                    </div>
 
-                    {/* Lista rápida de los primeros clientes con deuda */}
-                    {data.deudas.alertas.slice(0, 3).map((item) => (
-                      <div
-                        key={item.id}
-                        className="rounded-2xl border border-gray-100 bg-gray-50/60 px-3 py-2 text-xs flex items-center justify-between"
-                      >
-                        <div className="truncate pr-2">
-                          <p className="font-semibold text-gray-800 truncate">{item.titulo}</p>
-                          <p className="text-[10px] text-gray-400">{item.descripcion}</p>
-                        </div>
-                        <span className="font-mono font-bold text-gray-900 shrink-0">
+                  <div className="text-right">
+                    <span className="font-mono font-black text-amber-950 dark:text-amber-200 text-xs block">
+                      {formatUSD(data.deudas.totalDeudaUsd)}
+                    </span>
+                    <span className="font-mono text-[9px] text-amber-700 dark:text-amber-400">
+                      {formatBs(data.deudas.totalDeudaBs)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Vista previa compacta de 2 alumnos máximo (evita lista infinita) */}
+                {data.deudas.alertas.length > 0 && (
+                  <div className="rounded-xl bg-white/80 dark:bg-[#0D111A]/80 border border-amber-100 dark:border-amber-950/60 p-2 text-[11px] space-y-1">
+                    {data.deudas.alertas.slice(0, 2).map((item) => (
+                      <div key={item.id} className="flex items-center justify-between text-gray-700 dark:text-slate-300">
+                        <span className="truncate pr-2 font-medium">{item.titulo}</span>
+                        <span className="font-mono font-bold text-amber-900 dark:text-amber-300 shrink-0">
                           {item.montoUsd && formatUSD(item.montoUsd)}
                         </span>
                       </div>
                     ))}
+                    {data.deudas.clientesConDeuda > 2 && (
+                      <div className="text-[10px] text-amber-700 dark:text-amber-400 font-semibold pt-0.5 text-center border-t border-amber-100/60 dark:border-amber-950/40">
+                        +{data.deudas.clientesConDeuda - 2} alumnos más con saldo pendiente
+                      </div>
+                    )}
                   </div>
                 )}
+
+                {/* Botón directo a Cuentas por Cobrar */}
+                <Link
+                  href="/deudas"
+                  onClick={() => setAbierto(false)}
+                  className="flex items-center justify-between rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold py-1.5 px-3 text-[11px] shadow-2xs transition active:scale-95"
+                >
+                  <span>Ir a Cuentas por Cobrar</span>
+                  <ArrowRight className="h-3 w-3" />
+                </Link>
               </div>
             )}
 
-            {/* Sección: Novedades del Sistema */}
-            {(tabActiva === 'todas' || tabActiva === 'novedades') && (
-              <div className="pt-1">
-                <div className="px-1 mb-1.5">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
-                    Novedades &bull; Tasa Oficial BCV
-                  </span>
-                </div>
-
-                <div className="rounded-2xl border border-indigo-100 bg-indigo-50/60 p-3 text-xs flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <TrendingUp className="h-4 w-4 text-indigo-600" />
+            {/* SECCIÓN PROVEEDORES (Consolidada: NO REPETITIVA) */}
+            {(tabActiva === 'todas' || tabActiva === 'proveedores') && data.proveedores.pendientes > 0 && (
+              <div className="rounded-2xl border border-gray-200 dark:border-slate-800 bg-white dark:bg-[#111726] p-3 space-y-2">
+                <div className="flex items-start justify-between gap-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400">
+                      <Truck className="h-3.5 w-3.5" />
+                    </div>
                     <div>
-                      <p className="font-bold text-indigo-950">Tasa Oficial BCV Activa</p>
-                      <p className="text-[10px] text-indigo-700/80">Conversión en vivo para la cantina</p>
+                      <span className="font-black text-gray-900 dark:text-slate-100 text-xs block">
+                        Cuentas por Pagar
+                      </span>
+                      <span className="text-[10px] text-gray-400">
+                        {data.proveedores.pendientes} {data.proveedores.pendientes === 1 ? 'factura pendiente' : 'facturas pendientes'}
+                      </span>
                     </div>
                   </div>
-                  <span className="font-mono font-bold text-indigo-900 text-sm">
-                    {formatBs(data.tasaBcv)}
-                  </span>
+
+                  <div className="text-right">
+                    <span className="font-mono font-black text-gray-900 dark:text-slate-100 text-xs block">
+                      {formatUSD(data.proveedores.totalPendienteUsd)}
+                    </span>
+                    <span className="font-mono text-[9px] text-gray-400">
+                      {formatBs(data.proveedores.totalPendienteBs)}
+                    </span>
+                  </div>
                 </div>
+
+                {/* Alerta de Vencidas si existen */}
+                {data.proveedores.vencidas > 0 && (
+                  <div className="rounded-xl border border-rose-200 dark:border-rose-900 bg-rose-50/80 dark:bg-rose-950/40 p-2 text-[11px] flex items-center justify-between text-rose-800 dark:text-rose-300">
+                    <span className="flex items-center gap-1 font-bold">
+                      <AlertTriangle className="h-3.5 w-3.5 text-rose-600 shrink-0" />
+                      <span>{data.proveedores.vencidas} {data.proveedores.vencidas === 1 ? 'factura vencida' : 'facturas vencidas'}</span>
+                    </span>
+                    <span className="text-[10px] underline">Atención urgente</span>
+                  </div>
+                )}
+
+                {/* Alerta de Próximas a vencer si no hay vencidas pero sí próximas */}
+                {data.proveedores.vencidas === 0 && data.proveedores.proximas > 0 && (
+                  <div className="rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50/80 dark:bg-amber-950/40 p-2 text-[11px] flex items-center gap-1 text-amber-800 dark:text-amber-300 font-medium">
+                    <Clock className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                    <span>{data.proveedores.proximas} por vencer en ≤ 3 días</span>
+                  </div>
+                )}
+
+                {/* Botón directo a Cuentas por Pagar */}
+                <Link
+                  href="/proveedores"
+                  onClick={() => setAbierto(false)}
+                  className="flex items-center justify-between rounded-xl bg-gray-900 dark:bg-slate-800 hover:bg-black text-white font-bold py-1.5 px-3 text-[11px] shadow-2xs transition active:scale-95"
+                >
+                  <span>Ir a Cuentas por Pagar</span>
+                  <ArrowRight className="h-3 w-3" />
+                </Link>
               </div>
             )}
           </div>
 
-          {/* Footer del Popover */}
-          <div className="mt-4 border-t border-gray-100 pt-2.5 flex items-center justify-between text-[11px] text-gray-400">
+          {/* Footer Compacto */}
+          <div className="mt-2.5 pt-2 border-t border-gray-100 dark:border-slate-800/80 flex items-center justify-between text-[10px] text-gray-400 dark:text-slate-500">
             <span>Club 5 Cantina Escolar</span>
-            <button
-              type="button"
-              onClick={() => setAbierto(false)}
-              className="text-indigo-600 font-semibold hover:underline"
-            >
-              Cerrar panel
-            </button>
+            <span className="font-mono">Tasa BCV: {formatBs(data.tasaBcv)}</span>
           </div>
         </Popover.Content>
       </Popover.Portal>

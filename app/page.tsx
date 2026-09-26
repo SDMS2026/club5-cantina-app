@@ -7,12 +7,12 @@ import { ClientSelector } from '@/components/ClientSelector';
 import { ProductCatalog } from '@/components/ProductCatalog';
 import { Cart } from '@/components/Cart';
 import { PaymentModal } from '@/components/PaymentModal';
-import { VoiceOrderModal, PedidoVozResultado } from '@/components/VoiceOrderModal';
+import { VoiceOrderModal } from '@/components/VoiceOrderModal';
 import { Cliente, Producto, ItemCarrito, MetodoPagoId } from '@/types/pos';
 import { obtenerTasaBCV, TASA_BCV_FALLBACK_DEFAULT } from '@/lib/dolarApi';
 import { supabase } from '@/lib/supabaseClient';
 import { formatUSD, formatBs, calcularConversionBs } from '@/lib/utils';
-import { Sparkles, CheckCircle2, ShoppingBag, Plus, Minus, Trash2, X, ArrowRight } from 'lucide-react';
+import { Sparkles, CheckCircle2, AlertCircle, ShoppingBag, Plus, Minus, Trash2, X, ArrowRight } from 'lucide-react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { motion, AnimatePresence } from 'framer-motion';
 import { refrescarNotificacionesGlobales } from '@/components/NotificationsContext';
@@ -87,8 +87,8 @@ export default function PosPage() {
     onDismiss: () => setModalOrdenMovilAbierto(false),
   });
 
-  const [metodoPagoSugerido, setMetodoPagoSugerido] = useState<MetodoPagoId>('efectivo_usd');
-  const [notificacion, setNotificacion] = useState<{ tipo: 'exito' | 'info'; texto: string } | null>(null);
+  const [metodoPagoSugerido, setMetodoPagoSugerido] = useState<MetodoPagoId | null>(null);
+  const [notificacion, setNotificacion] = useState<{ tipo: 'exito' | 'info' | 'advertencia' | 'error'; texto: string } | null>(null);
   const [sembrandoDatos, setSembrandoDatos] = useState<boolean>(false);
 
   // 1. Cargar Tasa BCV
@@ -231,87 +231,79 @@ export default function PosPage() {
     setItemsCarrito([]);
   };
 
-  // Manejador del resultado de Pedido y Registro por Voz
-  const handlePedidoPorVoz = (resultado: PedidoVozResultado) => {
-    // Si la acción fue un abono financiero o guardar vuelto:
-    if (resultado.accion === 'abono_saldo_favor' || resultado.accion === 'guardar_vuelto') {
-      obtenerSaldosTodosClientes().then(setSaldosClientes).catch(console.error);
-      refrescarNotificacionesGlobales();
-      setNotificacion({
-        tipo: 'exito',
-        texto: resultado.resumen_interpretado || '¡Abono registrado con éxito!',
-      });
-      setTimeout(() => setNotificacion(null), 5000);
-      return;
+  // Manejadores para Pedido por Voz con Confirmación Previa
+  const handleCargarAlCarritoPorVoz = (
+    items: { producto: Producto; cantidad: number }[],
+    cliente: Cliente | null,
+    metodoPago?: MetodoPagoId
+  ) => {
+    if (cliente) {
+      setClienteSeleccionado(cliente);
     }
-
-    // 1. Si se creó o detectó un nuevo cliente:
-    if (resultado.cliente_creado) {
-      setClientes((prev) => {
-        const existe = prev.some((c) => c.id === resultado.cliente_creado.id);
-        return existe ? prev : [resultado.cliente_creado, ...prev];
-      });
-      setClienteSeleccionado(resultado.cliente_creado);
-    } else if (resultado.cliente_id) {
-      const clienteEncontrado = clientes.find((c) => c.id === resultado.cliente_id);
-      if (clienteEncontrado) {
-        setClienteSeleccionado(clienteEncontrado);
-      }
-    }
-
-    // 2. Llena el itemsCarrito con los productos identificados y sus cantidades
-    const tieneItems = Boolean(resultado.items && resultado.items.length > 0);
-    if (tieneItems) {
-      setItemsCarrito((prev) => {
-        const nuevoCarrito = [...prev];
-        for (const item of resultado.items) {
-          const prod = productos.find((p) => p.id === item.producto_id);
-          if (prod) {
-            const idxExistente = nuevoCarrito.findIndex((i) => i.producto.id === prod.id);
-            if (idxExistente >= 0) {
-              nuevoCarrito[idxExistente] = {
-                ...nuevoCarrito[idxExistente],
-                cantidad: nuevoCarrito[idxExistente].cantidad + item.cantidad,
-              };
-            } else {
-              nuevoCarrito.push({
-                producto: prod,
-                cantidad: item.cantidad,
-              });
-            }
-          }
+    setItemsCarrito((prev) => {
+      const nuevoCarrito = [...prev];
+      for (const item of items) {
+        const idx = nuevoCarrito.findIndex((i) => i.producto.id === item.producto.id);
+        if (idx >= 0) {
+          nuevoCarrito[idx] = {
+            ...nuevoCarrito[idx],
+            cantidad: nuevoCarrito[idx].cantidad + item.cantidad,
+          };
+        } else {
+          nuevoCarrito.push(item);
         }
-        return nuevoCarrito;
-      });
-    }
+      }
+      return nuevoCarrito;
+    });
 
-    // 3. Método de pago sugerido (saldo_favor, pendiente, efectivo_usd, etc.)
-    if (resultado.metodo_pago_sugerido) {
-      setMetodoPagoSugerido(resultado.metodo_pago_sugerido);
-      if (resultado.metodo_pago_sugerido === 'saldo_favor' && tieneItems) {
+    if (metodoPago) {
+      setMetodoPagoSugerido(metodoPago);
+      if (metodoPago === 'saldo_favor') {
         setModalPagoAbierto(true);
       }
-    } else if (resultado.pagado === false) {
-      setMetodoPagoSugerido('pendiente');
-    } else {
-      setMetodoPagoSugerido('efectivo_usd');
-    }
-
-    // 4. Muestra un feedback visual o toast:
-    let mensajeToast = resultado.resumen_interpretado || '¡Pedido cargado por Inteligencia Artificial!';
-    if (resultado.cliente_creado && tieneItems) {
-      mensajeToast = `¡"${resultado.cliente_creado.nombre_estudiante}" registrado y orden cargada con IA!`;
-    } else if (resultado.cliente_creado && !tieneItems) {
-      mensajeToast = `¡"${resultado.cliente_creado.nombre_estudiante}" registrado exitosamente en el sistema!`;
     }
 
     setNotificacion({
       tipo: 'exito',
-      texto: mensajeToast,
+      texto: '¡Pedido por voz confirmado y cargado al carrito!',
     });
-    setTimeout(() => {
-      setNotificacion(null);
-    }, 4500);
+    setTimeout(() => setNotificacion(null), 4000);
+  };
+
+  const handleClienteCreadoPorVoz = (nuevoCliente: Cliente) => {
+    setClientes((prev) => {
+      const existe = prev.some((c) => c.id === nuevoCliente.id);
+      return existe ? prev : [nuevoCliente, ...prev];
+    });
+    setClienteSeleccionado(nuevoCliente);
+  };
+
+  const handleVentaFiadaPorVoz = (mensaje: string) => {
+    obtenerSaldosTodosClientes().then(setSaldosClientes).catch(console.error);
+    refrescarNotificacionesGlobales();
+    setNotificacion({
+      tipo: 'exito',
+      texto: mensaje,
+    });
+    setTimeout(() => setNotificacion(null), 4500);
+  };
+
+  const handleAbonoPorVoz = (mensaje: string) => {
+    obtenerSaldosTodosClientes().then(setSaldosClientes).catch(console.error);
+    refrescarNotificacionesGlobales();
+    setNotificacion({
+      tipo: 'exito',
+      texto: mensaje,
+    });
+    setTimeout(() => setNotificacion(null), 4500);
+  };
+
+  const handleAlertaPorVoz = (tipo: 'error' | 'advertencia' | 'exito' | 'info', texto: string) => {
+    setNotificacion({
+      tipo,
+      texto,
+    });
+    setTimeout(() => setNotificacion(null), 5000);
   };
 
   // Finalizar transacción exitosa
@@ -436,8 +428,18 @@ export default function PosPage() {
 
       {/* Notificación Flotante */}
       {notificacion && (
-        <div className="fixed top-16 right-6 z-50 flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-semibold text-emerald-800 shadow-lg animate-in slide-in-from-top-2">
-          <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+        <div
+          className={`fixed top-16 right-6 z-50 flex items-center gap-2 rounded-2xl border px-4 py-3 text-xs font-semibold shadow-lg animate-in slide-in-from-top-2 ${
+            notificacion.tipo === 'advertencia' || notificacion.tipo === 'error'
+              ? 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/90 dark:text-amber-200'
+              : 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/90 dark:text-emerald-200'
+          }`}
+        >
+          {notificacion.tipo === 'advertencia' || notificacion.tipo === 'error' ? (
+            <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+          ) : (
+            <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+          )}
           <span>{notificacion.texto}</span>
         </div>
       )}
@@ -478,7 +480,17 @@ export default function PosPage() {
           <div className="flex flex-col gap-4 sm:gap-5 lg:col-span-8">
             {/* Acceso Rápido a Pedido por Voz en Pantallas Móviles (< lg) */}
             <div className="lg:hidden">
-              <VoiceOrderModal onPedidoProcesado={handlePedidoPorVoz} />
+              <VoiceOrderModal
+                productos={productos}
+                clientes={clientes}
+                tasaBcv={tasaBcv}
+                saldosClientes={saldosClientes}
+                onClienteCreado={handleClienteCreadoPorVoz}
+                onCargarAlCarrito={handleCargarAlCarritoPorVoz}
+                onVentaFiadaExitosa={handleVentaFiadaPorVoz}
+                onAbonoExitoso={handleAbonoPorVoz}
+                onAlerta={handleAlertaPorVoz}
+              />
             </div>
 
             {/* Selector de Cliente */}
@@ -532,7 +544,17 @@ export default function PosPage() {
           <div className="hidden lg:block lg:col-span-4">
             <div className="sticky top-20 flex flex-col gap-3.5">
               {/* Botón Destacado de Pedido y Registro por Voz */}
-              <VoiceOrderModal onPedidoProcesado={handlePedidoPorVoz} />
+              <VoiceOrderModal
+                productos={productos}
+                clientes={clientes}
+                tasaBcv={tasaBcv}
+                saldosClientes={saldosClientes}
+                onClienteCreado={handleClienteCreadoPorVoz}
+                onCargarAlCarrito={handleCargarAlCarritoPorVoz}
+                onVentaFiadaExitosa={handleVentaFiadaPorVoz}
+                onAbonoExitoso={handleAbonoPorVoz}
+                onAlerta={handleAlertaPorVoz}
+              />
 
               <Cart
                 items={itemsCarrito}
@@ -541,7 +563,10 @@ export default function PosPage() {
                 onModificarCantidad={handleModificarCantidad}
                 onEliminarItem={handleEliminarItem}
                 onVaciarCarrito={handleVaciarCarrito}
-                onProcederPago={() => setModalPagoAbierto(true)}
+                onProcederPago={() => {
+                  setMetodoPagoSugerido(null);
+                  setModalPagoAbierto(true);
+                }}
               />
             </div>
           </div>
@@ -675,7 +700,17 @@ export default function PosPage() {
               </div>
 
               {/* 2. Disparador de Pedido por Voz */}
-              <VoiceOrderModal onPedidoProcesado={handlePedidoPorVoz} />
+              <VoiceOrderModal
+                productos={productos}
+                clientes={clientes}
+                tasaBcv={tasaBcv}
+                saldosClientes={saldosClientes}
+                onClienteCreado={handleClienteCreadoPorVoz}
+                onCargarAlCarrito={handleCargarAlCarritoPorVoz}
+                onVentaFiadaExitosa={handleVentaFiadaPorVoz}
+                onAbonoExitoso={handleAbonoPorVoz}
+                onAlerta={handleAlertaPorVoz}
+              />
 
               {/* 3. Lista de productos con botones grandes para pulgar */}
               <div className="space-y-2 max-h-[260px] overflow-y-auto pr-1">
@@ -761,6 +796,7 @@ export default function PosPage() {
                 disabled={itemsCarrito.length === 0}
                 onClick={() => {
                   setModalOrdenMovilAbierto(false);
+                  setMetodoPagoSugerido(null);
                   setModalPagoAbierto(true);
                 }}
                 className="flex h-12 min-h-[48px] w-full items-center justify-center gap-2 rounded-2xl bg-indigo-600 text-base font-bold text-white shadow-md transition hover:bg-indigo-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400"
