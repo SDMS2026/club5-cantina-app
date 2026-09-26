@@ -66,6 +66,8 @@ export function VoiceOrderModal({ onPedidoProcesado, className = '' }: VoiceOrde
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const recognitionRef = useRef<any>(null);
+  const finalTranscriptRef = useRef<string>('');
+  const activoRef = useRef<boolean>(false);
 
   // Inicializar o comprobar soporte de SpeechRecognition
   useEffect(() => {
@@ -82,6 +84,7 @@ export function VoiceOrderModal({ onPedidoProcesado, className = '' }: VoiceOrde
   // Limpiar reconocimiento al desmontar o cerrar
   useEffect(() => {
     return () => {
+      activoRef.current = false;
       if (recognitionRef.current) {
         try {
           recognitionRef.current.abort();
@@ -113,43 +116,74 @@ export function VoiceOrderModal({ onPedidoProcesado, className = '' }: VoiceOrde
         }
       }
 
+      activoRef.current = true;
+
       const recognition = new SpeechRecognition();
       recognition.lang = 'es-VE';
       recognition.continuous = true;
       recognition.interimResults = true;
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       recognition.onstart = () => {
         setEscuchando(true);
       };
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      // Procesar únicamente el buffer con event.resultIndex para evitar bucles de palabras repetidas
       recognition.onresult = (event: any) => {
-        let textoFinal = '';
-        let textoInterino = '';
+        let interimTranscript = '';
 
-        for (let i = 0; i < event.results.length; ++i) {
-          if (event.results[i].isFinal) {
-            textoFinal += event.results[i][0].transcript + ' ';
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          const item = event.results[i];
+          const texto = item[0]?.transcript || '';
+
+          if (item.isFinal) {
+            const fraseLimpia = texto.trim();
+            if (fraseLimpia) {
+              const palabrasActuales = finalTranscriptRef.current.trim().split(/\s+/);
+              const ultimaPalabra = palabrasActuales[palabrasActuales.length - 1]?.toLowerCase();
+              const primeraNueva = fraseLimpia.split(/\s+/)[0]?.toLowerCase();
+
+              // Evitar bucles de repetición inmediata (agrega agrega... / listo listo...)
+              if (
+                ultimaPalabra &&
+                primeraNueva &&
+                ultimaPalabra === primeraNueva &&
+                finalTranscriptRef.current.length > 0
+              ) {
+                const resto = fraseLimpia.split(/\s+/).slice(1).join(' ');
+                if (resto) {
+                  finalTranscriptRef.current = `${finalTranscriptRef.current} ${resto}`.trim();
+                }
+              } else {
+                finalTranscriptRef.current = finalTranscriptRef.current
+                  ? `${finalTranscriptRef.current} ${fraseLimpia}`
+                  : fraseLimpia;
+              }
+            }
           } else {
-            textoInterino += event.results[i][0].transcript;
+            interimTranscript += texto;
           }
         }
 
-        const acumulado = (textoFinal + textoInterino).trim();
+        const acumulado = [finalTranscriptRef.current, interimTranscript.trim()]
+          .filter(Boolean)
+          .join(' ')
+          .trim();
+
         if (acumulado) {
           setTranscripcion(acumulado);
         }
       };
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       recognition.onerror = (event: any) => {
         console.warn('SpeechRecognition error:', event.error);
         if (event.error === 'not-allowed') {
+          activoRef.current = false;
           setErrorMsg('Acceso al micrófono denegado. Permite el micrófono en tu navegador o usa el modo texto.');
           setEscuchando(false);
         } else if (event.error === 'no-speech') {
-          // Silencio temporal
+          // Silencio temporal: no cancelar si el usuario aún tiene el micrófono activo
+        } else if (event.error === 'aborted') {
+          // Aborto manual
         } else {
           setErrorMsg(`Error de captura de audio: ${event.error}`);
           setEscuchando(false);
@@ -157,7 +191,25 @@ export function VoiceOrderModal({ onPedidoProcesado, className = '' }: VoiceOrde
       };
 
       recognition.onend = () => {
-        setEscuchando(false);
+        // Auto-reinicio cuando el micrófono siga activo para evitar pausas/congelamiento en iOS Safari (iPhone)
+        if (activoRef.current) {
+          try {
+            recognition.start();
+          } catch {
+            setTimeout(() => {
+              if (activoRef.current) {
+                try {
+                  recognition.start();
+                } catch {
+                  setEscuchando(false);
+                  activoRef.current = false;
+                }
+              }
+            }, 180);
+          }
+        } else {
+          setEscuchando(false);
+        }
       };
 
       recognitionRef.current = recognition;
@@ -167,10 +219,12 @@ export function VoiceOrderModal({ onPedidoProcesado, className = '' }: VoiceOrde
       console.error('Error al iniciar reconocimiento:', err);
       setErrorMsg(msg);
       setEscuchando(false);
+      activoRef.current = false;
     }
   };
 
   const detenerReconocimiento = () => {
+    activoRef.current = false;
     if (recognitionRef.current) {
       try {
         recognitionRef.current.stop();
@@ -237,9 +291,11 @@ export function VoiceOrderModal({ onPedidoProcesado, className = '' }: VoiceOrde
     setAbierto(open);
     if (!open) {
       detenerReconocimiento();
+      finalTranscriptRef.current = '';
       setProcesando(false);
       setErrorMsg(null);
     } else {
+      finalTranscriptRef.current = '';
       setTranscripcion('');
       setErrorMsg(null);
       // Iniciar automáticamente la escucha si el navegador lo permite
@@ -399,7 +455,10 @@ export function VoiceOrderModal({ onPedidoProcesado, className = '' }: VoiceOrde
                   {transcripcion && (
                     <button
                       type="button"
-                      onClick={() => setTranscripcion('')}
+                      onClick={() => {
+                        finalTranscriptRef.current = '';
+                        setTranscripcion('');
+                      }}
                       className="text-[11px] font-semibold text-gray-400 hover:text-rose-600 transition flex items-center gap-1"
                     >
                       <RotateCcw className="h-3 w-3" />
@@ -412,7 +471,10 @@ export function VoiceOrderModal({ onPedidoProcesado, className = '' }: VoiceOrde
                   <textarea
                     rows={3}
                     value={transcripcion}
-                    onChange={(e) => setTranscripcion(e.target.value)}
+                    onChange={(e) => {
+                      setTranscripcion(e.target.value);
+                      finalTranscriptRef.current = e.target.value;
+                    }}
                     placeholder={
                       escuchando
                         ? 'Habla ahora... "Una empanada de queso, una malta y anótalo a Sofía Martínez..."'

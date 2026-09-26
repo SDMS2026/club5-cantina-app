@@ -230,6 +230,38 @@ export function ClientSelector({
     setErrorRegistro(null);
 
     try {
+      // Validación de duplicados (Nombre + Apellido + Sección):
+      // Consulta en Supabase si ya existe un alumno donde coincidan nombre_estudiante Y grado_seccion.
+      // Permite alumnos con el mismo nombre y apellido SI están en secciones/grados distintos,
+      // pero bloquea el registro si coinciden en la misma sección.
+      const normalizarTexto = (str: string | null | undefined) =>
+        (str || '')
+          .trim()
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '');
+
+      const { data: alumnosMismoNombre, error: errQueryDup } = await supabase
+        .from('clientes')
+        .select('id, nombre_estudiante, grado_seccion')
+        .ilike('nombre_estudiante', nombreLimpio);
+
+      if (!errQueryDup && alumnosMismoNombre && alumnosMismoNombre.length > 0) {
+        const alumnoDuplicadoMismaSeccion = alumnosMismoNombre.find((c) => {
+          const mismoNombre = normalizarTexto(c.nombre_estudiante) === normalizarTexto(nombreLimpio);
+          const mismaSeccion = normalizarTexto(c.grado_seccion) === normalizarTexto(gradoFinal);
+          return mismoNombre && mismaSeccion;
+        });
+
+        if (alumnoDuplicadoMismaSeccion) {
+          setErrorRegistro(
+            `Ya existe un alumno registrado con el nombre "${nombreLimpio}" en la sección/grado "${gradoFinal || 'Sin sección'}". No se permiten dos alumnos con el mismo nombre en la misma sección.`
+          );
+          setGuardando(false);
+          return;
+        }
+      }
+
       const payload = {
         nombre_estudiante: nombreLimpio,
         grado_seccion: gradoFinal,

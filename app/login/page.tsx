@@ -5,7 +5,7 @@ import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Lock, Eye, EyeOff, Loader2, AlertCircle, ArrowRight, ShieldCheck, Star, Sparkles, Heart } from 'lucide-react';
-import { supabase } from '@/lib/supabaseClient';
+import { supabase, MANTENER_SESION_KEY } from '@/lib/supabaseClient';
 import { iniciarTransicionRuta } from '@/components/PageTransitionLoader';
 import { KirbyEmailField } from '@/components/KirbyEmailField';
 import { useTheme } from '@/components/ThemeContext';
@@ -17,8 +17,19 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [mostrarPassword, setMostrarPassword] = useState(false);
+  const [mantenerSesion, setMantenerSesion] = useState(true);
   const [cargando, setCargando] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Cargar preferencia previa de sesión
+  React.useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const guardado = localStorage.getItem(MANTENER_SESION_KEY);
+      if (guardado !== null) {
+        setMantenerSesion(guardado !== 'false');
+      }
+    }
+  }, []);
 
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -33,6 +44,9 @@ export default function LoginPage() {
 
     try {
       setCargando(true);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(MANTENER_SESION_KEY, String(mantenerSesion));
+      }
 
       const { data, error } = await supabase.auth.signInWithPassword({
         email: emailLimpio,
@@ -328,6 +342,33 @@ export default function LoginPage() {
                   )}
                 </button>
               </div>
+            </div>
+
+            {/* Casilla Mantener sesión iniciada (Persistencia en iOS) */}
+            <div className="flex items-center justify-between pt-0.5 px-0.5">
+              <label className="flex items-center gap-2.5 cursor-pointer select-none group">
+                <input
+                  type="checkbox"
+                  id="mantenerSesion"
+                  checked={mantenerSesion}
+                  onChange={(e) => setMantenerSesion(e.target.checked)}
+                  disabled={cargando}
+                  className={`h-4 w-4 rounded cursor-pointer transition-all ${
+                    isKirbyMode
+                      ? 'accent-pink-500 text-pink-500 focus:ring-pink-400'
+                      : 'accent-[#0E52A0] text-[#0E52A0] focus:ring-blue-500'
+                  }`}
+                />
+                <span
+                  className={`text-xs font-semibold transition-colors ${
+                    isKirbyMode
+                      ? 'text-[#8A2548] dark:text-pink-300 group-hover:text-pink-600'
+                      : 'text-gray-600 dark:text-slate-400 group-hover:text-gray-900 dark:group-hover:text-slate-200'
+                  }`}
+                >
+                  Mantener sesión iniciada
+                </span>
+              </label>
             </div>
 
             {/* Botón de Enviar */}

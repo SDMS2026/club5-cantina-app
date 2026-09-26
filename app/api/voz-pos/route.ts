@@ -300,26 +300,39 @@ ESQUEMA OBLIGATORIO DE RESPUESTA JSON:
       const tel = parsedResult.nuevo_cliente.telefono_whatsapp?.trim() || null;
 
       if (nom) {
-        const { data: existente } = await supabase
+        const normalizar = (s: string | null | undefined) =>
+          (s || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+        // Consultar clientes que coincidan con el nombre
+        const { data: alumnosMismoNombre } = await supabase
           .from('clientes')
           .select('*')
-          .ilike('nombre_estudiante', `%${nom}%`)
-          .limit(1);
+          .ilike('nombre_estudiante', `%${nom}%`);
 
-        if (existente && existente.length > 0) {
-          let clienteActualizado = existente[0];
-          if (cargoOrep && !existente[0].nombre_representante) {
+        // Validación estricta: coincide al mismo tiempo nombre_estudiante Y grado_seccion
+        const duplicadoMismaSeccion = alumnosMismoNombre?.find(
+          (c) =>
+            normalizar(c.nombre_estudiante) === normalizar(nom) &&
+            normalizar(c.grado_seccion) === normalizar(grado)
+        );
+
+        if (duplicadoMismaSeccion) {
+          // Si ya coincide en la misma sección, bloquear duplicado y asociar al alumno existente
+          let clienteActualizado = duplicadoMismaSeccion;
+          if (cargoOrep && !duplicadoMismaSeccion.nombre_representante) {
             const { data: upd } = await supabase
               .from('clientes')
               .update({ nombre_representante: cargoOrep })
-              .eq('id', existente[0].id)
+              .eq('id', duplicadoMismaSeccion.id)
               .select()
               .single();
             if (upd) clienteActualizado = upd;
           }
           resultadoLimpio.cliente_id = clienteActualizado.id;
           resultadoLimpio.cliente_creado = clienteActualizado;
+          resultadoLimpio.resumen_interpretado = `Aviso: El alumno "${nom}" ya existe en "${grado}". Se asoció su registro existente para evitar duplicados. ${resultadoLimpio.resumen_interpretado}`;
         } else {
+          // Si está en sección distinta o no existe, permitir registrar al nuevo alumno
           const { data: insertado, error: errIns } = await supabase
             .from('clientes')
             .insert([
@@ -336,7 +349,7 @@ ESQUEMA OBLIGATORIO DE RESPUESTA JSON:
           if (!errIns && insertado) {
             resultadoLimpio.cliente_id = insertado.id;
             resultadoLimpio.cliente_creado = insertado;
-            resultadoLimpio.resumen_interpretado = `¡${nom} registrado con éxito en el sistema! ${resultadoLimpio.resumen_interpretado}`;
+            resultadoLimpio.resumen_interpretado = `¡${nom} (${grado}) registrado con éxito! ${resultadoLimpio.resumen_interpretado}`;
           }
         }
       }
