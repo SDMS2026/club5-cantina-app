@@ -670,6 +670,7 @@ export default function PosPage() {
                     setTimeout(() => setNotificacion(null), 4000);
                   }}
                   cargando={cargandoClientes}
+                  saldosClientes={saldosClientes}
                 />
               </div>
 

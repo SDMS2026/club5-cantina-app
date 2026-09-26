@@ -38,6 +38,20 @@ import {
 import { formatUSD } from '@/lib/utils';
 import { ResumenSaldoCliente } from '@/lib/clientBalance';
 
+const CHIPS_FILTRO = [
+  { id: 'todos', label: 'Todos' },
+  { id: '1er_grado', label: '1er Grado' },
+  { id: '2do_grado', label: '2do Grado' },
+  { id: '3er_grado', label: '3er Grado' },
+  { id: '4to_grado', label: '4to Grado' },
+  { id: '5to_grado', label: '5to Grado' },
+  { id: '6to_grado', label: '6to Grado' },
+  { id: 'preescolar', label: 'Preescolar' },
+  { id: 'bachillerato', label: 'Bachillerato' },
+  { id: 'docentes', label: 'Docentes' },
+  { id: 'representantes', label: 'Representantes' },
+];
+
 interface ClientSelectorProps {
   clientes: Cliente[];
   clienteSeleccionado: Cliente | null;
@@ -57,6 +71,8 @@ export function ClientSelector({
 }: ClientSelectorProps) {
   const [abierto, setAbierto] = useState(false);
   const [busqueda, setBusqueda] = useState('');
+  const [filtroRapido, setFiltroRapido] = useState<string>('todos');
+  const searchInputRef = React.useRef<HTMLInputElement>(null);
 
   // Estados para Modal de Alta Rápida de Cliente (Radix UI Dialog)
   const [modalRegistroAbierto, setModalRegistroAbierto] = useState(false);
@@ -75,6 +91,24 @@ export function ClientSelector({
     onDismiss: () => setModalRegistroAbierto(false),
   });
 
+  const dragScrollSelector = useModalDragScroll({
+    isOpen: abierto,
+    onDismiss: () => setAbierto(false),
+  });
+
+  // Auto-enfocar el cursor en el buscador al abrir el modal
+  React.useEffect(() => {
+    if (abierto) {
+      const timer = setTimeout(() => {
+        searchInputRef.current?.focus();
+      }, 70);
+      return () => clearTimeout(timer);
+    } else {
+      setBusqueda('');
+      setFiltroRapido('todos');
+    }
+  }, [abierto]);
+
   // Estados del selector de Grado/Nivel interactivo idéntico al módulo de Gestión
   const [popoverGradoModalAbierto, setPopoverGradoModalAbierto] = useState(false);
   const [categoriaActivaModal, setCategoriaActivaModal] = useState<
@@ -85,17 +119,57 @@ export function ClientSelector({
   const [mostrandoInputSeccionExtra, setMostrandoInputSeccionExtra] = useState(false);
   const [seccionPersonalizadaInput, setSeccionPersonalizadaInput] = useState('');
 
+  // Helper para saldo unificado
+  const getSaldoCliente = (c: Cliente): number => {
+    if (c.saldo !== undefined && c.saldo !== null) return Number(c.saldo);
+    if (saldosClientes && saldosClientes[c.id]) return saldosClientes[c.id].saldoNetoUsd;
+    return 0;
+  };
+
+  // Helper para iniciales de avatar
+  const getIniciales = (nombre: string): string => {
+    if (!nombre) return 'C';
+    const partes = nombre.trim().split(/\s+/);
+    if (partes.length === 1) return partes[0].slice(0, 2).toUpperCase();
+    return (partes[0][0] + partes[1][0]).toUpperCase();
+  };
+
   const clientesFiltrados = useMemo(() => {
-    if (!busqueda.trim()) return clientes;
-    const q = busqueda.toLowerCase().trim();
-    return clientes.filter(
-      (c) =>
-        c.nombre_estudiante.toLowerCase().includes(q) ||
-        (c.grado_seccion && c.grado_seccion.toLowerCase().includes(q)) ||
-        (c.nombre_representante && c.nombre_representante.toLowerCase().includes(q)) ||
-        (c.telefono_whatsapp && c.telefono_whatsapp.includes(q))
-    );
-  }, [clientes, busqueda]);
+    let lista = clientes;
+
+    // 1. Filtrar por chip de grado rápido
+    if (filtroRapido !== 'todos') {
+      lista = lista.filter((c) => {
+        const sec = (c.grado_seccion || '').toLowerCase();
+        if (filtroRapido === '1er_grado') return sec.includes('1er grado') || sec.includes('1er');
+        if (filtroRapido === '2do_grado') return sec.includes('2do grado') || sec.includes('2do');
+        if (filtroRapido === '3er_grado') return sec.includes('3er grado') || sec.includes('3er');
+        if (filtroRapido === '4to_grado') return sec.includes('4to grado') || sec.includes('4to');
+        if (filtroRapido === '5to_grado') return sec.includes('5to grado') || sec.includes('5to');
+        if (filtroRapido === '6to_grado') return sec.includes('6to grado') || sec.includes('6to');
+        if (filtroRapido === 'preescolar')
+          return sec.includes('sala') || sec.includes('maternal') || sec.includes('preescolar');
+        if (filtroRapido === 'bachillerato')
+          return sec.includes('año') || sec.includes('bachillerato');
+        if (filtroRapido === 'docentes') return esProfesorOPersonal(c.grado_seccion);
+        if (filtroRapido === 'representantes') return esRepresentante(c.grado_seccion);
+        return true;
+      });
+    }
+
+    // 2. Filtrar por texto
+    if (busqueda.trim()) {
+      const q = busqueda.toLowerCase().trim();
+      lista = lista.filter(
+        (c) =>
+          c.nombre_estudiante.toLowerCase().includes(q) ||
+          (c.grado_seccion && c.grado_seccion.toLowerCase().includes(q)) ||
+          (c.nombre_representante && c.nombre_representante.toLowerCase().includes(q))
+      );
+    }
+
+    return lista;
+  }, [clientes, filtroRapido, busqueda]);
 
   // Verificar si hay coincidencia exacta con lo que el usuario escribió
   const existeCoincidenciaExacta = useMemo(() => {
@@ -303,155 +377,267 @@ export function ClientSelector({
 
   return (
     <>
+      {/* Botón Disparador en la Pantalla del POS */}
       <div className="flex w-full items-center gap-2 min-w-0">
-        <Popover.Root open={abierto} onOpenChange={setAbierto}>
-          <Popover.Trigger asChild>
-            <button
-              type="button"
-              className={`group relative flex flex-1 min-w-0 items-center justify-between gap-2.5 sm:gap-3 rounded-2xl border px-3 sm:px-4 py-2.5 sm:py-3 text-left transition-all ${
+        <button
+          type="button"
+          onClick={() => setAbierto(true)}
+          className={`group relative flex flex-1 min-w-0 items-center justify-between gap-2.5 sm:gap-3 rounded-2xl border px-3 sm:px-4 py-2.5 sm:py-3 text-left transition-all ${
+            clienteSeleccionado
+              ? 'border-indigo-200/90 bg-indigo-50/40 hover:border-indigo-300 hover:bg-indigo-50/70 shadow-xs'
+              : 'border-gray-200/80 bg-white hover:border-gray-300 hover:bg-gray-50/70 shadow-xs'
+          }`}
+        >
+          <div className="flex items-center gap-2.5 sm:gap-3 overflow-hidden min-w-0 flex-1">
+            <div
+              className={`flex h-9 w-9 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-xl transition-colors ${
                 clienteSeleccionado
-                  ? 'border-indigo-200/90 bg-indigo-50/40 hover:border-indigo-300 hover:bg-indigo-50/70 shadow-xs'
-                  : 'border-gray-200/80 bg-white hover:border-gray-300 hover:bg-gray-50/70 shadow-xs'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'bg-gray-100 text-gray-500 group-hover:bg-gray-200'
               }`}
             >
-              <div className="flex items-center gap-2.5 sm:gap-3 overflow-hidden min-w-0 flex-1">
-                <div
-                  className={`flex h-9 w-9 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-xl transition-colors ${
-                    clienteSeleccionado
-                      ? 'bg-indigo-600 text-white shadow-xs'
-                      : 'bg-gray-100 text-gray-500 group-hover:bg-gray-200'
-                  }`}
-                >
-                  {clienteSeleccionado ? (
-                    <UserCheck className="h-4.5 w-4.5 sm:h-5 sm:w-5" />
-                  ) : (
-                    <User className="h-4.5 w-4.5 sm:h-5 sm:w-5" />
-                  )}
-                </div>
+              {clienteSeleccionado ? (
+                <UserCheck className="h-4.5 w-4.5 sm:h-5 sm:w-5" />
+              ) : (
+                <User className="h-4.5 w-4.5 sm:h-5 sm:w-5" />
+              )}
+            </div>
 
-                <div className="overflow-hidden min-w-0 flex-1">
-                  <div className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider text-gray-500 truncate">
-                    {clienteSeleccionado && esRepresentante(clienteSeleccionado.grado_seccion)
-                      ? 'Representante / Padre'
-                      : clienteSeleccionado && esProfesorOPersonal(clienteSeleccionado.grado_seccion)
-                      ? 'Docente / Personal'
-                      : 'Estudiante / Cliente'}
-                  </div>
-                  <div className="flex items-center gap-1.5 truncate text-xs sm:text-sm font-semibold text-gray-900">
-                    {clienteSeleccionado ? (
-                      <>
-                        <span className="truncate">{clienteSeleccionado.nombre_estudiante}</span>
-                        {(() => {
-                          const s = clienteSeleccionado.saldo !== undefined && clienteSeleccionado.saldo !== null
-                            ? Number(clienteSeleccionado.saldo)
-                            : (saldosClientes[clienteSeleccionado.id]?.saldoNetoUsd ?? 0);
-                          if (s > 0) {
-                            return (
-                              <span className="shrink-0 font-bold text-emerald-700 bg-emerald-50 border border-emerald-200/90 px-2 py-0.5 rounded-full text-[10px]">
-                                +{formatUSD(s)}
-                              </span>
-                            );
-                          }
-                          if (s < 0) {
-                            return (
-                              <span className="shrink-0 font-bold text-rose-700 bg-rose-50 border border-rose-200/90 px-2 py-0.5 rounded-full text-[10px]">
-                                -{formatUSD(Math.abs(s))}
-                              </span>
-                            );
-                          }
-                          return null;
-                        })()}
-                      </>
-                    ) : (
-                      <span className="font-normal text-gray-500 truncate block">
-                        Venta General / Ocasional <span className="hidden sm:inline">(Click para asociar)</span>
-                      </span>
-                    )}
-                  </div>
-                  {clienteSeleccionado && (
-                    <div className="flex items-center gap-1.5 sm:gap-2 text-[11px] sm:text-xs truncate">
-                      {clienteSeleccionado.grado_seccion && (
-                        <span
-                          className={`flex items-center gap-1 font-semibold shrink-0 ${
-                            esRepresentante(clienteSeleccionado.grado_seccion)
-                              ? 'text-purple-800'
-                              : esProfesorOPersonal(clienteSeleccionado.grado_seccion)
-                              ? 'text-amber-800'
-                              : 'text-indigo-700'
-                          }`}
-                        >
-                          {esRepresentante(clienteSeleccionado.grado_seccion) ? (
-                            <Users className="h-3 w-3 text-purple-600" />
-                          ) : esProfesorOPersonal(clienteSeleccionado.grado_seccion) ? (
-                            <Briefcase className="h-3 w-3 text-amber-600" />
-                          ) : (
-                            <GraduationCap className="h-3 w-3 text-indigo-600" />
-                          )}
-                          {clienteSeleccionado.grado_seccion}
-                        </span>
-                      )}
-                      {clienteSeleccionado.nombre_representante && (
-                        <span className="text-gray-500 truncate">
-                          &bull; {esProfesorOPersonal(clienteSeleccionado.grado_seccion) ? 'Área: ' : 'Rep: '}
-                          {clienteSeleccionado.nombre_representante}
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
+            <div className="overflow-hidden min-w-0 flex-1">
+              <div className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider text-gray-500 truncate">
+                {clienteSeleccionado && esRepresentante(clienteSeleccionado.grado_seccion)
+                  ? 'Representante / Padre'
+                  : clienteSeleccionado && esProfesorOPersonal(clienteSeleccionado.grado_seccion)
+                  ? 'Docente / Personal'
+                  : 'Estudiante / Cliente'}
               </div>
-
-              <div className="flex items-center shrink-0">
-                <ChevronDown className="h-4 w-4 text-gray-400 transition-transform group-hover:text-gray-600" />
-              </div>
-            </button>
-          </Popover.Trigger>
-
-          {clienteSeleccionado && (
-            <button
-              type="button"
-              onClick={() => onSeleccionarCliente(null)}
-              title="Quitar cliente (Cambiar a Venta General)"
-              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-gray-200/80 bg-white text-gray-400 hover:border-gray-300 hover:bg-gray-100 hover:text-gray-700 shadow-xs transition"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          )}
-
-          <Popover.Portal>
-            <Popover.Content
-              className="z-50 w-[calc(100vw-2rem)] max-w-md rounded-2xl border border-gray-200 bg-white p-3 shadow-xl outline-none backdrop-blur-lg animate-in fade-in-0 zoom-in-95"
-              align="start"
-              sideOffset={8}
-            >
-              {/* Buscador de clientes */}
-              <div className="relative mb-2">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-                <input
-                  type="text"
-                  value={busqueda}
-                  onChange={(e) => setBusqueda(e.target.value)}
-                  placeholder="Buscar por nombre, grado o representante..."
-                  className="w-full rounded-xl border border-gray-200 bg-gray-50/70 py-2 pl-9 pr-3 text-sm text-gray-900 placeholder-gray-400 outline-none transition focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-100"
-                  autoFocus
-                />
-                {busqueda && (
-                  <button
-                    type="button"
-                    onClick={() => setBusqueda('')}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-gray-400 hover:text-gray-600"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
+              <div className="flex items-center gap-1.5 truncate text-xs sm:text-sm font-semibold text-gray-900">
+                {clienteSeleccionado ? (
+                  <>
+                    <span className="truncate">{clienteSeleccionado.nombre_estudiante}</span>
+                    {(() => {
+                      const s = getSaldoCliente(clienteSeleccionado);
+                      if (s > 0) {
+                        return (
+                          <span className="shrink-0 font-bold text-emerald-700 bg-emerald-50 border border-emerald-200/90 px-2 py-0.5 rounded-full text-[10px]">
+                            +{formatUSD(s)}
+                          </span>
+                        );
+                      }
+                      if (s < 0) {
+                        return (
+                          <span className="shrink-0 font-bold text-rose-700 bg-rose-50 border border-rose-200/90 px-2 py-0.5 rounded-full text-[10px]">
+                            -{formatUSD(Math.abs(s))}
+                          </span>
+                        );
+                      }
+                      return null;
+                    })()}
+                  </>
+                ) : (
+                  <span className="font-normal text-gray-500 truncate block">
+                    Venta General / Ocasional <span className="hidden sm:inline">(Click para buscar o asociar)</span>
+                  </span>
                 )}
               </div>
 
-              {/* Botón de Registro Express destacado cuando no existe coincidencia exacta */}
-              {busqueda.trim().length > 0 && !existeCoincidenciaExacta && (
+              {clienteSeleccionado && (
+                <div className="flex items-center gap-1.5 sm:gap-2 text-[11px] sm:text-xs truncate mt-0.5">
+                  {clienteSeleccionado.grado_seccion && (
+                    <span
+                      className={`flex items-center gap-1 font-semibold shrink-0 ${
+                        esRepresentante(clienteSeleccionado.grado_seccion)
+                          ? 'text-purple-800'
+                          : esProfesorOPersonal(clienteSeleccionado.grado_seccion)
+                          ? 'text-amber-800'
+                          : 'text-indigo-700'
+                      }`}
+                    >
+                      {esRepresentante(clienteSeleccionado.grado_seccion) ? (
+                        <Users className="h-3 w-3 text-purple-600" />
+                      ) : esProfesorOPersonal(clienteSeleccionado.grado_seccion) ? (
+                        <Briefcase className="h-3 w-3 text-amber-600" />
+                      ) : (
+                        <GraduationCap className="h-3 w-3 text-indigo-600" />
+                      )}
+                      {clienteSeleccionado.grado_seccion}
+                    </span>
+                  )}
+                  {clienteSeleccionado.nombre_representante && (
+                    <span className="text-gray-500 truncate">
+                      &bull; {esProfesorOPersonal(clienteSeleccionado.grado_seccion) ? 'Área: ' : 'Rep: '}
+                      {clienteSeleccionado.nombre_representante}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center shrink-0">
+            <ChevronDown className="h-4 w-4 text-gray-400 transition-transform group-hover:text-gray-600" />
+          </div>
+        </button>
+
+        {clienteSeleccionado && (
+          <button
+            type="button"
+            onClick={() => onSeleccionarCliente(null)}
+            title="Quitar cliente (Cambiar a Venta General)"
+            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-gray-200/80 bg-white text-gray-400 hover:border-gray-300 hover:bg-gray-100 hover:text-gray-700 shadow-xs transition"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
+      </div>
+
+      {/* Modal / Bottom Sheet Limpio de Selección de Clientes (Radix UI Dialog) */}
+      <Dialog.Root open={abierto} onOpenChange={setAbierto}>
+        <Dialog.Portal>
+          <Dialog.Overlay
+            {...dragScrollSelector.overlayProps}
+            className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs transition-opacity animate-in fade-in"
+          />
+          <Dialog.Content
+            style={dragScrollSelector.style}
+            {...dragScrollSelector.dragProps}
+            className="fixed inset-x-0 bottom-0 z-50 max-h-[92dvh] sm:max-h-[85vh] flex flex-col rounded-t-3xl sm:rounded-3xl border-t sm:border border-gray-200/90 bg-white p-4 sm:p-5 shadow-2xl outline-none duration-200 animate-in slide-in-from-bottom sm:slide-in-from-bottom-0 sm:fade-in-0 sm:zoom-in-95 sm:inset-auto sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:w-[95vw] sm:max-w-lg cursor-grab active:cursor-grabbing"
+          >
+            {/* Manija táctil para deslizar hacia abajo en móviles */}
+            <div
+              className="mx-auto mb-2 -mt-1 flex h-5 w-full cursor-grab active:cursor-grabbing items-center justify-center sm:hidden touch-none"
+              title="Deslizar hacia abajo para cerrar"
+            >
+              <div className="h-1.5 w-12 rounded-full bg-gray-300 active:bg-gray-400 transition-colors" />
+            </div>
+
+            {/* Cabecera del Modal */}
+            <div className="flex items-center justify-between pb-3 border-b border-gray-100">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-50 border border-indigo-200/60 text-indigo-600">
+                  <User className="h-5 w-5" />
+                </div>
+                <div>
+                  <Dialog.Title className="text-base font-bold text-gray-900 leading-tight">
+                    Seleccionar Cliente
+                  </Dialog.Title>
+                  <Dialog.Description className="text-xs text-gray-500">
+                    Asigna el estudiante, docente o representante al pedido
+                  </Dialog.Description>
+                </div>
+              </div>
+              <Dialog.Close asChild>
+                <button
+                  type="button"
+                  className="rounded-xl p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </Dialog.Close>
+            </div>
+
+            {/* Opción 'Venta Rápida / General' destacada arriba del todo */}
+            <div className="pt-3">
+              <button
+                type="button"
+                onClick={() => {
+                  onSeleccionarCliente(null);
+                  setAbierto(false);
+                }}
+                className={`w-full flex items-center justify-between gap-3 p-3 rounded-2xl border transition-all ${
+                  !clienteSeleccionado
+                    ? 'border-indigo-500 bg-indigo-50/70 shadow-xs ring-1 ring-indigo-500/20'
+                    : 'border-dashed border-gray-300 bg-gray-50/70 hover:bg-gray-100/80 hover:border-gray-400'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <div
+                    className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl font-bold transition-colors ${
+                      !clienteSeleccionado
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'bg-white border border-gray-200 text-gray-600'
+                    }`}
+                  >
+                    <User className="h-5 w-5" />
+                  </div>
+                  <div className="text-left">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs sm:text-sm font-bold text-gray-900">
+                        ⚡ Venta General / Ocasional
+                      </span>
+                      {!clienteSeleccionado && (
+                        <span className="text-[10px] font-bold text-indigo-700 bg-indigo-100/80 px-2 py-0.5 rounded-full">
+                          Activo
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-gray-500">Cobro rápido sin vincular a cuenta ni saldo</p>
+                  </div>
+                </div>
+                {!clienteSeleccionado ? (
+                  <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-white">
+                    <Check className="h-3.5 w-3.5 stroke-[3]" />
+                  </div>
+                ) : (
+                  <span className="text-xs font-semibold text-gray-500 bg-white border border-gray-200 px-2.5 py-1 rounded-xl group-hover:border-gray-300">
+                    Elegir
+                  </span>
+                )}
+              </button>
+            </div>
+
+            {/* Buscador de clientes con auto-focus */}
+            <div className="relative pt-2.5">
+              <Search className="absolute left-3.5 top-[calc(50%+5px)] h-4 w-4 -translate-y-1/2 text-gray-400" />
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={busqueda}
+                onChange={(e) => setBusqueda(e.target.value)}
+                placeholder="Buscar por nombre, apellido, sección o representante..."
+                className="w-full rounded-xl border border-gray-200 bg-gray-50/80 py-2.5 pl-10 pr-9 text-xs sm:text-sm text-gray-900 placeholder-gray-400 outline-none transition focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-100"
+              />
+              {busqueda && (
+                <button
+                  type="button"
+                  onClick={() => setBusqueda('')}
+                  className="absolute right-3 top-[calc(50%+5px)] -translate-y-1/2 rounded-full p-1 text-gray-400 hover:bg-gray-200 hover:text-gray-700 transition"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+
+            {/* Chips de filtro rápido horizontales scrolleables */}
+            <div className="pt-2">
+              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 touch-pan-x">
+                {CHIPS_FILTRO.map((chip) => {
+                  const activo = filtroRapido === chip.id;
+                  return (
+                    <button
+                      key={chip.id}
+                      type="button"
+                      onClick={() => setFiltroRapido(chip.id)}
+                      className={`shrink-0 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+                        activo
+                          ? 'bg-indigo-600 text-white shadow-2xs'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200 hover:text-gray-900'
+                      }`}
+                    >
+                      {chip.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Botón de Registro Express destacado cuando no existe coincidencia exacta */}
+            {busqueda.trim().length > 0 && !existeCoincidenciaExacta && (
+              <div className="pt-2">
                 <button
                   type="button"
                   onClick={() => handleAbrirRegistroExpress(busqueda.trim())}
-                  className="mb-2.5 flex w-full items-center justify-between gap-2.5 rounded-xl border border-indigo-200/90 bg-gradient-to-r from-indigo-50/90 via-blue-50/80 to-indigo-50/90 p-2.5 text-left transition hover:border-indigo-300 hover:shadow-xs group"
+                  className="w-full flex items-center justify-between gap-2.5 rounded-xl border border-indigo-200/90 bg-gradient-to-r from-indigo-50/90 via-blue-50/80 to-indigo-50/90 p-2.5 text-left transition hover:border-indigo-300 hover:shadow-xs group"
                 >
                   <div className="flex items-center gap-2.5 min-w-0">
                     <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-xs group-hover:scale-105 transition-transform">
@@ -470,65 +656,30 @@ export function ClientSelector({
                     Alta Rápida
                   </span>
                 </button>
-              )}
+              </div>
+            )}
 
-              {/* Opción venta general / sin cliente */}
-              <button
-                type="button"
-                onClick={() => {
-                  onSeleccionarCliente(null);
-                  setAbierto(false);
-                }}
-                className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm transition ${
-                  !clienteSeleccionado
-                    ? 'bg-indigo-50 font-medium text-indigo-900'
-                    : 'text-gray-700 hover:bg-gray-100'
-                }`}
-              >
-                <div className="flex items-center gap-2.5">
-                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gray-100 text-gray-600">
-                    <User className="h-4 w-4" />
-                  </div>
-                  <div>
-                    <div className="font-semibold text-gray-900">Venta General / Ocasional</div>
-                    <div className="text-xs text-gray-500">Sin asociar a cuenta personal</div>
-                  </div>
-                </div>
-                {!clienteSeleccionado && <Check className="h-4 w-4 text-indigo-600" />}
-              </button>
-
-              {/* Botón rápido para registrar si la búsqueda está vacía */}
-              {!busqueda.trim() && (
-                <button
-                  type="button"
-                  onClick={() => handleAbrirRegistroExpress('')}
-                  className="mt-1 flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs font-semibold text-indigo-600 hover:bg-indigo-50/80 transition"
-                >
-                  <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-indigo-100/70 text-indigo-700">
-                    <UserPlus className="h-3.5 w-3.5" />
-                  </div>
-                  <span>+ Registrar nuevo estudiante, docente o representante</span>
-                </button>
-              )}
-
-              <div className="my-2 border-t border-gray-100" />
-
-              {/* Lista de clientes */}
-              <div className="max-h-60 overflow-y-auto space-y-1 pr-1">
+            {/* Contenedor con altura fija y scroll interno para las tarjetas */}
+            <div className="flex-1 min-h-0 pt-2 pb-1">
+              <div className="max-h-[360px] overflow-y-auto space-y-2 pr-1">
                 {cargando ? (
-                  <div className="py-6 text-center text-xs text-gray-500">
-                    Cargando directorio...
+                  <div className="py-8 text-center text-xs text-gray-500 flex flex-col items-center justify-center gap-2">
+                    <Loader2 className="h-5 w-5 animate-spin text-indigo-600" />
+                    <span>Cargando directorio de clientes...</span>
                   </div>
                 ) : clientesFiltrados.length === 0 ? (
-                  <div className="py-6 px-3 text-center flex flex-col items-center justify-center">
+                  <div className="py-8 px-3 text-center flex flex-col items-center justify-center">
                     <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600 mb-2">
                       <UserPlus className="h-5 w-5" />
                     </div>
-                    <p className="text-xs font-semibold text-gray-900">
-                      No se encontró a &ldquo;{busqueda}&rdquo;
+                    <p className="text-xs font-bold text-gray-900">
+                      No se encontraron clientes
+                      {busqueda.trim() ? ` para "${busqueda}"` : ''}
                     </p>
                     <p className="text-[11px] text-gray-500 mb-3 max-w-[240px]">
-                      ¿Es un nuevo estudiante, docente o representante? Puedes registrarlo en 5 segundos.
+                      {busqueda.trim()
+                        ? '¿Deseas darlo de alta en el sistema? Puedes registrarlo en 5 segundos.'
+                        : 'No hay clientes registrados en esta categoría.'}
                     </p>
                     <button
                       type="button"
@@ -536,7 +687,7 @@ export function ClientSelector({
                       className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2 text-xs font-bold text-white shadow-xs hover:bg-indigo-700 transition active:scale-95"
                     >
                       <UserPlus className="h-3.5 w-3.5" />
-                      <span>+ Registrar &ldquo;{busqueda.trim()}&rdquo;</span>
+                      <span>+ Registrar {busqueda.trim() ? `"${busqueda.trim()}"` : 'Nuevo Alumno'}</span>
                     </button>
                   </div>
                 ) : (
@@ -544,6 +695,7 @@ export function ClientSelector({
                     const estaSeleccionado = clienteSeleccionado?.id === cliente.id;
                     const esRepItem = esRepresentante(cliente.grado_seccion);
                     const esProfItem = esProfesorOPersonal(cliente.grado_seccion);
+                    const saldo = getSaldoCliente(cliente);
 
                     return (
                       <button
@@ -553,73 +705,87 @@ export function ClientSelector({
                           onSeleccionarCliente(cliente);
                           setAbierto(false);
                         }}
-                        className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm transition ${
+                        className={`group w-full flex items-center justify-between gap-3 p-2.5 sm:p-3 rounded-2xl border transition-all text-left ${
                           estaSeleccionado
-                            ? 'bg-indigo-50 text-indigo-950 font-medium'
-                            : 'hover:bg-gray-50 text-gray-800'
+                            ? 'border-indigo-300 bg-indigo-50/70 shadow-xs'
+                            : 'border-gray-200/80 bg-white hover:border-gray-300 hover:bg-gray-50/70'
                         }`}
                       >
-                        <div className="overflow-hidden">
-                          <div className="flex items-center gap-1.5 font-medium text-gray-900 truncate">
-                            {esRepItem ? (
-                              <Users className="h-3.5 w-3.5 text-purple-600 shrink-0" />
-                            ) : esProfItem ? (
-                              <Briefcase className="h-3.5 w-3.5 text-amber-600 shrink-0" />
-                            ) : null}
-                            <span className="truncate">{cliente.nombre_estudiante}</span>
+                        {/* Columna Izquierda: Avatar iniciales + Nombre */}
+                        <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
+                          <div
+                            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-xs font-bold transition-transform group-hover:scale-105 ${
+                              estaSeleccionado
+                                ? 'bg-indigo-600 text-white shadow-xs'
+                                : esRepItem
+                                ? 'bg-purple-100 text-purple-700'
+                                : esProfItem
+                                ? 'bg-amber-100 text-amber-800'
+                                : 'bg-indigo-100/80 text-indigo-700'
+                            }`}
+                          >
+                            {getIniciales(cliente.nombre_estudiante)}
                           </div>
-                          <div className="flex items-center gap-2 text-xs text-gray-500 truncate">
-                            {cliente.grado_seccion && (
-                              <span
-                                className={`font-semibold ${
-                                  esRepItem
-                                    ? 'text-purple-800'
-                                    : esProfItem
-                                    ? 'text-amber-800'
-                                    : 'text-indigo-700'
-                                }`}
-                              >
-                                {cliente.grado_seccion}
+
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className="truncate text-xs sm:text-sm font-bold text-gray-900">
+                                {cliente.nombre_estudiante}
                               </span>
-                            )}
-                            {cliente.nombre_representante && (
-                              <span>
-                                &bull; {esProfItem ? 'Área: ' : 'Rep: '}
-                                {cliente.nombre_representante}
-                              </span>
-                            )}
-                          </div>
-                          {cliente.telefono_whatsapp && (
-                            <div className="flex items-center gap-1 text-[11px] text-emerald-600 font-mono">
-                              <Phone className="h-2.5 w-2.5" />
-                              {cliente.telefono_whatsapp}
+                              {estaSeleccionado && (
+                                <Check className="h-3.5 w-3.5 text-indigo-600 shrink-0 stroke-[3]" />
+                              )}
                             </div>
-                          )}
+
+                            {/* Grado y Sección */}
+                            <div className="flex items-center gap-1.5 text-[11px] sm:text-xs text-gray-500 truncate mt-0.5">
+                              {cliente.grado_seccion ? (
+                                <span
+                                  className={`inline-flex items-center gap-1 font-semibold ${
+                                    esRepItem
+                                      ? 'text-purple-700'
+                                      : esProfItem
+                                      ? 'text-amber-700'
+                                      : 'text-indigo-600'
+                                  }`}
+                                >
+                                  {esRepItem ? (
+                                    <Users className="h-3 w-3 shrink-0" />
+                                  ) : esProfItem ? (
+                                    <Briefcase className="h-3 w-3 shrink-0" />
+                                  ) : (
+                                    <GraduationCap className="h-3 w-3 shrink-0" />
+                                  )}
+                                  <span className="truncate">{cliente.grado_seccion}</span>
+                                </span>
+                              ) : (
+                                <span className="text-gray-400 italic">Sin sección</span>
+                              )}
+
+                              {cliente.nombre_representante && (
+                                <span className="text-gray-400 truncate hidden sm:inline">
+                                  &bull; {esProfItem ? 'Área: ' : 'Rep: '}
+                                  {cliente.nombre_representante}
+                                </span>
+                              )}
+                            </div>
+                          </div>
                         </div>
 
-                        <div className="flex items-center gap-1.5 shrink-0 ml-2">
-                          {(() => {
-                            const s = cliente.saldo !== undefined && cliente.saldo !== null
-                              ? Number(cliente.saldo)
-                              : (saldosClientes[cliente.id]?.saldoNetoUsd ?? 0);
-                            if (s > 0) {
-                              return (
-                                <span className="font-bold text-emerald-700 bg-emerald-50 border border-emerald-200/90 px-2 py-0.5 rounded-full text-[10px]">
-                                  +{formatUSD(s)}
-                                </span>
-                              );
-                            }
-                            if (s < 0) {
-                              return (
-                                <span className="font-bold text-rose-700 bg-rose-50 border border-rose-200/90 px-2 py-0.5 rounded-full text-[10px]">
-                                  -{formatUSD(Math.abs(s))}
-                                </span>
-                              );
-                            }
-                            return null;
-                          })()}
-                          {estaSeleccionado && (
-                            <Check className="h-4 w-4 shrink-0 text-indigo-600" />
+                        {/* Columna Derecha: Insignia de Saldo compacta */}
+                        <div className="shrink-0 flex items-center">
+                          {saldo > 0 ? (
+                            <span className="inline-flex items-center font-bold text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200/90 px-2.5 py-1 rounded-full shadow-2xs">
+                              +{formatUSD(saldo)}
+                            </span>
+                          ) : saldo < 0 ? (
+                            <span className="inline-flex items-center font-bold text-[11px] text-rose-700 bg-rose-50 border border-rose-200/90 px-2.5 py-1 rounded-full shadow-2xs">
+                              -{formatUSD(Math.abs(saldo))}
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center font-medium text-[11px] text-gray-500 bg-gray-100 border border-gray-200 px-2 py-0.5 rounded-full">
+                              $0.00
+                            </span>
                           )}
                         </div>
                       </button>
@@ -627,10 +793,25 @@ export function ClientSelector({
                   })
                 )}
               </div>
-            </Popover.Content>
-          </Popover.Portal>
-        </Popover.Root>
-      </div>
+            </div>
+
+            {/* Pie del modal */}
+            <div className="pt-2 border-t border-gray-100 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => handleAbrirRegistroExpress('')}
+                className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50/80 px-2.5 py-1.5 rounded-xl transition"
+              >
+                <UserPlus className="h-4 w-4" />
+                <span>+ Registrar Nuevo Alumno o Personal</span>
+              </button>
+              <span className="text-[11px] text-gray-400">
+                {clientesFiltrados.length} cliente{clientesFiltrados.length === 1 ? '' : 's'}
+              </span>
+            </div>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
 
       {/* Modal de Alta Rápida de Cliente (Radix UI Dialog) */}
       <Dialog.Root open={modalRegistroAbierto} onOpenChange={setModalRegistroAbierto}>
