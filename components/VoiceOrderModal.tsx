@@ -563,8 +563,12 @@ export function VoiceOrderModal({
         const duplicado = alumnosMismoNombre?.find(
           (c) =>
             normalizar(c.nombre_estudiante) === normalizar(nom) &&
-            normalizar(c.grado_seccion) === normalizar(grado)
-        );
+            (normalizar(c.grado_seccion) === normalizar(grado) ||
+             !grado || grado === 'Estudiante' || grado === 'General' ||
+             !c.grado_seccion || c.grado_seccion === 'Estudiante' || c.grado_seccion === 'General')
+        ) || alumnosMismoNombre?.find(
+          (c) => normalizar(c.nombre_estudiante) === normalizar(nom)
+        ) || (alumnosMismoNombre && alumnosMismoNombre.length === 1 ? alumnosMismoNombre[0] : null);
 
         if (duplicado) {
           cliId = duplicado.id;
@@ -860,14 +864,17 @@ export function VoiceOrderModal({
         : saldosClientes[clienteActivo.id]?.saldoNetoUsd || 0)
     : 0;
 
-  // Clientes filtrados para selector de cambio
+  // Clientes filtrados para selector de cambio con normalización de acentos y seguridad contra nulos
+  const normalizarBusquedaVoz = (s?: string | null) =>
+    (s || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
   const clientesFiltrados = clientes.filter((c) => {
     if (!busquedaCliente.trim()) return true;
-    const q = busquedaCliente.toLowerCase();
-    return (
-      c.nombre_estudiante.toLowerCase().includes(q) ||
-      (c.grado_seccion && c.grado_seccion.toLowerCase().includes(q))
-    );
+    const q = normalizarBusquedaVoz(busquedaCliente);
+    const est = normalizarBusquedaVoz(c.nombre_estudiante);
+    const grado = normalizarBusquedaVoz(c.grado_seccion);
+    const rep = normalizarBusquedaVoz(c.nombre_representante);
+    return est.includes(q) || grado.includes(q) || rep.includes(q);
   });
 
   return (

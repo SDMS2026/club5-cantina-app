@@ -226,12 +226,20 @@ export function ClientSelector({
     return 0;
   };
 
+  const normalizarBusqueda = (str?: string | null) =>
+    (str || '')
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+
   // Helper para iniciales de avatar
-  const getIniciales = (nombre: string): string => {
+  const getIniciales = (nombre?: string | null): string => {
     if (!nombre) return 'C';
-    const partes = nombre.trim().split(/\s+/);
+    const partes = nombre.trim().split(/\s+/).filter(Boolean);
+    if (partes.length === 0) return 'C';
     if (partes.length === 1) return partes[0].slice(0, 2).toUpperCase();
-    return (partes[0][0] + partes[1][0]).toUpperCase();
+    return ((partes[0][0] || '') + (partes[1][0] || '')).toUpperCase() || 'C';
   };
 
   const clientesFiltrados = useMemo(() => {
@@ -240,7 +248,7 @@ export function ClientSelector({
     // 1. Filtrar por chip de grado rápido
     if (filtroRapido !== 'todos') {
       lista = lista.filter((c) => {
-        const sec = (c.grado_seccion || '').toLowerCase();
+        const sec = normalizarBusqueda(c.grado_seccion);
         if (filtroRapido === '1er_grado') return sec.includes('1er grado') || sec.includes('1er');
         if (filtroRapido === '2do_grado') return sec.includes('2do grado') || sec.includes('2do');
         if (filtroRapido === '3er_grado') return sec.includes('3er grado') || sec.includes('3er');
@@ -250,22 +258,29 @@ export function ClientSelector({
         if (filtroRapido === 'preescolar')
           return sec.includes('sala') || sec.includes('maternal') || sec.includes('preescolar');
         if (filtroRapido === 'bachillerato')
-          return sec.includes('año') || sec.includes('bachillerato');
+          return sec.includes('ano') || sec.includes('año') || sec.includes('bachillerato');
         if (filtroRapido === 'docentes') return esProfesorOPersonal(c.grado_seccion);
         if (filtroRapido === 'representantes') return esRepresentante(c.grado_seccion);
         return true;
       });
     }
 
-    // 2. Filtrar por texto
+    // 2. Filtrar por texto con normalización robusta de tildes y teléfono
     if (busqueda.trim()) {
-      const q = busqueda.toLowerCase().trim();
-      lista = lista.filter(
-        (c) =>
-          c.nombre_estudiante.toLowerCase().includes(q) ||
-          (c.grado_seccion && c.grado_seccion.toLowerCase().includes(q)) ||
-          (c.nombre_representante && c.nombre_representante.toLowerCase().includes(q))
-      );
+      const q = normalizarBusqueda(busqueda);
+      const qNums = busqueda.replace(/\D/g, '');
+      lista = lista.filter((c) => {
+        const est = normalizarBusqueda(c.nombre_estudiante);
+        const sec = normalizarBusqueda(c.grado_seccion);
+        const rep = normalizarBusqueda(c.nombre_representante);
+        const telNums = (c.telefono_whatsapp || '').replace(/\D/g, '');
+        return (
+          est.includes(q) ||
+          sec.includes(q) ||
+          rep.includes(q) ||
+          (qNums.length >= 3 && telNums.includes(qNums))
+        );
+      });
     }
 
     return lista;
@@ -273,9 +288,9 @@ export function ClientSelector({
 
   // Verificar si hay coincidencia exacta con lo que el usuario escribió
   const existeCoincidenciaExacta = useMemo(() => {
-    const q = busqueda.trim().toLowerCase();
+    const q = normalizarBusqueda(busqueda);
     if (!q) return false;
-    return clientes.some((c) => c.nombre_estudiante.trim().toLowerCase() === q);
+    return clientes.some((c) => normalizarBusqueda(c.nombre_estudiante) === q);
   }, [clientes, busqueda]);
 
   // Grado final actual calculado
@@ -404,10 +419,8 @@ export function ClientSelector({
     setErrorRegistro(null);
 
     try {
-      // Validación de duplicados (Nombre + Apellido + Sección):
-      // Consulta en Supabase si ya existe un alumno donde coincidan nombre_estudiante Y grado_seccion.
-      // Permite alumnos con el mismo nombre y apellido SI están en secciones/grados distintos,
-      // pero bloquea el registro si coinciden en la misma sección.
+      // Validación y Consolidación de duplicados (Nombre + Apellido):
+      // Consulta en Supabase si ya existe el alumno para no duplicarlo ni fragmentar su deuda e historial.
       const normalizarTexto = (str: string | null | undefined) =>
         (str || '')
           .trim()
@@ -417,20 +430,26 @@ export function ClientSelector({
 
       const { data: alumnosMismoNombre, error: errQueryDup } = await supabase
         .from('clientes')
-        .select('id, nombre_estudiante, grado_seccion')
-        .ilike('nombre_estudiante', nombreLimpio);
+        .select('*')
+        .ilike('nombre_estudiante', `%${nombreLimpio}%`);
 
       if (!errQueryDup && alumnosMismoNombre && alumnosMismoNombre.length > 0) {
-        const alumnoDuplicadoMismaSeccion = alumnosMismoNombre.find((c) => {
+        const alumnoDuplicado = alumnosMismoNombre.find((c) => {
           const mismoNombre = normalizarTexto(c.nombre_estudiante) === normalizarTexto(nombreLimpio);
           const mismaSeccion = normalizarTexto(c.grado_seccion) === normalizarTexto(gradoFinal);
-          return mismoNombre && mismaSeccion;
-        });
-
-        if (alumnoDuplicadoMismaSeccion) {
-          setErrorRegistro(
-            `Ya existe un alumno registrado con el nombre "${nombreLimpio}" en la sección/grado "${gradoFinal || 'Sin sección'}". No se permiten dos alumnos con el mismo nombre en la misma sección.`
+          return (
+            mismoNombre &&
+            (mismaSeccion || !gradoFinal || gradoFinal === 'General' || !c.grado_seccion || c.grado_seccion === 'General')
           );
+        }) || alumnosMismoNombre.find(
+          (c) => normalizarTexto(c.nombre_estudiante) === normalizarTexto(nombreLimpio)
+        );
+
+        if (alumnoDuplicado) {
+          // Asociar automáticamente al alumno ya existente para consolidar deudas y evitar duplicados
+          onSeleccionarCliente(alumnoDuplicado);
+          setBusqueda('');
+          setModalRegistroAbierto(false);
           setGuardando(false);
           return;
         }
@@ -438,9 +457,10 @@ export function ClientSelector({
 
       const payload = {
         nombre_estudiante: nombreLimpio,
-        grado_seccion: gradoFinal,
+        grado_seccion: gradoFinal || 'General',
         nombre_representante: esRep ? null : repLimpio || null,
-        telefono_whatsapp: telefonoCompleto,
+        telefono_whatsapp: telefonoCompleto || null,
+        saldo: 0,
       };
 
       const { data, error } = await supabase

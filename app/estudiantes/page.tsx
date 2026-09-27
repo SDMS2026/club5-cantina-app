@@ -321,7 +321,8 @@ export default function EstudiantesPage() {
       const { data: clientesDb, error: errClientes } = await supabase
         .from('clientes')
         .select('*')
-        .order('nombre_estudiante', { ascending: true });
+        .order('nombre_estudiante', { ascending: true })
+        .limit(5000);
 
       if (errClientes) throw errClientes;
       setClientes(clientesDb || []);
@@ -362,6 +363,13 @@ export default function EstudiantesPage() {
           cargarDatos();
         }
       )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'abonos' },
+        () => {
+          cargarDatos();
+        }
+      )
       .subscribe();
 
     return () => {
@@ -369,12 +377,21 @@ export default function EstudiantesPage() {
     };
   }, [cargarTasa, cargarDatos]);
 
+  // Helper de normalización de texto insensible a tildes y mayúsculas
+  const normalizarTexto = (str?: string | null) =>
+    (str || '')
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+
   // Grados / Secciones únicos para el filtro
   const gradosDisponibles = useMemo(() => {
     const set = new Set<string>();
     clientes.forEach((c) => {
-      if (c.grado_seccion && c.grado_seccion.trim()) {
-        set.add(c.grado_seccion.trim());
+      const g = (c.grado_seccion || '').trim();
+      if (g) {
+        set.add(g);
       }
     });
     return Array.from(set).sort();
@@ -385,34 +402,41 @@ export default function EstudiantesPage() {
     let lista = [...clientes];
 
     if (busqueda.trim()) {
-      const q = busqueda.toLowerCase().trim();
+      const q = normalizarTexto(busqueda);
+      const qNums = busqueda.replace(/\D/g, '');
       lista = lista.filter((c) => {
-        const est = c.nombre_estudiante.toLowerCase();
-        const rep = (c.nombre_representante || '').toLowerCase();
-        const grado = (c.grado_seccion || '').toLowerCase();
-        const tel = c.telefono_whatsapp || '';
-        return est.includes(q) || rep.includes(q) || grado.includes(q) || tel.includes(q);
+        const est = normalizarTexto(c.nombre_estudiante);
+        const rep = normalizarTexto(c.nombre_representante);
+        const grado = normalizarTexto(c.grado_seccion);
+        const telNums = (c.telefono_whatsapp || '').replace(/\D/g, '');
+        return (
+          est.includes(q) ||
+          rep.includes(q) ||
+          grado.includes(q) ||
+          (qNums.length >= 3 && telNums.includes(qNums))
+        );
       });
     }
 
     if (filtroGrado !== 'todos') {
-      lista = lista.filter((c) => c.grado_seccion === filtroGrado);
+      const fGradoNorm = normalizarTexto(filtroGrado);
+      lista = lista.filter((c) => normalizarTexto(c.grado_seccion) === fGradoNorm);
     }
 
     if (filtroEstado === 'con_deuda') {
       lista = lista.filter((c) => {
         const s = c.saldo !== undefined && c.saldo !== null ? Number(c.saldo) : (saldosClientes[c.id]?.saldoNetoUsd || 0);
-        return s < 0;
+        return s < -0.001;
       });
     } else if (filtroEstado === 'con_saldo_favor') {
       lista = lista.filter((c) => {
         const s = c.saldo !== undefined && c.saldo !== null ? Number(c.saldo) : (saldosClientes[c.id]?.saldoNetoUsd || 0);
-        return s > 0;
+        return s > 0.001;
       });
     } else if (filtroEstado === 'solvente') {
       lista = lista.filter((c) => {
         const s = c.saldo !== undefined && c.saldo !== null ? Number(c.saldo) : (saldosClientes[c.id]?.saldoNetoUsd || 0);
-        return s >= 0;
+        return Math.abs(s) <= 0.001;
       });
     }
 
@@ -788,7 +812,7 @@ export default function EstudiantesPage() {
         }
       }
 
-      const payload = {
+      const payload: Record<string, any> = {
         nombre_estudiante: nombreLimpio,
         grado_seccion: gradoFinal,
         nombre_representante: repLimpio || null,
@@ -796,6 +820,7 @@ export default function EstudiantesPage() {
       };
 
       if (modalForm.modo === 'crear') {
+        payload.saldo = 0;
         const { error } = await supabase.from('clientes').insert([payload]);
         if (error) throw error;
         setNotificacion({

@@ -112,7 +112,8 @@ export default function PosPage() {
       const { data, error } = await supabase
         .from('clientes')
         .select('*')
-        .order('nombre_estudiante', { ascending: true });
+        .order('nombre_estudiante', { ascending: true })
+        .limit(5000);
 
       if (error) {
         console.error('Error al obtener clientes de Supabase:', error);
@@ -179,6 +180,13 @@ export default function PosPage() {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'consumos' },
+        () => {
+          obtenerSaldosTodosClientes().then(setSaldosClientes).catch(console.error);
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'abonos' },
         () => {
           obtenerSaldosTodosClientes().then(setSaldosClientes).catch(console.error);
         }

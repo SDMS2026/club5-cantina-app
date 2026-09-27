@@ -202,7 +202,8 @@ export async function POST(req: NextRequest) {
     // 2. Obtener lista de clientes / estudiantes de Supabase
     const { data: clientes, error: errCli } = await supabase
       .from('clientes')
-      .select('id, nombre_estudiante, grado_seccion, nombre_representante');
+      .select('id, nombre_estudiante, grado_seccion, nombre_representante')
+      .limit(5000);
 
     if (errCli) {
       console.error('Error consultando clientes para Gemini:', errCli);
@@ -477,12 +478,17 @@ ESQUEMA OBLIGATORIO DE RESPUESTA JSON:
           .select('id, nombre_estudiante, grado_seccion, nombre_representante, telefono_whatsapp')
           .ilike('nombre_estudiante', `%${nom}%`);
 
-        // Validación estricta: coincide al mismo tiempo nombre_estudiante Y grado_seccion
-        const duplicadoMismaSeccion = alumnosMismoNombre?.find(
-          (c) =>
-            normalizar(c.nombre_estudiante) === normalizar(nom) &&
-            normalizar(c.grado_seccion) === normalizar(grado)
-        );
+        // Validación y consolidación: si ya existe el alumno en el colegio se asocia de inmediato
+        const duplicadoMismaSeccion = alumnosMismoNombre?.find((c) => {
+          const mismoNom = normalizar(c.nombre_estudiante) === normalizar(nom);
+          const mismaSec = normalizar(c.grado_seccion) === normalizar(grado);
+          return (
+            mismoNom &&
+            (mismaSec || !grado || grado === 'Estudiante' || grado === 'General' || !c.grado_seccion || c.grado_seccion === 'Estudiante' || c.grado_seccion === 'General')
+          );
+        }) || alumnosMismoNombre?.find(
+          (c) => normalizar(c.nombre_estudiante) === normalizar(nom)
+        ) || (alumnosMismoNombre && alumnosMismoNombre.length === 1 ? alumnosMismoNombre[0] : null);
 
         if (duplicadoMismaSeccion) {
           resultadoLimpio.cliente_id = duplicadoMismaSeccion.id;

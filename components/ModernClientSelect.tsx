@@ -46,15 +46,24 @@ export function ModernClientSelect({
     }
   }, [abierto]);
 
+  const normalizarBusqueda = (s?: string | null) =>
+    (s || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
   const clientesFiltrados = useMemo(() => {
     if (!busqueda.trim()) return clientes;
-    const query = busqueda.toLowerCase().trim();
+    const query = normalizarBusqueda(busqueda);
+    const qNums = busqueda.replace(/\D/g, '');
     return clientes.filter((c) => {
-      const nom = c.nombre_estudiante.toLowerCase();
-      const grado = (c.grado_seccion || '').toLowerCase();
-      const rep = (c.nombre_representante || '').toLowerCase();
-      const tel = (c.telefono_whatsapp || '').toLowerCase();
-      return nom.includes(query) || grado.includes(query) || rep.includes(query) || tel.includes(query);
+      const nom = normalizarBusqueda(c.nombre_estudiante);
+      const grado = normalizarBusqueda(c.grado_seccion);
+      const rep = normalizarBusqueda(c.nombre_representante);
+      const telNums = (c.telefono_whatsapp || '').replace(/\D/g, '');
+      return (
+        nom.includes(query) ||
+        grado.includes(query) ||
+        rep.includes(query) ||
+        (qNums.length >= 3 && telNums.includes(qNums))
+      );
     });
   }, [clientes, busqueda]);
 

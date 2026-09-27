@@ -56,7 +56,8 @@ export function extraerSaldoFavorUsado(metodoPago?: string | null, montoTotal: n
 export async function obtenerSaldosTodosClientes(): Promise<Record<string, ResumenSaldoCliente>> {
   const { data, error } = await supabase
     .from('clientes')
-    .select('id, saldo, nombre_estudiante');
+    .select('id, saldo, nombre_estudiante')
+    .limit(5000);
 
   if (error || !data) {
     console.error('Error obteniendo clientes para saldos unificados:', error);
