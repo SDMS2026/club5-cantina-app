@@ -142,6 +142,7 @@ export default function EstudiantesPage() {
     montoUsd: string;
     montoBs: string;
     metodoPago: string;
+    numeroReferencia: string;
     guardando: boolean;
     error: string | null;
   }>({
@@ -150,6 +151,7 @@ export default function EstudiantesPage() {
     montoUsd: '',
     montoBs: '',
     metodoPago: 'efectivo_usd',
+    numeroReferencia: '',
     guardando: false,
     error: null,
   });
@@ -543,6 +545,7 @@ export default function EstudiantesPage() {
       montoUsd: '',
       montoBs: '',
       metodoPago: 'efectivo_usd',
+      numeroReferencia: '',
       guardando: false,
       error: null,
     });
@@ -564,6 +567,7 @@ export default function EstudiantesPage() {
         clienteId: modalAbono.cliente.id,
         montoUsd: monto,
         metodoPago: modalAbono.metodoPago,
+        numeroReferencia: modalAbono.numeroReferencia,
         tasaBcv,
       });
 
@@ -2578,6 +2582,42 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
                   })}
                 </div>
               </div>
+
+              {/* Campo para Número de Referencia si es Pago Móvil */}
+              {modalAbono.metodoPago === 'pago_movil' && (
+                <div className="rounded-2xl border border-sky-200 dark:border-sky-900/60 bg-sky-50/70 dark:bg-sky-950/40 p-3 text-xs text-sky-950 dark:text-sky-200 animate-in fade-in space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="font-bold flex items-center gap-1.5 text-sky-900 dark:text-sky-300">
+                      <Smartphone className="h-4 w-4 text-sky-600 dark:text-sky-400" />
+                      <span>Número de Referencia (Pago Móvil):</span>
+                    </label>
+                    <span className="text-[10px] text-sky-700 dark:text-sky-300 bg-sky-100 dark:bg-sky-900/60 font-bold px-2 py-0.5 rounded-full">
+                      Pago Móvil
+                    </span>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={modalAbono.numeroReferencia}
+                      onChange={(e) => setModalAbono((prev) => ({ ...prev, numeroReferencia: e.target.value }))}
+                      placeholder="Ej: 123456 o comprobante bancario"
+                      className="w-full rounded-xl border border-sky-300 dark:border-sky-800 bg-white dark:bg-slate-900 py-2 pl-3 pr-8 text-xs font-mono font-bold text-gray-900 dark:text-white placeholder:text-gray-400 focus:border-sky-500 focus:outline-none"
+                    />
+                    {modalAbono.numeroReferencia && (
+                      <button
+                        type="button"
+                        onClick={() => setModalAbono((prev) => ({ ...prev, numeroReferencia: '' }))}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-0.5"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-sky-700 dark:text-sky-400 leading-tight">
+                    Quedará registrado en la transacción para conciliación contable en el Historial de Transacciones.
+                  </p>
+                </div>
+              )}
 
               {/* Inputs de Monto Bimoneda con Validación Numérica Estricta */}
               {(() => {

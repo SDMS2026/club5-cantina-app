@@ -205,6 +205,7 @@ export default function DeudasPage() {
   });
 
   const [metodoPago, setMetodoPago] = useState<MetodoCancelacionId>('pago_movil');
+  const [numeroReferenciaLiquidacion, setNumeroReferenciaLiquidacion] = useState<string>('');
   const [procesandoPago, setProcesandoPago] = useState<boolean>(false);
   const [errorPago, setErrorPago] = useState<string | null>(null);
 
@@ -215,6 +216,7 @@ export default function DeudasPage() {
     montoUsd: string;
     montoBs: string;
     metodoPago: string;
+    numeroReferencia: string;
     guardando: boolean;
     error: string | null;
   }>({
@@ -223,6 +225,7 @@ export default function DeudasPage() {
     montoUsd: '',
     montoBs: '',
     metodoPago: 'efectivo_usd',
+    numeroReferencia: '',
     guardando: false,
     error: null,
   });
@@ -493,6 +496,7 @@ export default function DeudasPage() {
       clienteId: cuenta.cliente?.id || null,
     });
     setMetodoPago('pago_movil');
+    setNumeroReferenciaLiquidacion('');
     setErrorPago(null);
   };
 
@@ -521,6 +525,7 @@ export default function DeudasPage() {
       clienteId: clienteId || deuda.cliente_id || null,
     });
     setMetodoPago('pago_movil');
+    setNumeroReferenciaLiquidacion('');
     setErrorPago(null);
   };
 
@@ -544,11 +549,16 @@ export default function DeudasPage() {
         }
       }
 
+      let metodoFinal = metodoPago as string;
+      if (metodoPago === 'pago_movil' && numeroReferenciaLiquidacion.trim()) {
+        metodoFinal = `pago_movil#ref:${numeroReferenciaLiquidacion.trim()}`;
+      }
+
       const { error } = await supabase
         .from('consumos')
         .update({
           pagado: true,
-          metodo_pago: metodoPago,
+          metodo_pago: metodoFinal,
         })
         .in('id', modalLiquidacion.idsConsumos);
 
@@ -603,6 +613,7 @@ export default function DeudasPage() {
       montoUsd: '',
       montoBs: '',
       metodoPago: 'efectivo_usd',
+      numeroReferencia: '',
       guardando: false,
       error: null,
     });
@@ -627,6 +638,7 @@ export default function DeudasPage() {
         clienteId: modalAbono.cliente.id,
         montoUsd: monto,
         metodoPago: modalAbono.metodoPago,
+        numeroReferencia: modalAbono.numeroReferencia,
         tasaBcv,
       });
 
@@ -1432,7 +1444,7 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
           <Dialog.Content
             style={dragScrollDeuda.style}
             {...dragScrollDeuda.dragProps}
-            className="fixed inset-x-0 bottom-0 z-50 max-h-[88dvh] sm:max-h-[90vh] overflow-y-auto overscroll-contain touch-scroll-ios rounded-t-3xl sm:rounded-3xl border-t sm:border border-gray-200/90 bg-white p-4 sm:p-6 pb-28 sm:pb-6 shadow-2xl outline-none duration-300 animate-in slide-in-from-bottom sm:slide-in-from-bottom-0 sm:fade-in-0 sm:zoom-in-95 sm:inset-auto sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:w-[95vw] sm:max-w-lg cursor-grab active:cursor-grabbing"
+            className="fixed inset-x-0 bottom-0 z-50 max-h-[88dvh] sm:max-h-[90vh] overflow-y-auto overscroll-contain touch-scroll-ios rounded-t-3xl sm:rounded-3xl border-t sm:border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#0D111A] p-4 sm:p-6 pb-28 sm:pb-6 shadow-2xl outline-none duration-300 animate-in slide-in-from-bottom sm:slide-in-from-bottom-0 sm:fade-in-0 sm:zoom-in-95 sm:inset-auto sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:w-[95vw] sm:max-w-lg cursor-grab active:cursor-grabbing text-slate-900 dark:text-slate-100"
           >
             {/* Manija táctil para deslizar hacia arriba y abajo en móviles */}
             <div
@@ -1586,18 +1598,53 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
                 })}
               </div>
 
-              {/* Información bancaria oficial si seleccionan Pago Móvil */}
+              {/* Información bancaria oficial y número de referencia si seleccionan Pago Móvil */}
               {metodoPago === 'pago_movil' && (
-                <div className="mt-3 rounded-2xl border border-indigo-100 bg-indigo-50/70 p-3 text-xs text-indigo-950">
-                  <div className="font-bold flex items-center gap-1.5 mb-1 text-indigo-900">
-                    <Smartphone className="h-3.5 w-3.5 text-indigo-600" />
-                    <span>Datos Oficiales Pago Móvil:</span>
+                <div className="mt-3 space-y-2.5">
+                  <div className="rounded-2xl border border-indigo-100 dark:border-indigo-900/60 bg-indigo-50/70 dark:bg-indigo-950/40 p-3 text-xs text-indigo-950 dark:text-indigo-200">
+                    <div className="font-bold flex items-center gap-1.5 mb-1 text-indigo-900 dark:text-indigo-300">
+                      <Smartphone className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
+                      <span>Datos Oficiales Pago Móvil:</span>
+                    </div>
+                    <div className="space-y-0.5 text-[11px] font-mono">
+                      <p><strong>Banco:</strong> BNC (Banco Nacional de Crédito - 0191)</p>
+                      <p><strong>Cédula:</strong> 14953511</p>
+                      <p><strong>Teléfono:</strong> 04125404830</p>
+                      <p><strong>WhatsApp Referencia:</strong> 04123588848</p>
+                    </div>
                   </div>
-                  <div className="space-y-0.5 text-[11px] font-mono">
-                    <p><strong>Banco:</strong> BNC (Banco Nacional de Crédito - 0191)</p>
-                    <p><strong>Cédula:</strong> 14953511</p>
-                    <p><strong>Teléfono:</strong> 04125404830</p>
-                    <p><strong>WhatsApp Referencia:</strong> 04123588848</p>
+
+                  <div className="rounded-2xl border border-sky-200 dark:border-sky-900/60 bg-sky-50/70 dark:bg-sky-950/40 p-3 text-xs text-sky-950 dark:text-sky-200 animate-in fade-in space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="font-bold flex items-center gap-1.5 text-sky-900 dark:text-sky-300">
+                        <Smartphone className="h-4 w-4 text-sky-600 dark:text-sky-400" />
+                        <span>Número de Referencia (Pago Móvil):</span>
+                      </label>
+                      <span className="text-[10px] text-sky-700 dark:text-sky-300 bg-sky-100 dark:bg-sky-900/60 font-bold px-2 py-0.5 rounded-full">
+                        Pago Móvil
+                      </span>
+                    </div>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={numeroReferenciaLiquidacion}
+                        onChange={(e) => setNumeroReferenciaLiquidacion(e.target.value)}
+                        placeholder="Ej: 123456 o comprobante bancario"
+                        className="w-full rounded-xl border border-sky-300 dark:border-sky-800 bg-white dark:bg-slate-900 py-2 pl-3 pr-8 text-xs font-mono font-bold text-gray-900 dark:text-white placeholder:text-gray-400 focus:border-sky-500 focus:outline-none"
+                      />
+                      {numeroReferenciaLiquidacion && (
+                        <button
+                          type="button"
+                          onClick={() => setNumeroReferenciaLiquidacion('')}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-0.5"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-sky-700 dark:text-sky-400 leading-tight">
+                      Quedará guardado en la transacción de la base de datos para auditoría y consulta en el Historial.
+                    </p>
                   </div>
                 </div>
               )}
@@ -1782,6 +1829,42 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
                   })}
                 </div>
               </div>
+
+              {/* Campo para Número de Referencia si es Pago Móvil */}
+              {modalAbono.metodoPago === 'pago_movil' && (
+                <div className="rounded-2xl border border-sky-200 dark:border-sky-900/60 bg-sky-50/70 dark:bg-sky-950/40 p-3 text-xs text-sky-950 dark:text-sky-200 animate-in fade-in space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="font-bold flex items-center gap-1.5 text-sky-900 dark:text-sky-300">
+                      <Smartphone className="h-4 w-4 text-sky-600 dark:text-sky-400" />
+                      <span>Número de Referencia (Pago Móvil):</span>
+                    </label>
+                    <span className="text-[10px] text-sky-700 dark:text-sky-300 bg-sky-100 dark:bg-sky-900/60 font-bold px-2 py-0.5 rounded-full">
+                      Pago Móvil
+                    </span>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={modalAbono.numeroReferencia}
+                      onChange={(e) => setModalAbono((prev) => ({ ...prev, numeroReferencia: e.target.value }))}
+                      placeholder="Ej: 123456 o comprobante bancario"
+                      className="w-full rounded-xl border border-sky-300 dark:border-sky-800 bg-white dark:bg-slate-900 py-2 pl-3 pr-8 text-xs font-mono font-bold text-gray-900 dark:text-white placeholder:text-gray-400 focus:border-sky-500 focus:outline-none"
+                    />
+                    {modalAbono.numeroReferencia && (
+                      <button
+                        type="button"
+                        onClick={() => setModalAbono((prev) => ({ ...prev, numeroReferencia: '' }))}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-0.5"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-sky-700 dark:text-sky-400 leading-tight">
+                    Quedará registrado en la transacción para conciliación contable en el Historial de Transacciones.
+                  </p>
+                </div>
+              )}
 
               {/* Inputs de Monto Bimoneda con Validación Numérica Estricta */}
               {(() => {

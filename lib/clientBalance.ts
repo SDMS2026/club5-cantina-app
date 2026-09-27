@@ -188,12 +188,14 @@ export async function procesarAbonoCliente({
   metodoPago = 'efectivo_usd',
   tasaBcv,
   esVuelto = false,
+  numeroReferencia,
 }: {
   clienteId: string;
   montoUsd: number;
   metodoPago?: string;
   tasaBcv: number;
   esVuelto?: boolean;
+  numeroReferencia?: string | null;
 }): Promise<{
   exito: boolean;
   saldoAnterior: number;
@@ -240,7 +242,13 @@ export async function procesarAbonoCliente({
   }
 
   // 3. Registrar el ticket en consumos para el historial contable detallado
-  const metodoRegistro = esVuelto ? 'vuelto_saldo_favor' : (metodoPago || 'abono_saldo_favor');
+  let metodoRegistro = esVuelto ? 'vuelto_saldo_favor' : (metodoPago || 'abono_saldo_favor');
+  if (numeroReferencia && numeroReferencia.trim()) {
+    if (!metodoRegistro.includes('#ref:')) {
+      metodoRegistro = `${metodoRegistro}#ref:${numeroReferencia.trim()}`;
+    }
+  }
+
   const { error: errHistorial } = await supabase.from('consumos').insert({
     cliente_id: clienteId,
     monto_total_usd: montoUsd,
