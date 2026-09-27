@@ -34,6 +34,8 @@ import { NotificationBell } from '@/components/NotificationBell';
 import { refrescarNotificacionesGlobales } from '@/components/NotificationsContext';
 import { useSidebar } from '@/components/SidebarContext';
 import { useModalDragScroll } from '@/lib/useModalDragScroll';
+import { useRouter } from 'next/navigation';
+import { ejecutarMiniRecarga, EVENTO_MINI_RECARGA } from '@/lib/syncUtils';
 
 // Helper: Formato de fecha YYYY-MM-DD
 const obtenerFechaHoy = (): string => {
@@ -72,6 +74,7 @@ const formatearFechaLegible = (fechaStr: string): string => {
 };
 
 export default function ProveedoresPage() {
+  const router = useRouter();
   const [montado, setMontado] = useState(false);
   const { toggleSidebar, abierto: sidebarAbierto } = useSidebar();
 
@@ -247,8 +250,14 @@ export default function ProveedoresPage() {
       )
       .subscribe();
 
+    const handleMiniRecarga = () => {
+      cargarCuentas();
+    };
+    window.addEventListener(EVENTO_MINI_RECARGA, handleMiniRecarga);
+
     return () => {
       supabase.removeChannel(canalRealtime);
+      window.removeEventListener(EVENTO_MINI_RECARGA, handleMiniRecarga);
     };
   }, [cargarTasa, cargarCuentas]);
 
@@ -479,8 +488,13 @@ export default function ProveedoresPage() {
       }
 
       setModalForm((prev) => ({ ...prev, abierto: false, guardando: false }));
-      cargarCuentas();
-      refrescarNotificacionesGlobales();
+      await ejecutarMiniRecarga({
+        router,
+        recargarDatosLocales: async () => {
+          await cargarCuentas();
+        },
+        mensaje: modalForm.modo === 'crear' ? 'Factura guardada y sincronizada' : 'Factura actualizada y sincronizada',
+      });
     } catch (err: any) {
       console.error('Error al guardar factura:', err);
       setModalForm((prev) => ({
@@ -521,8 +535,13 @@ export default function ProveedoresPage() {
         `Pago a "${modalLiquidar.cuenta.nombre_proveedor}" liquidado a tasa ${formatBs(tasaBcv)}.`
       );
       setModalLiquidar({ abierto: false, cuenta: null, procesando: false, error: null });
-      cargarCuentas();
-      refrescarNotificacionesGlobales();
+      await ejecutarMiniRecarga({
+        router,
+        recargarDatosLocales: async () => {
+          await cargarCuentas();
+        },
+        mensaje: 'Pago liquidado y sincronizado',
+      });
     } catch (err: any) {
       console.error('Error al liquidar pago:', err);
       setModalLiquidar((prev) => ({
@@ -547,8 +566,13 @@ export default function ProveedoresPage() {
       if (error) throw error;
 
       mostrarNotificacion('info', `La factura de "${cuenta.nombre_proveedor}" volvió a estado Pendiente.`);
-      cargarCuentas();
-      refrescarNotificacionesGlobales();
+      await ejecutarMiniRecarga({
+        router,
+        recargarDatosLocales: async () => {
+          await cargarCuentas();
+        },
+        mensaje: 'Factura revertida a pendiente y sincronizada',
+      });
     } catch (err: any) {
       console.error('Error al revertir pago:', err);
       mostrarNotificacion('error', 'No se pudo revertir el estado de la factura.');
@@ -582,8 +606,13 @@ export default function ProveedoresPage() {
         `Factura de "${modalEliminar.cuenta.nombre_proveedor}" eliminada exitosamente.`
       );
       setModalEliminar({ abierto: false, cuenta: null, eliminando: false, error: null });
-      cargarCuentas();
-      refrescarNotificacionesGlobales();
+      await ejecutarMiniRecarga({
+        router,
+        recargarDatosLocales: async () => {
+          await cargarCuentas();
+        },
+        mensaje: 'Factura eliminada y sincronizada',
+      });
     } catch (err: any) {
       console.error('Error al eliminar factura:', err);
       setModalEliminar((prev) => ({

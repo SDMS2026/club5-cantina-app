@@ -27,6 +27,7 @@ import {
 import { ModernClientSelect } from '@/components/ModernClientSelect';
 import { refrescarNotificacionesGlobales } from '@/components/NotificationsContext';
 import { useModalDragScroll } from '@/lib/useModalDragScroll';
+import { ejecutarMiniRecarga } from '@/lib/syncUtils';
 
 interface AbonoModalProps {
   abierto: boolean;
@@ -111,7 +112,7 @@ export function AbonoModal({
       if (onAbonoExitoso) {
         onAbonoExitoso(res.mensaje);
       }
-      refrescarNotificacionesGlobales();
+      ejecutarMiniRecarga();
     } catch (err: unknown) {
       console.error('Error registrando abono:', err);
       setModalAbono((prev) => ({

@@ -1,7 +1,9 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
+import { ejecutarMiniRecarga, EVENTO_MINI_RECARGA } from '@/lib/syncUtils';
 import * as Dialog from '@radix-ui/react-dialog';
 import {
   History,
@@ -110,6 +112,7 @@ const formatearFechaHora = (fechaIso?: string): { fecha: string; hora: string; e
 };
 
 export default function TransaccionesPage() {
+  const router = useRouter();
   const [montado, setMontado] = useState(false);
   const { toggleSidebar, abierto: sidebarAbierto } = useSidebar();
 
@@ -431,7 +434,15 @@ export default function TransaccionesPage() {
       })
       .subscribe();
 
+    const handleMiniRecarga = () => {
+      cargarTransacciones(paginaActual, false);
+      cargarMetricasResumen();
+    };
+
+    window.addEventListener(EVENTO_MINI_RECARGA, handleMiniRecarga);
+
     return () => {
+      window.removeEventListener(EVENTO_MINI_RECARGA, handleMiniRecarga);
       supabase.removeChannel(channel);
     };
   }, [paginaActual, cargarTransacciones, cargarMetricasResumen]);
@@ -456,8 +467,12 @@ export default function TransaccionesPage() {
       if (modalDetalle.abierto) {
         setModalDetalle({ abierto: false, transaccion: null });
       }
-      await Promise.all([cargarTransacciones(paginaActual, false), cargarMetricasResumen()]);
-      refrescarNotificacionesGlobales();
+      await ejecutarMiniRecarga({
+        router,
+        recargarDatosLocales: async () => {
+          await Promise.all([cargarTransacciones(paginaActual, false), cargarMetricasResumen()]);
+        },
+      });
     } catch (err: unknown) {
       console.error('Error al anular transacción:', err);
       const msg = err instanceof Error ? err.message : 'Error al anular la transacción.';

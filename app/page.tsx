@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import Image from 'next/image';
+import { useRouter } from 'next/navigation';
 import { Header } from '@/components/Header';
 import { ClientSelector } from '@/components/ClientSelector';
 import { ProductCatalog } from '@/components/ProductCatalog';
@@ -19,6 +20,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { refrescarNotificacionesGlobales } from '@/components/NotificationsContext';
 import { useModalDragScroll } from '@/lib/useModalDragScroll';
 import { obtenerSaldosTodosClientes, ResumenSaldoCliente } from '@/lib/clientBalance';
+import { ejecutarMiniRecarga, EVENTO_MINI_RECARGA } from '@/lib/syncUtils';
 
 const PRODUCTOS_MUESTRA_SEMILLA: Omit<Producto, 'id'>[] = [
   { nombre: 'Empanada de Queso Blanco', precio_usd: 1.5, activo: true, categoria: 'Desayunos' },
@@ -61,6 +63,7 @@ const CLIENTES_MUESTRA_SEMILLA: Omit<Cliente, 'id'>[] = [
 ];
 
 export default function PosPage() {
+  const router = useRouter();
   const [montado, setMontado] = useState(false);
 
   // Estado de tasa BCV
@@ -195,7 +198,17 @@ export default function PosPage() {
       )
       .subscribe();
 
+    // Sincronización mediante evento global de mini recarga
+    const handleMiniRecarga = () => {
+      cargarClientes();
+      cargarProductos();
+      obtenerSaldosTodosClientes().then(setSaldosClientes).catch(console.error);
+    };
+
+    window.addEventListener(EVENTO_MINI_RECARGA, handleMiniRecarga);
+
     return () => {
+      window.removeEventListener(EVENTO_MINI_RECARGA, handleMiniRecarga);
       supabase.removeChannel(canalRealtime);
     };
   }, [cargarTasa, cargarClientes, cargarProductos]);
@@ -283,36 +296,68 @@ export default function PosPage() {
       return existe ? prev : [nuevoCliente, ...prev];
     });
     setClienteSeleccionado(nuevoCliente);
+    ejecutarMiniRecarga({
+      router,
+      recargarDatosLocales: async () => {
+        await Promise.all([
+          cargarClientes(),
+          obtenerSaldosTodosClientes().then(setSaldosClientes).catch(console.error),
+        ]);
+      },
+    });
   };
 
   const handleVentaExitosaPorVoz = (mensaje: string) => {
-    obtenerSaldosTodosClientes().then(setSaldosClientes).catch(console.error);
-    refrescarNotificacionesGlobales();
     setNotificacion({
       tipo: 'exito',
       texto: mensaje,
     });
     setTimeout(() => setNotificacion(null), 4500);
+    ejecutarMiniRecarga({
+      router,
+      recargarDatosLocales: async () => {
+        await Promise.all([
+          cargarClientes(),
+          cargarProductos(),
+          obtenerSaldosTodosClientes().then(setSaldosClientes).catch(console.error),
+        ]);
+      },
+    });
   };
 
   const handleVentaFiadaPorVoz = (mensaje: string) => {
-    obtenerSaldosTodosClientes().then(setSaldosClientes).catch(console.error);
-    refrescarNotificacionesGlobales();
     setNotificacion({
       tipo: 'exito',
       texto: mensaje,
     });
     setTimeout(() => setNotificacion(null), 4500);
+    ejecutarMiniRecarga({
+      router,
+      recargarDatosLocales: async () => {
+        await Promise.all([
+          cargarClientes(),
+          cargarProductos(),
+          obtenerSaldosTodosClientes().then(setSaldosClientes).catch(console.error),
+        ]);
+      },
+    });
   };
 
   const handleAbonoPorVoz = (mensaje: string) => {
-    obtenerSaldosTodosClientes().then(setSaldosClientes).catch(console.error);
-    refrescarNotificacionesGlobales();
     setNotificacion({
       tipo: 'exito',
       texto: mensaje,
     });
     setTimeout(() => setNotificacion(null), 4500);
+    ejecutarMiniRecarga({
+      router,
+      recargarDatosLocales: async () => {
+        await Promise.all([
+          cargarClientes(),
+          obtenerSaldosTodosClientes().then(setSaldosClientes).catch(console.error),
+        ]);
+      },
+    });
   };
 
   const handleAlertaPorVoz = (tipo: 'error' | 'advertencia' | 'exito' | 'info', texto: string) => {
@@ -329,15 +374,24 @@ export default function PosPage() {
     setModalPagoAbierto(false);
     setModalOrdenMovilAbierto(false);
     setMetodoPagoSugerido('efectivo_usd');
-    obtenerSaldosTodosClientes().then(setSaldosClientes).catch(console.error);
     setNotificacion({
       tipo: 'exito',
       texto: '¡Venta registrada con éxito en Supabase!',
     });
-    refrescarNotificacionesGlobales();
     setTimeout(() => {
       setNotificacion(null);
     }, 4000);
+
+    ejecutarMiniRecarga({
+      router,
+      recargarDatosLocales: async () => {
+        await Promise.all([
+          cargarClientes(),
+          cargarProductos(),
+          obtenerSaldosTodosClientes().then(setSaldosClientes).catch(console.error),
+        ]);
+      },
+    });
   };
 
   // Sembrar datos de prueba iniciales en Supabase si la base de datos está vacía
@@ -526,6 +580,15 @@ export default function PosPage() {
                     texto: `¡"${nuevo.nombre_estudiante}" registrado y asociado a la venta!`,
                   });
                   setTimeout(() => setNotificacion(null), 4000);
+                  ejecutarMiniRecarga({
+                    router,
+                    recargarDatosLocales: async () => {
+                      await Promise.all([
+                        cargarClientes(),
+                        obtenerSaldosTodosClientes().then(setSaldosClientes).catch(console.error),
+                      ]);
+                    },
+                  });
                 }}
                 cargando={cargandoClientes}
                 saldosClientes={saldosClientes}
@@ -713,6 +776,15 @@ export default function PosPage() {
                       texto: `¡"${nuevo.nombre_estudiante}" registrado y asociado a la venta!`,
                     });
                     setTimeout(() => setNotificacion(null), 4000);
+                    ejecutarMiniRecarga({
+                      router,
+                      recargarDatosLocales: async () => {
+                        await Promise.all([
+                          cargarClientes(),
+                          obtenerSaldosTodosClientes().then(setSaldosClientes).catch(console.error),
+                        ]);
+                      },
+                    });
                   }}
                   cargando={cargandoClientes}
                   saldosClientes={saldosClientes}
@@ -855,8 +927,15 @@ export default function PosPage() {
             texto: mensaje,
           });
           setTimeout(() => setNotificacion(null), 4500);
-          obtenerSaldosTodosClientes().then(setSaldosClientes).catch(console.error);
-          cargarClientes();
+          ejecutarMiniRecarga({
+            router,
+            recargarDatosLocales: async () => {
+              await Promise.all([
+                cargarClientes(),
+                obtenerSaldosTodosClientes().then(setSaldosClientes).catch(console.error),
+              ]);
+            },
+          });
         }}
       />
     </div>

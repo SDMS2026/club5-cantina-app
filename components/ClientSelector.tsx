@@ -40,6 +40,7 @@ import {
 } from '@/lib/constants';
 import { formatUSD } from '@/lib/utils';
 import { ResumenSaldoCliente } from '@/lib/clientBalance';
+import { ejecutarMiniRecarga } from '@/lib/syncUtils';
 
 const CHIPS_FILTRO = [
   { id: 'todos', label: 'Todos' },
@@ -481,6 +482,8 @@ export function ClientSelector({
         }
         // 2. Asociar automáticamente como cliente activo en la orden actual
         onSeleccionarCliente(data);
+        // 3. Mini recarga y sincronización global
+        ejecutarMiniRecarga();
       }
 
       // Limpiar y cerrar modal

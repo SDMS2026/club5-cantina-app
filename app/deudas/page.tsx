@@ -2,7 +2,9 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
+import { ejecutarMiniRecarga, EVENTO_MINI_RECARGA } from '@/lib/syncUtils';
 import * as Dialog from '@radix-ui/react-dialog';
 import * as Popover from '@radix-ui/react-popover';
 import {
@@ -148,6 +150,7 @@ const OPCIONES_ORDEN = [
 ];
 
 export default function DeudasPage() {
+  const router = useRouter();
   const [montado, setMontado] = useState(false);
   const { toggleSidebar, abierto: sidebarAbierto } = useSidebar();
 
@@ -334,7 +337,14 @@ export default function DeudasPage() {
       )
       .subscribe();
 
+    const handleMiniRecarga = () => {
+      cargarDeudas();
+    };
+
+    window.addEventListener(EVENTO_MINI_RECARGA, handleMiniRecarga);
+
     return () => {
+      window.removeEventListener(EVENTO_MINI_RECARGA, handleMiniRecarga);
       supabase.removeChannel(canalRealtime);
     };
   }, [cargarTasa, cargarDeudas]);
@@ -591,8 +601,12 @@ export default function DeudasPage() {
         texto: `¡Pago de ${formatUSD(modalLiquidacion.montoUsd)} procesado con éxito!`,
       });
       setTimeout(() => setNotificacion(null), 4000);
-      await cargarDeudas();
-      refrescarNotificacionesGlobales();
+      await ejecutarMiniRecarga({
+        router,
+        recargarDatosLocales: async () => {
+          await cargarDeudas();
+        },
+      });
     } catch (err: unknown) {
       console.error('Error al procesar pago:', err);
       setErrorPago(
@@ -648,8 +662,12 @@ export default function DeudasPage() {
         texto: res.mensaje,
       });
       setTimeout(() => setNotificacion(null), 4500);
-      await cargarDeudas();
-      refrescarNotificacionesGlobales();
+      await ejecutarMiniRecarga({
+        router,
+        recargarDatosLocales: async () => {
+          await cargarDeudas();
+        },
+      });
     } catch (err: unknown) {
       console.error('Error registrando abono:', err);
       setModalAbono((prev) => ({

@@ -37,6 +37,7 @@ import {
   ResumenSaldoCliente,
 } from '@/lib/clientBalance';
 import { refrescarNotificacionesGlobales } from '@/components/NotificationsContext';
+import { ejecutarMiniRecarga } from '@/lib/syncUtils';
 
 interface PaymentModalProps {
   abierto: boolean;
@@ -344,7 +345,7 @@ export function PaymentModal({
         esVuelto: true,
       });
       setVueltoAcreditadoExito(vueltoUsd);
-      refrescarNotificacionesGlobales();
+      ejecutarMiniRecarga();
     } catch (e) {
       console.error('Error guardando vuelto:', e);
     } finally {

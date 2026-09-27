@@ -10,6 +10,7 @@ import { Footer } from './Footer';
 import { motion, AnimatePresence } from 'framer-motion';
 import { isMaintenanceMode } from '@/lib/maintenance';
 import { MaintenanceScreen } from './MaintenanceScreen';
+import { MiniSyncIndicator } from './MiniSyncIndicator';
 
 export function LayoutContainer({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -51,6 +52,9 @@ export function LayoutContainer({ children }: { children: React.ReactNode }) {
       <div className="relative min-h-screen flex flex-col bg-[#FAFAFA] dark:bg-[#090D16] text-slate-900 dark:text-slate-100 overflow-x-hidden">
         {/* Notificación suave de bienvenida en la sesión */}
         <WelcomeSessionToast />
+
+        {/* Indicador flotante de Mini Recarga / Sincronización en tiempo real */}
+        <MiniSyncIndicator />
 
         {/* Sidebar con animación lenta y apertura progresiva */}
         <Sidebar />

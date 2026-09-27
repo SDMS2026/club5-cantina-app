@@ -2,7 +2,9 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Image from 'next/image';
+import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
+import { ejecutarMiniRecarga, EVENTO_MINI_RECARGA } from '@/lib/syncUtils';
 import * as Dialog from '@radix-ui/react-dialog';
 import * as Popover from '@radix-ui/react-popover';
 import {
@@ -52,6 +54,7 @@ import { useDraggableScroll } from '@/lib/useDraggableScroll';
 import { useModalDragScroll } from '@/lib/useModalDragScroll';
 
 export default function ProductosPage() {
+  const router = useRouter();
   const [montado, setMontado] = useState(false);
   const { toggleSidebar, abierto: sidebarAbierto } = useSidebar();
 
@@ -297,7 +300,15 @@ export default function ProductosPage() {
       })
       .subscribe();
 
+    const handleMiniRecarga = () => {
+      cargarProductos(paginaActual, false);
+      cargarMetricasCatalogo();
+    };
+
+    window.addEventListener(EVENTO_MINI_RECARGA, handleMiniRecarga);
+
     return () => {
+      window.removeEventListener(EVENTO_MINI_RECARGA, handleMiniRecarga);
       supabase.removeChannel(canalRealtime);
     };
   }, [paginaActual, cargarProductos, cargarMetricasCatalogo]);
@@ -389,7 +400,12 @@ export default function ProductosPage() {
           ? `"${producto.nombre}" ahora está visible en el Punto de Venta.`
           : `"${producto.nombre}" se pausó y no aparecerá en el Punto de Venta.`
       );
-      cargarMetricasCatalogo();
+      ejecutarMiniRecarga({
+        router,
+        recargarDatosLocales: async () => {
+          await cargarMetricasCatalogo();
+        },
+      });
     } catch (err) {
       console.error('Error al cambiar visibilidad:', err);
       // Revertir optimismo
@@ -444,7 +460,12 @@ export default function ProductosPage() {
       }
 
       setModalForm((prev) => ({ ...prev, abierto: false }));
-      await Promise.all([cargarProductos(paginaActual, false), cargarMetricasCatalogo()]);
+      await ejecutarMiniRecarga({
+        router,
+        recargarDatosLocales: async () => {
+          await Promise.all([cargarProductos(paginaActual, false), cargarMetricasCatalogo()]);
+        },
+      });
     } catch (err: any) {
       console.error('Error guardando producto:', err);
       setModalForm((prev) => ({
@@ -489,7 +510,12 @@ export default function ProductosPage() {
 
       mostrarNotificacion('exito', `"${modalEliminar.producto.nombre}" ha sido eliminado del catálogo.`);
       setModalEliminar({ abierto: false, producto: null, eliminando: false, error: null });
-      await Promise.all([cargarProductos(paginaActual, false), cargarMetricasCatalogo()]);
+      await ejecutarMiniRecarga({
+        router,
+        recargarDatosLocales: async () => {
+          await Promise.all([cargarProductos(paginaActual, false), cargarMetricasCatalogo()]);
+        },
+      });
     } catch (err: any) {
       console.error('Error al eliminar producto:', err);
       setModalEliminar((prev) => ({
@@ -518,7 +544,12 @@ export default function ProductosPage() {
         `"${modalEliminar.producto.nombre}" fue pausado del Punto de Venta. Su historial de ventas se mantiene intacto.`
       );
       setModalEliminar({ abierto: false, producto: null, eliminando: false, error: null });
-      cargarProductos();
+      await ejecutarMiniRecarga({
+        router,
+        recargarDatosLocales: async () => {
+          await Promise.all([cargarProductos(paginaActual, false), cargarMetricasCatalogo()]);
+        },
+      });
     } catch (err: any) {
       setModalEliminar((prev) => ({
         ...prev,

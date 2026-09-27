@@ -2,7 +2,9 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
+import { ejecutarMiniRecarga, EVENTO_MINI_RECARGA } from '@/lib/syncUtils';
 import * as Dialog from '@radix-ui/react-dialog';
 import * as Popover from '@radix-ui/react-popover';
 import {
@@ -89,6 +91,7 @@ import {
 } from '@/lib/clientBalance';
 
 export default function EstudiantesPage() {
+  const router = useRouter();
   const [montado, setMontado] = useState(false);
   const { toggleSidebar, abierto: sidebarAbierto } = useSidebar();
 
@@ -503,7 +506,15 @@ export default function EstudiantesPage() {
       })
       .subscribe();
 
+    const handleMiniRecarga = () => {
+      cargarDatos(paginaActual, false);
+      cargarMetricasDirectorio();
+    };
+
+    window.addEventListener(EVENTO_MINI_RECARGA, handleMiniRecarga);
+
     return () => {
+      window.removeEventListener(EVENTO_MINI_RECARGA, handleMiniRecarga);
       supabase.removeChannel(canalRealtime);
     };
   }, [paginaActual, cargarDatos, cargarMetricasDirectorio]);
@@ -577,8 +588,12 @@ export default function EstudiantesPage() {
         texto: res.mensaje,
       });
       setTimeout(() => setNotificacion(null), 4500);
-      await Promise.all([cargarDatos(paginaActual, false), cargarMetricasDirectorio()]);
-      refrescarNotificacionesGlobales();
+      await ejecutarMiniRecarga({
+        router,
+        recargarDatosLocales: async () => {
+          await Promise.all([cargarDatos(paginaActual, false), cargarMetricasDirectorio()]);
+        },
+      });
     } catch (err: unknown) {
       console.error('Error registrando abono:', err);
       setModalAbono((prev) => ({
@@ -900,8 +915,12 @@ export default function EstudiantesPage() {
 
       setModalForm((prev) => ({ ...prev, abierto: false }));
       setTimeout(() => setNotificacion(null), 4000);
-      await Promise.all([cargarDatos(paginaActual, false), cargarMetricasDirectorio()]);
-      refrescarNotificacionesGlobales();
+      await ejecutarMiniRecarga({
+        router,
+        recargarDatosLocales: async () => {
+          await Promise.all([cargarDatos(paginaActual, false), cargarMetricasDirectorio()]);
+        },
+      });
     } catch (err: unknown) {
       console.error('Error guardando registro:', err);
       setModalForm((prev) => ({
@@ -959,8 +978,12 @@ export default function EstudiantesPage() {
         texto: `Registro de "${modalEliminar.cliente.nombre_estudiante}" eliminado correctamente.`,
       });
       setTimeout(() => setNotificacion(null), 4000);
-      await Promise.all([cargarDatos(paginaActual, false), cargarMetricasDirectorio()]);
-      refrescarNotificacionesGlobales();
+      await ejecutarMiniRecarga({
+        router,
+        recargarDatosLocales: async () => {
+          await Promise.all([cargarDatos(paginaActual, false), cargarMetricasDirectorio()]);
+        },
+      });
     } catch (err: unknown) {
       console.error('Error eliminando cliente:', err);
       setModalEliminar((prev) => ({
