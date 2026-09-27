@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import {
   Mic,
@@ -198,22 +198,83 @@ export function VoiceOrderModal({
     }
   }, []);
 
-  // Limpiar reconocimiento al desmontar o cerrar
-  useEffect(() => {
-    return () => {
-      activoRef.current = false;
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.abort();
-        } catch {
-          // Silenciar errores al abortar
-        }
+  // Destrucción limpia y explícita de cualquier instancia previa de SpeechRecognition
+  const destruirReconocimiento = useCallback(() => {
+    activoRef.current = false;
+    if (recognitionRef.current) {
+      try {
+        // Desvincular handlers para evitar que ningún evento residual se dispare
+        recognitionRef.current.onstart = null;
+        recognitionRef.current.onresult = null;
+        recognitionRef.current.onerror = null;
+        recognitionRef.current.onend = null;
+        recognitionRef.current.abort();
+      } catch {
+        // Silenciar errores al abortar
       }
-    };
+      recognitionRef.current = null;
+    }
+    setEscuchando(false);
   }, []);
 
-  const iniciarReconocimiento = () => {
+  // Limpiar reconocimiento al desmontar
+  useEffect(() => {
+    return () => {
+      destruirReconocimiento();
+    };
+  }, [destruirReconocimiento]);
+
+  // Manejo de Pérdida de Foco, Notificaciones y Minimizar en iOS (iPhone/Safari)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handlePerdidaFoco = () => {
+      // Si la app pierde el foco por notificaciones entrantes, cambio de pestaña o minimizar:
+      // detén de forma limpia el micrófono ejecutando recognition.abort() y resetea los estados (isListening = false)
+      if (activoRef.current || escuchando) {
+        destruirReconocimiento();
+      }
+    };
+
+    const handleRegresoFoco = () => {
+      // Al regresar la cajera a la app (evento focus o visibilitychange),
+      // asegura que el botón del micrófono vuelva a su estado inicial de 'Listo para presionar',
+      // sin dejar instancias del micrófono colgadas en memoria.
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        if (activoRef.current) {
+          destruirReconocimiento();
+        }
+        setEscuchando(false);
+      }
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        handlePerdidaFoco();
+      } else {
+        handleRegresoFoco();
+      }
+    };
+
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('blur', handlePerdidaFoco);
+    window.addEventListener('pagehide', handlePerdidaFoco);
+    window.addEventListener('focus', handleRegresoFoco);
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('blur', handlePerdidaFoco);
+      window.removeEventListener('pagehide', handlePerdidaFoco);
+      window.removeEventListener('focus', handleRegresoFoco);
+    };
+  }, [destruirReconocimiento, escuchando]);
+
+  const iniciarReconocimiento = async () => {
     setErrorMsg(null);
+
+    // 1. Antes de volver a llamar a recognition.start(), destruye explícitamente cualquier objeto previo
+    destruirReconocimiento();
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
@@ -225,11 +286,16 @@ export function VoiceOrderModal({
     }
 
     try {
-      if (recognitionRef.current) {
+      // 2. Re-solicitud limpia de permisos si el navegador los revocó o perdió
+      if (typeof navigator !== 'undefined' && navigator?.mediaDevices?.getUserMedia) {
         try {
-          recognitionRef.current.abort();
-        } catch {
-          // ignore
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          stream.getTracks().forEach((track) => track.stop());
+        } catch (errPermiso) {
+          console.warn('Permiso de micrófono no concedido o revocado en Safari/iOS:', errPermiso);
+          destruirReconocimiento();
+          setErrorMsg('Acceso al micrófono denegado. Permite el acceso al micrófono en la configuración de Safari/iOS o escribe el pedido.');
+          return;
         }
       }
 
@@ -313,39 +379,43 @@ export function VoiceOrderModal({
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       recognition.onerror = (event: any) => {
         console.warn('SpeechRecognition error:', event.error);
-        if (event.error === 'not-allowed') {
-          activoRef.current = false;
-          setErrorMsg('Acceso al micrófono denegado. Permite el micrófono en tu navegador o usa el modo texto.');
-          setEscuchando(false);
+        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+          destruirReconocimiento();
+          setErrorMsg('Acceso al micrófono denegado. Permite el micrófono en la configuración de Safari/iOS o usa el modo texto.');
         } else if (event.error === 'no-speech') {
           // Silencio temporal: no cancelar si el usuario aún tiene el micrófono activo
         } else if (event.error === 'aborted') {
-          // Aborto manual
-        } else {
-          setErrorMsg(`Error de captura de audio: ${event.error}`);
+          // Aborto manual o por pérdida de foco
           setEscuchando(false);
+          activoRef.current = false;
+        } else {
+          destruirReconocimiento();
+          setErrorMsg(`Error de captura de audio: ${event.error}. Toca el micrófono para reintentar.`);
         }
       };
 
       recognition.onend = () => {
-        // Auto-reinicio cuando el micrófono siga activo para evitar pausas/congelamiento en iOS Safari (iPhone)
-        if (activoRef.current) {
+        // Auto-reinicio únicamente cuando el micrófono siga intencionalmente activo Y la app esté en primer plano
+        const esVisible = typeof document !== 'undefined' && document.visibilityState === 'visible';
+        if (activoRef.current && esVisible) {
           try {
             recognition.start();
           } catch {
             setTimeout(() => {
-              if (activoRef.current) {
+              const sigueVisible = typeof document !== 'undefined' && document.visibilityState === 'visible';
+              if (activoRef.current && sigueVisible) {
                 try {
                   recognition.start();
                 } catch {
-                  setEscuchando(false);
-                  activoRef.current = false;
+                  destruirReconocimiento();
                 }
+              } else {
+                destruirReconocimiento();
               }
             }, 180);
           }
         } else {
-          setEscuchando(false);
+          destruirReconocimiento();
         }
       };
 
@@ -354,22 +424,13 @@ export function VoiceOrderModal({
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error iniciando micrófono';
       console.error('Error al iniciar reconocimiento:', err);
+      destruirReconocimiento();
       setErrorMsg(msg);
-      setEscuchando(false);
-      activoRef.current = false;
     }
   };
 
   const detenerReconocimiento = () => {
-    activoRef.current = false;
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop();
-      } catch {
-        // ignore
-      }
-    }
-    setEscuchando(false);
+    destruirReconocimiento();
   };
 
   const toggleGrabacion = () => {
