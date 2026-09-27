@@ -54,6 +54,7 @@ import { NotificationBell } from '@/components/NotificationBell';
 import { refrescarNotificacionesGlobales } from '@/components/NotificationsContext';
 import { useSidebar } from '@/components/SidebarContext';
 import { useModalDragScroll } from '@/lib/useModalDragScroll';
+import { useDraggableScroll } from '@/lib/useDraggableScroll';
 import {
   obtenerSaldosTodosClientes,
   procesarAbonoCliente,
@@ -169,6 +170,7 @@ export default function DeudasPage() {
   // Estados de apertura de dropdowns personalizados
   const [popoverGradoAbierto, setPopoverGradoAbierto] = useState<boolean>(false);
   const [popoverOrdenAbierto, setPopoverOrdenAbierto] = useState<boolean>(false);
+  const { ref: draggableFiltrosRef, events: draggableFiltrosEvents } = useDraggableScroll();
 
   // Acordeón de detalles por estudiante
   const [estudiantesDesplegados, setEstudiantesDesplegados] = useState<Record<string, boolean>>({});
@@ -970,21 +972,25 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
           </div>
 
           {/* Menús desplegables personalizados estilo Precedent con Radix UI */}
-          <div className="flex flex-wrap items-center gap-2.5">
+          <div
+            ref={draggableFiltrosRef}
+            {...draggableFiltrosEvents}
+            className="flex items-center gap-2 overflow-x-auto pb-1.5 pt-0.5 w-full min-w-0 max-w-full touch-scroll-ios scrollbar-none select-none cursor-grab active:cursor-grabbing lg:w-auto"
+          >
             {/* 1. Menú Desplegable Personalizado: Grado / Sección */}
             <Popover.Root open={popoverGradoAbierto} onOpenChange={setPopoverGradoAbierto}>
               <Popover.Trigger asChild>
                 <button
                   type="button"
-                  className="flex items-center gap-2 rounded-2xl border border-gray-200/90 bg-gray-50/70 px-3.5 py-2 text-xs font-semibold text-gray-700 shadow-2xs hover:border-gray-300 hover:bg-white transition"
+                  className="flex items-center gap-2 shrink-0 whitespace-nowrap rounded-2xl border border-gray-200/90 bg-gray-50/70 px-3.5 py-2 text-xs font-semibold text-gray-700 shadow-2xs hover:border-gray-300 hover:bg-white transition"
                 >
-                  <GraduationCap className="h-4 w-4 text-indigo-600" />
+                  <GraduationCap className="h-4 w-4 text-indigo-600 shrink-0" />
                   <span>
                     {filtroGrado === 'todos'
                       ? `Todos los Grados (${gradosDisponibles.length})`
                       : filtroGrado}
                   </span>
-                  <ChevronDown className={`h-3.5 w-3.5 text-gray-400 transition-transform ${popoverGradoAbierto ? 'rotate-180 text-gray-700' : ''}`} />
+                  <ChevronDown className={`h-3.5 w-3.5 text-gray-400 shrink-0 transition-transform ${popoverGradoAbierto ? 'rotate-180 text-gray-700' : ''}`} />
                 </button>
               </Popover.Trigger>
               <Popover.Portal>
@@ -1038,13 +1044,13 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
               <Popover.Trigger asChild>
                 <button
                   type="button"
-                  className="flex items-center gap-2 rounded-2xl border border-gray-200/90 bg-gray-50/70 px-3.5 py-2 text-xs font-semibold text-gray-700 shadow-2xs hover:border-gray-300 hover:bg-white transition"
+                  className="flex items-center gap-2 shrink-0 whitespace-nowrap rounded-2xl border border-gray-200/90 bg-gray-50/70 px-3.5 py-2 text-xs font-semibold text-gray-700 shadow-2xs hover:border-gray-300 hover:bg-white transition"
                 >
-                  <ArrowUpDown className="h-4 w-4 text-gray-500" />
+                  <ArrowUpDown className="h-4 w-4 text-gray-500 shrink-0" />
                   <span>
                     {OPCIONES_ORDEN.find((o) => o.id === criterioOrden)?.label || 'Ordenar'}
                   </span>
-                  <ChevronDown className={`h-3.5 w-3.5 text-gray-400 transition-transform ${popoverOrdenAbierto ? 'rotate-180 text-gray-700' : ''}`} />
+                  <ChevronDown className={`h-3.5 w-3.5 text-gray-400 shrink-0 transition-transform ${popoverOrdenAbierto ? 'rotate-180 text-gray-700' : ''}`} />
                 </button>
               </Popover.Trigger>
               <Popover.Portal>
@@ -1084,10 +1090,10 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
               type="button"
               onClick={cargarDeudas}
               disabled={cargandoDeudas}
-              className="flex items-center gap-1.5 rounded-2xl border border-gray-200/80 bg-white px-3 py-2 text-xs font-semibold text-gray-700 shadow-2xs hover:bg-gray-50 transition disabled:opacity-60"
+              className="flex items-center gap-1.5 shrink-0 rounded-2xl border border-gray-200/80 bg-white px-3 py-2 text-xs font-semibold text-gray-700 shadow-2xs hover:bg-gray-50 transition disabled:opacity-60"
               title="Recargar deudas"
             >
-              <RefreshCw className={`h-3.5 w-3.5 ${cargandoDeudas ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`h-3.5 w-3.5 shrink-0 ${cargandoDeudas ? 'animate-spin' : ''}`} />
             </button>
           </div>
         </div>
