@@ -24,6 +24,8 @@ import {
   X,
   Check,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Loader2,
   ShieldCheck,
   ExternalLink,
@@ -92,13 +94,37 @@ export default function EstudiantesPage() {
   const [tasaBcv, setTasaBcv] = useState<number>(TASA_BCV_FALLBACK_DEFAULT);
   const [cargandoTasa, setCargandoTasa] = useState<boolean>(true);
 
-  // Clientes y Saldos desde Supabase
+  // 2. Clientes y Paginación en Servidor (.range)
+  const TAMANO_PAGINA_ESTUDIANTES = 24;
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [cargandoClientes, setCargandoClientes] = useState<boolean>(true);
+  const [cargandoMas, setCargandoMas] = useState<boolean>(false);
+  const [paginaActual, setPaginaActual] = useState<number>(1);
+  const [totalEstudiantesDb, setTotalEstudiantesDb] = useState<number>(0);
   const [saldosClientes, setSaldosClientes] = useState<Record<string, ResumenSaldoCliente>>({});
 
-  // Filtros
+  // Directorio completo ligero para vinculación familiar y grados
+  const [directorioContactos, setDirectorioContactos] = useState<{
+    id: string;
+    nombre_estudiante: string;
+    grado_seccion?: string | null;
+    nombre_representante?: string | null;
+    telefono_whatsapp?: string | null;
+    saldo?: number;
+  }[]>([]);
+
+  // Métricas financieras globales del directorio escolar
+  const [metricasGlobales, setMetricasGlobales] = useState({
+    totalEstudiantes: 0,
+    estudiantesConDeuda: 0,
+    estudiantesConSaldoFavor: 0,
+    totalDeudaGlobalUsd: 0,
+    totalSaldoAFavorGlobalUsd: 0,
+  });
+
+  // 3. Filtros y Búsqueda con Debounce
   const [busqueda, setBusqueda] = useState<string>('');
+  const [busquedaDebounced, setBusquedaDebounced] = useState<string>('');
   const [filtroGrado, setFiltroGrado] = useState<string>('todos');
   const [filtroEstado, setFiltroEstado] = useState<'todos' | 'con_deuda' | 'con_saldo_favor' | 'solvente'>('todos');
   const [popoverGradoAbierto, setPopoverGradoAbierto] = useState<boolean>(false);
@@ -314,172 +340,197 @@ export default function EstudiantesPage() {
     }
   }, []);
 
-  // 2. Cargar Clientes y Saldos Consolidados
-  const cargarDatos = useCallback(async () => {
-    setCargandoClientes(true);
+  // Debounce para la barra de búsqueda de estudiantes (300ms)
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setBusquedaDebounced(busqueda);
+    }, 300);
+    return () => clearTimeout(handler);
+  }, [busqueda]);
+
+  // Cargar métricas financieras globales y directorio ligero para vínculos familiares
+  const cargarMetricasDirectorio = useCallback(async () => {
     try {
-      const { data: clientesDb, error: errClientes } = await supabase
+      const { data: todos, error } = await supabase
         .from('clientes')
-        .select('*')
+        .select('id, nombre_estudiante, grado_seccion, nombre_representante, telefono_whatsapp, saldo')
         .order('nombre_estudiante', { ascending: true })
         .limit(5000);
 
-      if (errClientes) throw errClientes;
-      setClientes(clientesDb || []);
+      if (error || !todos) return;
 
-      const saldos = await obtenerSaldosTodosClientes();
-      setSaldosClientes(saldos);
-    } catch (err) {
-      console.error('Error cargando estudiantes y saldos:', err);
-      setNotificacion({
-        tipo: 'error',
-        texto: 'Error al conectar con la base de datos de Supabase.',
+      let deudaCount = 0;
+      let favorCount = 0;
+      let deudaSum = 0;
+      let favorSum = 0;
+
+      const mapaSaldos: Record<string, ResumenSaldoCliente> = {};
+
+      todos.forEach((c) => {
+        const s = Math.round(Number(c.saldo || 0) * 100) / 100;
+        mapaSaldos[c.id] = {
+          clienteId: c.id,
+          saldo: s,
+          deudaTotalUsd: s < 0 ? Math.abs(s) : 0,
+          saldoAFavorTotalUsd: s > 0 ? s : 0,
+          saldoNetoUsd: s,
+        };
+
+        if (s < -0.001) {
+          deudaCount++;
+          deudaSum += Math.abs(s);
+        } else if (s > 0.001) {
+          favorCount++;
+          favorSum += s;
+        }
       });
-      setTimeout(() => setNotificacion(null), 4000);
-    } finally {
-      setCargandoClientes(false);
+
+      setSaldosClientes(mapaSaldos);
+      setDirectorioContactos(todos);
+      setMetricasGlobales({
+        totalEstudiantes: todos.length,
+        estudiantesConDeuda: deudaCount,
+        estudiantesConSaldoFavor: favorCount,
+        totalDeudaGlobalUsd: deudaSum,
+        totalSaldoAFavorGlobalUsd: favorSum,
+      });
+    } catch (e) {
+      console.error('Error calculando métricas globales de directorio:', e);
     }
   }, []);
 
+  // Cargar clientes paginados desde Supabase usando .range(from, to) y filtros en DB
+  const cargarDatos = useCallback(
+    async (paginaDestino: number = 1, esCargarMas: boolean = false) => {
+      if (esCargarMas) {
+        setCargandoMas(true);
+      } else {
+        setCargandoClientes(true);
+      }
+
+      try {
+        let q = supabase
+          .from('clientes')
+          .select('*', { count: 'exact' });
+
+        // 1. Filtro en Base de Datos por Búsqueda (.ilike en DB)
+        const term = busquedaDebounced.trim();
+        if (term) {
+          q = q.or(
+            `nombre_estudiante.ilike.%${term}%,nombre_representante.ilike.%${term}%,grado_seccion.ilike.%${term}%,telefono_whatsapp.ilike.%${term}%`
+          );
+        }
+
+        // 2. Filtro en Base de Datos por Grado / Sección (.eq en DB)
+        if (filtroGrado !== 'todos') {
+          q = q.eq('grado_seccion', filtroGrado);
+        }
+
+        // 3. Filtro en Base de Datos por Estado de Saldo (.lt, .gt, .gte / .lte en DB)
+        if (filtroEstado === 'con_deuda') {
+          q = q.lt('saldo', -0.001);
+        } else if (filtroEstado === 'con_saldo_favor') {
+          q = q.gt('saldo', 0.001);
+        } else if (filtroEstado === 'solvente') {
+          q = q.gte('saldo', -0.001).lte('saldo', 0.001);
+        }
+
+        // 4. Paginación en Servidor con .range(from, to)
+        const from = (paginaDestino - 1) * TAMANO_PAGINA_ESTUDIANTES;
+        const to = from + TAMANO_PAGINA_ESTUDIANTES - 1;
+
+        q = q.order('nombre_estudiante', { ascending: true }).range(from, to);
+
+        const { data: clientesDb, count, error: errClientes } = await q;
+
+        if (errClientes) throw errClientes;
+
+        const items = clientesDb || [];
+        setTotalEstudiantesDb(count ?? items.length);
+        setPaginaActual(paginaDestino);
+
+        if (esCargarMas) {
+          setClientes((prev) => [...prev, ...items]);
+        } else {
+          setClientes(items);
+        }
+      } catch (err) {
+        console.error('Error cargando estudiantes paginados:', err);
+        setNotificacion({
+          tipo: 'error',
+          texto: 'Error al conectar con la base de datos de Supabase.',
+        });
+        setTimeout(() => setNotificacion(null), 4000);
+      } finally {
+        setCargandoClientes(false);
+        setCargandoMas(false);
+      }
+    },
+    [busquedaDebounced, filtroGrado, filtroEstado]
+  );
+
+  // Inicialización y recarga automática ante cambios de filtros o búsqueda
   useEffect(() => {
     setMontado(true);
     cargarTasa();
-    cargarDatos();
+    cargarMetricasDirectorio();
+  }, [cargarTasa, cargarMetricasDirectorio]);
 
-    // Sincronización en tiempo real con Supabase entre dispositivos
+  useEffect(() => {
+    cargarDatos(1, false);
+  }, [cargarDatos]);
+
+  // Sincronización en tiempo real con Supabase entre dispositivos
+  useEffect(() => {
     const canalRealtime = supabase
       .channel('estudiantes_realtime_sync')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'clientes' },
-        () => {
-          cargarDatos();
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'consumos' },
-        () => {
-          cargarDatos();
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'abonos' },
-        () => {
-          cargarDatos();
-        }
-      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, () => {
+        cargarDatos(paginaActual, false);
+        cargarMetricasDirectorio();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'consumos' }, () => {
+        cargarDatos(paginaActual, false);
+        cargarMetricasDirectorio();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'abonos' }, () => {
+        cargarDatos(paginaActual, false);
+        cargarMetricasDirectorio();
+      })
       .subscribe();
 
     return () => {
       supabase.removeChannel(canalRealtime);
     };
-  }, [cargarTasa, cargarDatos]);
+  }, [paginaActual, cargarDatos, cargarMetricasDirectorio]);
 
-  // Helper de normalización de texto insensible a tildes y mayúsculas
-  const normalizarTexto = (str?: string | null) =>
-    (str || '')
-      .trim()
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '');
-
-  // Grados / Secciones únicos para el filtro
+  // Grados / Secciones disponibles para el selector de filtro
   const gradosDisponibles = useMemo(() => {
     const set = new Set<string>();
-    clientes.forEach((c) => {
+    TODOS_LOS_GRADOS_SISTEMA.forEach((g) => set.add(g));
+    directorioContactos.forEach((c) => {
       const g = (c.grado_seccion || '').trim();
-      if (g) {
-        set.add(g);
-      }
+      if (g) set.add(g);
     });
     return Array.from(set).sort();
-  }, [clientes]);
+  }, [directorioContactos]);
 
-  // Filtrado reactivo de clientes
-  const clientesFiltrados = useMemo(() => {
-    let lista = [...clientes];
+  // Como la búsqueda y filtros se ejecutan directamente en Supabase,
+  // clientesFiltrados es la lista resultante del servidor para esta página.
+  const clientesFiltrados = clientes;
 
-    if (busqueda.trim()) {
-      const q = normalizarTexto(busqueda);
-      const qNums = busqueda.replace(/\D/g, '');
-      lista = lista.filter((c) => {
-        const est = normalizarTexto(c.nombre_estudiante);
-        const rep = normalizarTexto(c.nombre_representante);
-        const grado = normalizarTexto(c.grado_seccion);
-        const telNums = (c.telefono_whatsapp || '').replace(/\D/g, '');
-        return (
-          est.includes(q) ||
-          rep.includes(q) ||
-          grado.includes(q) ||
-          (qNums.length >= 3 && telNums.includes(qNums))
-        );
-      });
-    }
+  // Métricas de cuenta corriente unificada globales
+  const totalEstudiantes = metricasGlobales.totalEstudiantes;
+  const estudiantesConDeuda = metricasGlobales.estudiantesConDeuda;
+  const estudiantesConSaldoFavor = metricasGlobales.estudiantesConSaldoFavor;
+  const totalDeudaGlobalUsd = metricasGlobales.totalDeudaGlobalUsd;
+  const totalDeudaGlobalBs = calcularConversionBs(totalDeudaGlobalUsd, tasaBcv);
+  const totalSaldoAFavorGlobalUsd = metricasGlobales.totalSaldoAFavorGlobalUsd;
+  const totalSaldoAFavorGlobalBs = calcularConversionBs(totalSaldoAFavorGlobalUsd, tasaBcv);
 
-    if (filtroGrado !== 'todos') {
-      const fGradoNorm = normalizarTexto(filtroGrado);
-      lista = lista.filter((c) => normalizarTexto(c.grado_seccion) === fGradoNorm);
-    }
-
-    if (filtroEstado === 'con_deuda') {
-      lista = lista.filter((c) => {
-        const s = c.saldo !== undefined && c.saldo !== null ? Number(c.saldo) : (saldosClientes[c.id]?.saldoNetoUsd || 0);
-        return s < -0.001;
-      });
-    } else if (filtroEstado === 'con_saldo_favor') {
-      lista = lista.filter((c) => {
-        const s = c.saldo !== undefined && c.saldo !== null ? Number(c.saldo) : (saldosClientes[c.id]?.saldoNetoUsd || 0);
-        return s > 0.001;
-      });
-    } else if (filtroEstado === 'solvente') {
-      lista = lista.filter((c) => {
-        const s = c.saldo !== undefined && c.saldo !== null ? Number(c.saldo) : (saldosClientes[c.id]?.saldoNetoUsd || 0);
-        return Math.abs(s) <= 0.001;
-      });
-    }
-
-    return lista;
-  }, [clientes, busqueda, filtroGrado, filtroEstado, saldosClientes]);
-
-  // Métricas de cuenta corriente unificada
-  const totalEstudiantes = clientes.length;
-  const estudiantesConDeuda = useMemo(() => {
-    return clientes.filter((c) => {
-      const s = c.saldo !== undefined && c.saldo !== null ? Number(c.saldo) : (saldosClientes[c.id]?.saldoNetoUsd || 0);
-      return s < 0;
-    }).length;
-  }, [clientes, saldosClientes]);
-
-  const estudiantesConSaldoFavor = useMemo(() => {
-    return clientes.filter((c) => {
-      const s = c.saldo !== undefined && c.saldo !== null ? Number(c.saldo) : (saldosClientes[c.id]?.saldoNetoUsd || 0);
-      return s > 0;
-    }).length;
-  }, [clientes, saldosClientes]);
-
-  const totalDeudaGlobalUsd = useMemo(() => {
-    return clientes.reduce((acc, c) => {
-      const s = c.saldo !== undefined && c.saldo !== null ? Number(c.saldo) : (saldosClientes[c.id]?.saldoNetoUsd || 0);
-      return s < 0 ? acc + Math.abs(s) : acc;
-    }, 0);
-  }, [clientes, saldosClientes]);
-
-  const totalDeudaGlobalBs = useMemo(() => {
-    return calcularConversionBs(totalDeudaGlobalUsd, tasaBcv);
-  }, [totalDeudaGlobalUsd, tasaBcv]);
-
-  const totalSaldoAFavorGlobalUsd = useMemo(() => {
-    return clientes.reduce((acc, c) => {
-      const s = c.saldo !== undefined && c.saldo !== null ? Number(c.saldo) : (saldosClientes[c.id]?.saldoNetoUsd || 0);
-      return s > 0 ? acc + s : acc;
-    }, 0);
-  }, [clientes, saldosClientes]);
-
-  const totalSaldoAFavorGlobalBs = useMemo(() => {
-    return calcularConversionBs(totalSaldoAFavorGlobalUsd, tasaBcv);
-  }, [totalSaldoAFavorGlobalUsd, tasaBcv]);
+  // Cálculos para paginación compacta
+  const totalPaginas = Math.max(1, Math.ceil(totalEstudiantesDb / TAMANO_PAGINA_ESTUDIANTES));
+  const indiceInicial = totalEstudiantesDb === 0 ? 0 : (paginaActual - 1) * TAMANO_PAGINA_ESTUDIANTES + 1;
+  const indiceFinal = Math.min(totalEstudiantesDb, paginaActual * TAMANO_PAGINA_ESTUDIANTES);
 
   // Abrir Modal de Abono
   const handleAbrirAbono = (c: Cliente) => {
@@ -519,7 +570,7 @@ export default function EstudiantesPage() {
         texto: res.mensaje,
       });
       setTimeout(() => setNotificacion(null), 4500);
-      await cargarDatos();
+      await Promise.all([cargarDatos(paginaActual, false), cargarMetricasDirectorio()]);
       refrescarNotificacionesGlobales();
     } catch (err: unknown) {
       console.error('Error registrando abono:', err);
@@ -842,7 +893,7 @@ export default function EstudiantesPage() {
 
       setModalForm((prev) => ({ ...prev, abierto: false }));
       setTimeout(() => setNotificacion(null), 4000);
-      await cargarDatos();
+      await Promise.all([cargarDatos(paginaActual, false), cargarMetricasDirectorio()]);
       refrescarNotificacionesGlobales();
     } catch (err: unknown) {
       console.error('Error guardando registro:', err);
@@ -901,7 +952,7 @@ export default function EstudiantesPage() {
         texto: `Registro de "${modalEliminar.cliente.nombre_estudiante}" eliminado correctamente.`,
       });
       setTimeout(() => setNotificacion(null), 4000);
-      await cargarDatos();
+      await Promise.all([cargarDatos(paginaActual, false), cargarMetricasDirectorio()]);
       refrescarNotificacionesGlobales();
     } catch (err: unknown) {
       console.error('Error eliminando cliente:', err);
@@ -1025,7 +1076,7 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
                   Estudiantes
                 </h1>
                 <span className="rounded-full border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/60 px-1.5 py-0.2 text-[10px] sm:text-[11px] font-semibold text-indigo-700 dark:text-indigo-300 shrink-0">
-                  {clientes.length}
+                  {totalEstudiantesDb}
                 </span>
               </div>
               <p className="text-[11px] sm:text-xs text-gray-500 dark:text-slate-400 hidden sm:block">
@@ -1314,7 +1365,10 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
             {/* Refrescar */}
             <button
               type="button"
-              onClick={cargarDatos}
+              onClick={() => {
+                cargarDatos(1, false);
+                cargarMetricasDirectorio();
+              }}
               disabled={cargandoClientes}
               className="flex items-center gap-1.5 rounded-2xl border border-gray-200/80 bg-white px-3 py-2 text-xs font-semibold text-gray-700 shadow-2xs hover:bg-gray-50 transition disabled:opacity-60"
               title="Recargar directorio"
@@ -1360,7 +1414,8 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <AnimatePresence mode="popLayout">
               {clientesFiltrados.map((cliente, index) => {
                 const s = cliente.saldo !== undefined && cliente.saldo !== null ? Number(cliente.saldo) : (saldosClientes[cliente.id]?.saldoNetoUsd ?? 0);
@@ -1371,7 +1426,7 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
                 const iniciales = getIniciales(cliente.nombre_estudiante);
                 const esProf = esProfesorOPersonal(cliente.grado_seccion);
                 const esPadre = esRepresentante(cliente.grado_seccion);
-                const vinculos = encontrarVinculosCliente(cliente, clientes);
+                const vinculos = encontrarVinculosCliente(cliente, directorioContactos.length > 0 ? directorioContactos : clientes);
 
                 return (
                   <motion.div
@@ -1634,6 +1689,70 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
               })}
             </AnimatePresence>
           </div>
+
+          {/* Controles de Paginación en Servidor (.range) */}
+          {totalEstudiantesDb > 0 && (
+            <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-3 rounded-3xl border border-gray-200/80 dark:border-slate-800 bg-white dark:bg-[#0D111A] p-3.5 sm:px-5 shadow-2xs">
+              {/* Resumen de conteo */}
+              <div className="text-xs text-gray-500 dark:text-slate-400 text-center sm:text-left">
+                Mostrando <span className="font-bold text-gray-900 dark:text-slate-100">{indiceInicial}</span> -{' '}
+                <span className="font-bold text-gray-900 dark:text-slate-100">{indiceFinal}</span> de{' '}
+                <span className="font-bold text-indigo-600 dark:text-indigo-400">{totalEstudiantesDb}</span> personas
+              </div>
+
+              {/* Botón Cargar Más en Móviles (Progressive Append) */}
+              {paginaActual < totalPaginas && (
+                <button
+                  type="button"
+                  disabled={cargandoMas || cargandoClientes}
+                  onClick={() => cargarDatos(paginaActual + 1, true)}
+                  className="flex sm:hidden w-full items-center justify-center gap-2 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800/60 py-2.5 text-xs font-bold text-indigo-700 dark:text-indigo-300 active:scale-95 transition disabled:opacity-50"
+                >
+                  {cargandoMas ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-4 w-4" />
+                  )}
+                  <span>Cargar más ({clientes.length} de {totalEstudiantesDb})</span>
+                </button>
+              )}
+
+              {/* Navegación Anterior / Siguiente */}
+              <div className="flex items-center gap-2 self-center sm:self-auto">
+                <button
+                  type="button"
+                  disabled={paginaActual <= 1 || cargandoClientes}
+                  onClick={() => {
+                    const nueva = Math.max(1, paginaActual - 1);
+                    cargarDatos(nueva, false);
+                  }}
+                  className="flex items-center gap-1 rounded-2xl border border-gray-200 dark:border-slate-800 bg-gray-50/70 dark:bg-[#111726] px-3.5 py-2 text-xs font-bold text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:pointer-events-none transition active:scale-95"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  <span>Anterior</span>
+                </button>
+
+                <div className="px-3 py-1.5 rounded-xl bg-gray-100/70 dark:bg-slate-800 text-xs font-bold text-gray-700 dark:text-slate-300">
+                  Página <span className="text-indigo-600 dark:text-indigo-400 font-extrabold">{paginaActual}</span> de{' '}
+                  <span>{totalPaginas}</span>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={paginaActual >= totalPaginas || cargandoClientes}
+                  onClick={() => {
+                    const nueva = Math.min(totalPaginas, paginaActual + 1);
+                    cargarDatos(nueva, false);
+                  }}
+                  className="flex items-center gap-1 rounded-2xl border border-gray-200 dark:border-slate-800 bg-gray-50/70 dark:bg-[#111726] px-3.5 py-2 text-xs font-bold text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:pointer-events-none transition active:scale-95"
+                >
+                  <span>Siguiente</span>
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          )}
+          </>
         )}
       </main>
 

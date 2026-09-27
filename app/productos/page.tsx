@@ -28,6 +28,8 @@ import {
   Sparkles,
   Utensils,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Menu,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
@@ -57,12 +59,28 @@ export default function ProductosPage() {
   const [tasaBcv, setTasaBcv] = useState<number>(TASA_BCV_FALLBACK_DEFAULT);
   const [cargandoTasa, setCargandoTasa] = useState<boolean>(true);
 
-  // 2. Productos
+  // 2. Productos y Paginación en Servidor (.range)
+  const TAMANO_PAGINA_PRODUCTOS = 24;
   const [productos, setProductos] = useState<Producto[]>([]);
   const [cargandoProductos, setCargandoProductos] = useState<boolean>(true);
+  const [cargandoMas, setCargandoMas] = useState<boolean>(false);
+  const [paginaActual, setPaginaActual] = useState<number>(1);
+  const [totalProductosDb, setTotalProductosDb] = useState<number>(0);
 
-  // 3. Filtros
+  // Métricas globales del catálogo
+  const [metricasCatalogo, setMetricasCatalogo] = useState({
+    total: 0,
+    activos: 0,
+    inactivos: 0,
+    precioPromedioUsd: 0,
+    porcentajeActivos: 0,
+  });
+
+  const [todasLasCategorias, setTodasLasCategorias] = useState<string[]>([]);
+
+  // 3. Filtros y Búsqueda con Debounce
   const [busqueda, setBusqueda] = useState<string>('');
+  const [busquedaDebounced, setBusquedaDebounced] = useState<string>('');
   const [filtroCategoria, setFiltroCategoria] = useState<string>('todos');
   const [filtroEstado, setFiltroEstado] = useState<'todos' | 'activos' | 'inactivos'>('todos');
   const { ref: draggableCategoriasRef, events: draggableCategoriasEvents } = useDraggableScroll();
@@ -149,108 +167,162 @@ export default function ProductosPage() {
     }
   }, []);
 
-  // 8. Cargar Productos desde Supabase
-  const cargarProductos = useCallback(async () => {
-    setCargandoProductos(true);
+  // Debounce para la barra de búsqueda de productos (300ms)
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setBusquedaDebounced(busqueda);
+    }, 300);
+    return () => clearTimeout(handler);
+  }, [busqueda]);
+
+  // Cargar métricas globales de inventario y categorías disponibles en la DB
+  const cargarMetricasCatalogo = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('productos')
-        .select('*')
-        .order('nombre', { ascending: true });
+        .select('id, precio_usd, activo, categoria');
 
-      if (error) throw error;
-      setProductos(data || []);
-    } catch (err) {
-      console.error('Error al cargar productos:', err);
-      mostrarNotificacion('error', 'Error al conectar con la base de datos de productos.');
-    } finally {
-      setCargandoProductos(false);
+      if (error || !data) return;
+
+      const total = data.length;
+      const activos = data.filter((p) => p.activo).length;
+      const inactivos = total - activos;
+
+      let sumaPrecios = 0;
+      const categoriasSet = new Set<string>(CATEGORIAS_PRODUCTOS_SISTEMA);
+
+      data.forEach((p) => {
+        sumaPrecios += Number(p.precio_usd || 0);
+        if (p.categoria && p.categoria.trim()) {
+          categoriasSet.add(p.categoria.trim());
+        }
+      });
+
+      const precioPromedioUsd = total > 0 ? sumaPrecios / total : 0;
+
+      setMetricasCatalogo({
+        total,
+        activos,
+        inactivos,
+        precioPromedioUsd,
+        porcentajeActivos: total > 0 ? Math.round((activos / total) * 100) : 0,
+      });
+
+      setTodasLasCategorias(Array.from(categoriasSet));
+    } catch (e) {
+      console.error('Error calculando métricas de inventario:', e);
     }
-  }, [mostrarNotificacion]);
+  }, []);
 
+  // Cargar productos paginados desde Supabase usando .range(from, to) y filtros en DB
+  const cargarProductos = useCallback(
+    async (paginaDestino: number = 1, esCargarMas: boolean = false) => {
+      if (esCargarMas) {
+        setCargandoMas(true);
+      } else {
+        setCargandoProductos(true);
+      }
+
+      try {
+        let q = supabase
+          .from('productos')
+          .select('*', { count: 'exact' });
+
+        // 1. Filtro en Base de Datos por Búsqueda (.ilike en DB)
+        const term = busquedaDebounced.trim();
+        if (term) {
+          q = q.ilike('nombre', `%${term}%`);
+        }
+
+        // 2. Filtro en Base de Datos por Categoría (.eq en DB)
+        if (filtroCategoria !== 'todos') {
+          q = q.eq('categoria', filtroCategoria);
+        }
+
+        // 3. Filtro en Base de Datos por Estado Activo/Inactivo (.eq en DB)
+        if (filtroEstado === 'activos') {
+          q = q.eq('activo', true);
+        } else if (filtroEstado === 'inactivos') {
+          q = q.eq('activo', false);
+        }
+
+        // 4. Paginación en Servidor con .range(from, to)
+        const from = (paginaDestino - 1) * TAMANO_PAGINA_PRODUCTOS;
+        const to = from + TAMANO_PAGINA_PRODUCTOS - 1;
+
+        q = q.order('nombre', { ascending: true }).range(from, to);
+
+        const { data, count, error } = await q;
+
+        if (error) throw error;
+
+        const items = data || [];
+        setTotalProductosDb(count ?? items.length);
+        setPaginaActual(paginaDestino);
+
+        if (esCargarMas) {
+          setProductos((prev) => [...prev, ...items]);
+        } else {
+          setProductos(items);
+        }
+      } catch (err) {
+        console.error('Error al cargar productos paginados:', err);
+        mostrarNotificacion('error', 'Error al conectar con la base de datos de productos.');
+      } finally {
+        setCargandoProductos(false);
+        setCargandoMas(false);
+      }
+    },
+    [busquedaDebounced, filtroCategoria, filtroEstado, mostrarNotificacion]
+  );
+
+  // Inicialización y recarga automática ante cambios de filtros o búsqueda
   useEffect(() => {
     setMontado(true);
     cargarTasa();
-    cargarProductos();
+    cargarMetricasCatalogo();
+  }, [cargarTasa, cargarMetricasCatalogo]);
 
-    // Sincronización en tiempo real con Supabase entre dispositivos
+  useEffect(() => {
+    cargarProductos(1, false);
+  }, [cargarProductos]);
+
+  // Sincronización en tiempo real con Supabase entre dispositivos
+  useEffect(() => {
     const canalRealtime = supabase
       .channel('productos_realtime_sync')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'productos' },
-        () => {
-          cargarProductos();
-        }
-      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'productos' }, () => {
+        cargarProductos(paginaActual, false);
+        cargarMetricasCatalogo();
+      })
       .subscribe();
 
     return () => {
       supabase.removeChannel(canalRealtime);
     };
-  }, [cargarTasa, cargarProductos]);
+  }, [paginaActual, cargarProductos, cargarMetricasCatalogo]);
 
-  // Lista de categorías detectadas de los productos cargados
+  // Lista de categorías detectadas del catálogo global
   const categoriasDisponibles = useMemo(() => {
-    const set = new Set<string>(CATEGORIAS_PRODUCTOS_SISTEMA);
-    productos.forEach((p) => {
-      if (p.categoria && p.categoria.trim()) {
-        set.add(p.categoria.trim());
-      }
-    });
-    return Array.from(set);
-  }, [productos]);
+    return todasLasCategorias.length > 0 ? todasLasCategorias : Array.from(CATEGORIAS_PRODUCTOS_SISTEMA);
+  }, [todasLasCategorias]);
 
-  // Métricas para las Tarjetas Metrik
+  // Métricas reactivas para las Tarjetas Metrik con tasa BCV
   const metricas = useMemo(() => {
-    const total = productos.length;
-    const activos = productos.filter((p) => p.activo).length;
-    const inactivos = total - activos;
-
-    let sumaPrecios = 0;
-    productos.forEach((p) => {
-      sumaPrecios += Number(p.precio_usd || 0);
-    });
-
-    const precioPromedioUsd = total > 0 ? sumaPrecios / total : 0;
-    const precioPromedioBs = calcularConversionBs(precioPromedioUsd, tasaBcv);
-
     return {
-      total,
-      activos,
-      inactivos,
-      precioPromedioUsd,
-      precioPromedioBs,
-      porcentajeActivos: total > 0 ? Math.round((activos / total) * 100) : 0,
+      ...metricasCatalogo,
+      precioPromedioBs: calcularConversionBs(metricasCatalogo.precioPromedioUsd, tasaBcv),
     };
-  }, [productos, tasaBcv]);
+  }, [metricasCatalogo, tasaBcv]);
 
-  // Filtrado reactivo de productos
-  const productosFiltrados = useMemo(() => {
-    let lista = [...productos];
+  // Como la búsqueda y filtros se ejecutan directamente en Supabase,
+  // productosFiltrados es la lista resultante del servidor para esta página.
+  const productosFiltrados = productos;
 
-    if (busqueda.trim()) {
-      const q = busqueda.toLowerCase().trim();
-      lista = lista.filter((p) => {
-        const coincideNombre = p.nombre.toLowerCase().includes(q);
-        const coincidePrecio = p.precio_usd.toString().includes(q);
-        const coincideCat = (p.categoria || '').toLowerCase().includes(q);
-        return coincideNombre || coincidePrecio || coincideCat;
-      });
-    }
-
-    if (filtroCategoria !== 'todos') {
-      lista = lista.filter((p) => p.categoria === filtroCategoria);
-    }
-
-    if (filtroEstado === 'activos') {
-      lista = lista.filter((p) => p.activo);
-    } else if (filtroEstado === 'inactivos') {
-      lista = lista.filter((p) => !p.activo);
-    }
-
-    return lista;
-  }, [productos, busqueda, filtroCategoria, filtroEstado]);
+  // Cálculos para paginación compacta
+  const totalPaginas = Math.max(1, Math.ceil(totalProductosDb / TAMANO_PAGINA_PRODUCTOS));
+  const indiceInicial = totalProductosDb === 0 ? 0 : (paginaActual - 1) * TAMANO_PAGINA_PRODUCTOS + 1;
+  const indiceFinal = Math.min(totalProductosDb, paginaActual * TAMANO_PAGINA_PRODUCTOS);
 
   // Lista de emojis filtrados para el selector
   const emojisFiltrados = useMemo(() => {
@@ -317,6 +389,7 @@ export default function ProductosPage() {
           ? `"${producto.nombre}" ahora está visible en el Punto de Venta.`
           : `"${producto.nombre}" se pausó y no aparecerá en el Punto de Venta.`
       );
+      cargarMetricasCatalogo();
     } catch (err) {
       console.error('Error al cambiar visibilidad:', err);
       // Revertir optimismo
@@ -371,7 +444,7 @@ export default function ProductosPage() {
       }
 
       setModalForm((prev) => ({ ...prev, abierto: false }));
-      cargarProductos();
+      await Promise.all([cargarProductos(paginaActual, false), cargarMetricasCatalogo()]);
     } catch (err: any) {
       console.error('Error guardando producto:', err);
       setModalForm((prev) => ({
@@ -416,7 +489,7 @@ export default function ProductosPage() {
 
       mostrarNotificacion('exito', `"${modalEliminar.producto.nombre}" ha sido eliminado del catálogo.`);
       setModalEliminar({ abierto: false, producto: null, eliminando: false, error: null });
-      cargarProductos();
+      await Promise.all([cargarProductos(paginaActual, false), cargarMetricasCatalogo()]);
     } catch (err: any) {
       console.error('Error al eliminar producto:', err);
       setModalEliminar((prev) => ({
@@ -505,7 +578,7 @@ export default function ProductosPage() {
                   Inventario
                 </h1>
                 <span className="rounded-full border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/60 px-1.5 py-0.2 text-[10px] sm:text-[11px] font-semibold text-indigo-700 dark:text-indigo-300 shrink-0">
-                  {productos.length}
+                  {totalProductosDb}
                 </span>
               </div>
               <p className="text-[11px] sm:text-xs text-gray-500 dark:text-slate-400 hidden sm:block">
@@ -695,7 +768,10 @@ export default function ProductosPage() {
             {/* Refrescar */}
             <button
               type="button"
-              onClick={cargarProductos}
+              onClick={() => {
+                cargarProductos(1, false);
+                cargarMetricasCatalogo();
+              }}
               disabled={cargandoProductos}
               className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-gray-200/80 bg-white text-gray-700 shadow-2xs hover:bg-gray-50 transition disabled:opacity-60"
               title="Recargar catálogo"
@@ -777,7 +853,8 @@ export default function ProductosPage() {
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4 w-full min-w-0 max-w-full">
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4 w-full min-w-0 max-w-full">
             <AnimatePresence mode="popLayout">
               {productosFiltrados.map((producto, index) => {
                 const precioBs = calcularConversionBs(producto.precio_usd, tasaBcv);
@@ -904,6 +981,70 @@ export default function ProductosPage() {
               })}
             </AnimatePresence>
           </div>
+
+          {/* Controles de Paginación en Servidor (.range) */}
+          {totalProductosDb > 0 && (
+            <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-3 rounded-3xl border border-gray-200/80 dark:border-slate-800 bg-white dark:bg-[#0D111A] p-3.5 sm:px-5 shadow-2xs">
+              {/* Resumen de conteo */}
+              <div className="text-xs text-gray-500 dark:text-slate-400 text-center sm:text-left">
+                Mostrando <span className="font-bold text-gray-900 dark:text-slate-100">{indiceInicial}</span> -{' '}
+                <span className="font-bold text-gray-900 dark:text-slate-100">{indiceFinal}</span> de{' '}
+                <span className="font-bold text-indigo-600 dark:text-indigo-400">{totalProductosDb}</span> productos
+              </div>
+
+              {/* Botón Cargar Más en Móviles (Progressive Append) */}
+              {paginaActual < totalPaginas && (
+                <button
+                  type="button"
+                  disabled={cargandoMas || cargandoProductos}
+                  onClick={() => cargarProductos(paginaActual + 1, true)}
+                  className="flex sm:hidden w-full items-center justify-center gap-2 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800/60 py-2.5 text-xs font-bold text-indigo-700 dark:text-indigo-300 active:scale-95 transition disabled:opacity-50"
+                >
+                  {cargandoMas ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-4 w-4" />
+                  )}
+                  <span>Cargar más ({productos.length} de {totalProductosDb})</span>
+                </button>
+              )}
+
+              {/* Navegación Anterior / Siguiente */}
+              <div className="flex items-center gap-2 self-center sm:self-auto">
+                <button
+                  type="button"
+                  disabled={paginaActual <= 1 || cargandoProductos}
+                  onClick={() => {
+                    const nueva = Math.max(1, paginaActual - 1);
+                    cargarProductos(nueva, false);
+                  }}
+                  className="flex items-center gap-1 rounded-2xl border border-gray-200 dark:border-slate-800 bg-gray-50/70 dark:bg-[#111726] px-3.5 py-2 text-xs font-bold text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:pointer-events-none transition active:scale-95"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  <span>Anterior</span>
+                </button>
+
+                <div className="px-3 py-1.5 rounded-xl bg-gray-100/70 dark:bg-slate-800 text-xs font-bold text-gray-700 dark:text-slate-300">
+                  Página <span className="text-indigo-600 dark:text-indigo-400 font-extrabold">{paginaActual}</span> de{' '}
+                  <span>{totalPaginas}</span>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={paginaActual >= totalPaginas || cargandoProductos}
+                  onClick={() => {
+                    const nueva = Math.min(totalPaginas, paginaActual + 1);
+                    cargarProductos(nueva, false);
+                  }}
+                  className="flex items-center gap-1 rounded-2xl border border-gray-200 dark:border-slate-800 bg-gray-50/70 dark:bg-[#111726] px-3.5 py-2 text-xs font-bold text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:pointer-events-none transition active:scale-95"
+                >
+                  <span>Siguiente</span>
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          )}
+          </>
         )}
       </main>
 

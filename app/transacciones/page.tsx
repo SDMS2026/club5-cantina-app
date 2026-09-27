@@ -27,6 +27,8 @@ import {
   ExternalLink,
   ChevronDown,
   ChevronUp,
+  ChevronLeft,
+  ChevronRight,
   AlertCircle,
   Loader2,
   FileText,
@@ -115,12 +117,17 @@ export default function TransaccionesPage() {
   const [tasaBcv, setTasaBcv] = useState<number>(TASA_BCV_FALLBACK_DEFAULT);
   const [cargandoTasa, setCargandoTasa] = useState<boolean>(true);
 
-  // 2. Transacciones
+  // 2. Transacciones y Paginación en Servidor (.range)
+  const TAMANO_PAGINA_TRANSACCIONES = 25;
   const [transacciones, setTransacciones] = useState<TransaccionRegistro[]>([]);
   const [cargandoTransacciones, setCargandoTransacciones] = useState<boolean>(true);
+  const [cargandoMas, setCargandoMas] = useState<boolean>(false);
+  const [paginaActual, setPaginaActual] = useState<number>(1);
+  const [totalRegistros, setTotalRegistros] = useState<number>(0);
 
-  // 3. Filtros
+  // 3. Filtros y Búsqueda con Debounce
   const [busqueda, setBusqueda] = useState<string>('');
+  const [busquedaDebounced, setBusquedaDebounced] = useState<string>('');
   const [filtroMetodo, setFiltroMetodo] = useState<
     'todas' | 'pago_movil' | 'efectivo' | 'pendientes' | 'saldo_favor' | 'anuladas'
   >('todas');
@@ -183,72 +190,251 @@ export default function TransaccionesPage() {
     }
   }, []);
 
-  // Cargar todas las transacciones desde Supabase
-  const cargarTransacciones = useCallback(async () => {
-    setCargandoTransacciones(true);
+  // Debounce para la barra de búsqueda de transacciones (300ms)
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setBusquedaDebounced(busqueda);
+    }, 300);
+    return () => clearTimeout(handler);
+  }, [busqueda]);
+
+  // Cargar métricas financieras de auditoría (KPIs globales de la fecha seleccionada)
+  const [metricasData, setMetricasData] = useState({
+    totalVentasUsd: 0,
+    pagadasCajaUsd: 0,
+    pendientesFiadoUsd: 0,
+    anuladasTotalUsd: 0,
+    cantidadAnuladas: 0,
+    cantidadTotal: 0,
+  });
+
+  const cargarMetricasResumen = useCallback(async () => {
     try {
-      const { data, error } = await supabase
+      let q = supabase
         .from('consumos')
-        .select(`
-          id,
-          cliente_id,
-          monto_total_usd,
-          tasa_bcv_historica,
-          metodo_pago,
-          pagado,
-          fecha,
-          clientes (
-            id,
-            nombre_estudiante,
-            grado_seccion,
-            nombre_representante,
-            telefono_whatsapp,
-            saldo
-          ),
-          consumo_detalles (
-            id,
-            cantidad,
-            precio_unitario_usd,
-            producto_id,
-            productos (
-              id,
-              nombre,
-              precio_usd,
-              imagen_url
-            )
-          )
-        `)
-        .order('fecha', { ascending: false });
+        .select('monto_total_usd, metodo_pago, pagado, fecha');
 
-      if (error) {
-        console.error('Error consultando historial de transacciones:', error);
-      } else {
-        setTransacciones((data as unknown as TransaccionRegistro[]) || []);
+      if (filtroFecha === 'hoy') {
+        const hoy = new Date();
+        hoy.setHours(0, 0, 0, 0);
+        q = q.gte('fecha', hoy.toISOString());
+      } else if (filtroFecha === 'semana') {
+        const hace7 = new Date();
+        hace7.setDate(hace7.getDate() - 7);
+        hace7.setHours(0, 0, 0, 0);
+        q = q.gte('fecha', hace7.toISOString());
+      } else if (filtroFecha === 'mes') {
+        const hace30 = new Date();
+        hace30.setDate(hace30.getDate() - 30);
+        hace30.setHours(0, 0, 0, 0);
+        q = q.gte('fecha', hace30.toISOString());
       }
-    } catch (err) {
-      console.error('Error inesperado cargando transacciones:', err);
-    } finally {
-      setCargandoTransacciones(false);
-    }
-  }, []);
 
+      const { data, error } = await q;
+      if (error || !data) return;
+
+      let totalVentasUsd = 0;
+      let pagadasCajaUsd = 0;
+      let pendientesFiadoUsd = 0;
+      let anuladasTotalUsd = 0;
+      let cantidadAnuladas = 0;
+      let cantidadTotal = 0;
+
+      data.forEach((t) => {
+        const monto = Number(t.monto_total_usd || 0);
+        cantidadTotal++;
+        const audit = parseConsumoAudit({ metodo_pago: t.metodo_pago, pagado: t.pagado });
+
+        if (audit.esAnulado) {
+          anuladasTotalUsd += monto;
+          cantidadAnuladas++;
+        } else {
+          totalVentasUsd += monto;
+          if (audit.esPendiente) {
+            pendientesFiadoUsd += monto;
+          } else {
+            pagadasCajaUsd += monto;
+          }
+        }
+      });
+
+      setMetricasData({
+        totalVentasUsd,
+        pagadasCajaUsd,
+        pendientesFiadoUsd,
+        anuladasTotalUsd,
+        cantidadAnuladas,
+        cantidadTotal,
+      });
+    } catch (err) {
+      console.error('Error calculando resumen de métricas:', err);
+    }
+  }, [filtroFecha]);
+
+  // Cargar transacciones paginadas desde Supabase usando .range(from, to) y filtros en DB
+  const cargarTransacciones = useCallback(
+    async (paginaDestino: number = 1, esCargarMas: boolean = false) => {
+      if (esCargarMas) {
+        setCargandoMas(true);
+      } else {
+        setCargandoTransacciones(true);
+      }
+
+      try {
+        let query = supabase
+          .from('consumos')
+          .select(
+            `
+            id,
+            cliente_id,
+            monto_total_usd,
+            tasa_bcv_historica,
+            metodo_pago,
+            pagado,
+            fecha,
+            clientes (
+              id,
+              nombre_estudiante,
+              grado_seccion,
+              nombre_representante,
+              telefono_whatsapp,
+              saldo
+            ),
+            consumo_detalles (
+              id,
+              cantidad,
+              precio_unitario_usd,
+              producto_id,
+              productos (
+                id,
+                nombre,
+                precio_usd,
+                imagen_url
+              )
+            )
+          `,
+            { count: 'exact' }
+          );
+
+        // 1. Filtro en Base de Datos por Rango de Fecha (.gte)
+        if (filtroFecha === 'hoy') {
+          const hoy = new Date();
+          hoy.setHours(0, 0, 0, 0);
+          query = query.gte('fecha', hoy.toISOString());
+        } else if (filtroFecha === 'semana') {
+          const hace7 = new Date();
+          hace7.setDate(hace7.getDate() - 7);
+          hace7.setHours(0, 0, 0, 0);
+          query = query.gte('fecha', hace7.toISOString());
+        } else if (filtroFecha === 'mes') {
+          const hace30 = new Date();
+          hace30.setDate(hace30.getDate() - 30);
+          hace30.setHours(0, 0, 0, 0);
+          query = query.gte('fecha', hace30.toISOString());
+        }
+
+        // 2. Filtro en Base de Datos por Método de Pago / Estado
+        if (filtroMetodo === 'anuladas') {
+          query = query.ilike('metodo_pago', 'anulado%');
+        } else if (filtroMetodo === 'pendientes') {
+          query = query.eq('pagado', false).not('metodo_pago', 'ilike', 'anulado%');
+        } else if (filtroMetodo === 'pago_movil') {
+          query = query.ilike('metodo_pago', 'pago_movil%');
+        } else if (filtroMetodo === 'efectivo') {
+          query = query.or('metodo_pago.ilike.efectivo_usd%,metodo_pago.ilike.efectivo_bs%');
+        } else if (filtroMetodo === 'saldo_favor') {
+          query = query.or('metodo_pago.ilike.saldo_favor%,metodo_pago.ilike.mixto%');
+        }
+
+        // 3. Filtro en Base de Datos por Término de Búsqueda (.ilike en DB)
+        const term = busquedaDebounced.trim();
+        if (term) {
+          // Búsqueda cruzada eficiente en clientes y productos para encontrar IDs coincidentes
+          const [resClientes, resDetalles] = await Promise.all([
+            supabase
+              .from('clientes')
+              .select('id')
+              .or(
+                `nombre_estudiante.ilike.%${term}%,nombre_representante.ilike.%${term}%,grado_seccion.ilike.%${term}%`
+              )
+              .limit(80),
+            supabase
+              .from('consumo_detalles')
+              .select('consumo_id, productos!inner(nombre)')
+              .ilike('productos.nombre', `%${term}%`)
+              .limit(80),
+          ]);
+
+          const clientIds = (resClientes.data || []).map((c) => c.id).filter(Boolean);
+          const consumoIds = (resDetalles.data || []).map((d) => d.consumo_id).filter(Boolean);
+
+          const orClauses: string[] = [`metodo_pago.ilike.%${term}%`];
+          if (clientIds.length > 0) {
+            orClauses.push(`cliente_id.in.(${clientIds.join(',')})`);
+          }
+          if (consumoIds.length > 0) {
+            orClauses.push(`id.in.(${consumoIds.join(',')})`);
+          }
+          query = query.or(orClauses.join(','));
+        }
+
+        // 4. Paginación con .range(from, to)
+        const from = (paginaDestino - 1) * TAMANO_PAGINA_TRANSACCIONES;
+        const to = from + TAMANO_PAGINA_TRANSACCIONES - 1;
+
+        query = query.order('fecha', { ascending: false }).range(from, to);
+
+        const { data, count, error } = await query;
+
+        if (error) {
+          console.error('Error consultando historial de transacciones:', error);
+          mostrarNotificacion('error', 'Error al consultar historial.');
+        } else {
+          const items = (data as unknown as TransaccionRegistro[]) || [];
+          setTotalRegistros(count ?? items.length);
+          setPaginaActual(paginaDestino);
+
+          if (esCargarMas) {
+            setTransacciones((prev) => [...prev, ...items]);
+          } else {
+            setTransacciones(items);
+          }
+        }
+      } catch (err) {
+        console.error('Error inesperado cargando transacciones:', err);
+      } finally {
+        setCargandoTransacciones(false);
+        setCargandoMas(false);
+      }
+    },
+    [filtroFecha, filtroMetodo, busquedaDebounced, mostrarNotificacion]
+  );
+
+  // Inicialización y recarga automática ante cambios de filtros o búsqueda
   useEffect(() => {
     setMontado(true);
     cargarTasa();
-    cargarTransacciones();
+  }, [cargarTasa]);
 
-    // Suscripción en tiempo real a la tabla 'consumos'
+  useEffect(() => {
+    cargarTransacciones(1, false);
+    cargarMetricasResumen();
+  }, [cargarTransacciones, cargarMetricasResumen]);
+
+  // Suscripción en tiempo real a la tabla 'consumos'
+  useEffect(() => {
     const channel = supabase
       .channel('transacciones_realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'consumos' }, () => {
-        cargarTransacciones();
+        cargarTransacciones(paginaActual, false);
+        cargarMetricasResumen();
       })
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [cargarTasa, cargarTransacciones]);
+  }, [paginaActual, cargarTransacciones, cargarMetricasResumen]);
 
   // Manejo de la acción de anular transacción
   const handleConfirmarAnulacion = async () => {
@@ -270,7 +456,7 @@ export default function TransaccionesPage() {
       if (modalDetalle.abierto) {
         setModalDetalle({ abierto: false, transaccion: null });
       }
-      await cargarTransacciones();
+      await Promise.all([cargarTransacciones(paginaActual, false), cargarMetricasResumen()]);
       refrescarNotificacionesGlobales();
     } catch (err: unknown) {
       console.error('Error al anular transacción:', err);
@@ -279,117 +465,24 @@ export default function TransaccionesPage() {
     }
   };
 
-  // Filtrado reactivo de transacciones
-  const transaccionesFiltradas = useMemo(() => {
-    const q = busqueda.trim().toLowerCase();
-    const hoy = new Date();
-    hoy.setHours(0, 0, 0, 0);
+  // Como la búsqueda y filtros se ejecutan directamente en Supabase,
+  // transaccionesFiltradas es la lista resultante del servidor para esta página.
+  const transaccionesFiltradas = transacciones;
 
-    return transacciones.filter((t) => {
-      const audit = parseConsumoAudit({
-        metodo_pago: t.metodo_pago,
-        pagado: t.pagado,
-      });
-
-      // 1. Filtro por Método / Estado
-      if (filtroMetodo === 'anuladas' && !audit.esAnulado) return false;
-      if (filtroMetodo === 'pendientes' && (audit.esAnulado || !audit.esPendiente)) return false;
-      if (filtroMetodo === 'pago_movil' && audit.metodoBase !== 'pago_movil') return false;
-      if (
-        filtroMetodo === 'efectivo' &&
-        audit.metodoBase !== 'efectivo_usd' &&
-        audit.metodoBase !== 'efectivo_bs'
-      )
-        return false;
-      if (filtroMetodo === 'saldo_favor' && audit.metodoBase !== 'saldo_favor' && !audit.esMixto)
-        return false;
-
-      // 2. Filtro por Fecha
-      if (filtroFecha !== 'todas' && t.fecha) {
-        const d = new Date(t.fecha);
-        const diasDiff = (hoy.getTime() - d.getTime()) / (1000 * 60 * 60 * 24);
-
-        if (filtroFecha === 'hoy') {
-          const esMismoDia =
-            d.getDate() === hoy.getDate() &&
-            d.getMonth() === hoy.getMonth() &&
-            d.getFullYear() === hoy.getFullYear();
-          if (!esMismoDia) return false;
-        } else if (filtroFecha === 'semana') {
-          if (diasDiff > 7) return false;
-        } else if (filtroFecha === 'mes') {
-          if (diasDiff > 31) return false;
-        }
-      }
-
-      // 3. Filtro por Búsqueda de texto
-      if (q) {
-        const nombreCliente = t.clientes?.nombre_estudiante?.toLowerCase() || '';
-        const seccion = t.clientes?.grado_seccion?.toLowerCase() || '';
-        const rep = t.clientes?.nombre_representante?.toLowerCase() || '';
-        const ref = audit.referencia?.toLowerCase() || '';
-        const metodo = audit.nombreLegible.toLowerCase();
-
-        // Buscar también en nombres de productos comprados
-        const productosNombres =
-          t.consumo_detalles
-            ?.map((cd) => cd.productos?.nombre?.toLowerCase() || '')
-            .join(' ') || '';
-
-        const coincide =
-          nombreCliente.includes(q) ||
-          seccion.includes(q) ||
-          rep.includes(q) ||
-          ref.includes(q) ||
-          metodo.includes(q) ||
-          productosNombres.includes(q);
-
-        if (!coincide) return false;
-      }
-
-      return true;
-    });
-  }, [transacciones, busqueda, filtroMetodo, filtroFecha]);
-
-  // Resumen de Métricas Financieras (KPIs de Auditoría)
+  // Resumen de Métricas Financieras (KPIs de Auditoría) con tasa BCV reactiva
   const metricas = useMemo(() => {
-    let totalVentasUsd = 0;
-    let pagadasCajaUsd = 0;
-    let pendientesFiadoUsd = 0;
-    let anuladasTotalUsd = 0;
-    let cantidadAnuladas = 0;
-    let cantidadTotal = 0;
-
-    transacciones.forEach((t) => {
-      const monto = Number(t.monto_total_usd || 0);
-      cantidadTotal++;
-      const audit = parseConsumoAudit({ metodo_pago: t.metodo_pago, pagado: t.pagado });
-
-      if (audit.esAnulado) {
-        anuladasTotalUsd += monto;
-        cantidadAnuladas++;
-      } else {
-        totalVentasUsd += monto;
-        if (audit.esPendiente) {
-          pendientesFiadoUsd += monto;
-        } else {
-          pagadasCajaUsd += monto;
-        }
-      }
-    });
-
     return {
-      totalVentasUsd,
-      totalVentasBs: calcularConversionBs(totalVentasUsd, tasaBcv),
-      pagadasCajaUsd,
-      pagadasCajaBs: calcularConversionBs(pagadasCajaUsd, tasaBcv),
-      pendientesFiadoUsd,
-      pendientesFiadoBs: calcularConversionBs(pendientesFiadoUsd, tasaBcv),
-      anuladasTotalUsd,
-      cantidadAnuladas,
-      cantidadTotal,
+      ...metricasData,
+      totalVentasBs: calcularConversionBs(metricasData.totalVentasUsd, tasaBcv),
+      pagadasCajaBs: calcularConversionBs(metricasData.pagadasCajaUsd, tasaBcv),
+      pendientesFiadoBs: calcularConversionBs(metricasData.pendientesFiadoUsd, tasaBcv),
     };
-  }, [transacciones, tasaBcv]);
+  }, [metricasData, tasaBcv]);
+
+  // Cálculos para paginación compacta
+  const totalPaginas = Math.max(1, Math.ceil(totalRegistros / TAMANO_PAGINA_TRANSACCIONES));
+  const indiceInicial = totalRegistros === 0 ? 0 : (paginaActual - 1) * TAMANO_PAGINA_TRANSACCIONES + 1;
+  const indiceFinal = Math.min(totalRegistros, paginaActual * TAMANO_PAGINA_TRANSACCIONES);
 
   if (!montado) {
     return (
@@ -434,7 +527,7 @@ export default function TransaccionesPage() {
                   Historial de Transacciones
                 </h1>
                 <span className="rounded-full border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/60 px-1.5 py-0.2 text-[10px] sm:text-[11px] font-semibold text-indigo-700 dark:text-indigo-300 shrink-0">
-                  {transacciones.length}
+                  {totalRegistros}
                 </span>
               </div>
               <p className="text-[11px] sm:text-xs text-gray-500 dark:text-slate-400 hidden sm:block">
@@ -966,6 +1059,69 @@ export default function TransaccionesPage() {
                 </tbody>
               </table>
             </div>
+
+            {/* Controles de Paginación en el Servidor (.range) */}
+            {totalRegistros > 0 && (
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 rounded-3xl border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#0D111A] p-3.5 sm:px-5 shadow-2xs">
+                {/* Resumen de conteo */}
+                <div className="text-xs text-gray-500 dark:text-slate-400 text-center sm:text-left">
+                  Mostrando <span className="font-bold text-gray-900 dark:text-slate-100">{indiceInicial}</span> -{' '}
+                  <span className="font-bold text-gray-900 dark:text-slate-100">{indiceFinal}</span> de{' '}
+                  <span className="font-bold text-indigo-600 dark:text-indigo-400">{totalRegistros}</span> transacciones
+                </div>
+
+                {/* Botón Cargar Más en Móviles (Progressive Append) */}
+                {paginaActual < totalPaginas && (
+                  <button
+                    type="button"
+                    disabled={cargandoMas || cargandoTransacciones}
+                    onClick={() => cargarTransacciones(paginaActual + 1, true)}
+                    className="flex sm:hidden w-full items-center justify-center gap-2 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800/60 py-2.5 text-xs font-bold text-indigo-700 dark:text-indigo-300 active:scale-95 transition disabled:opacity-50"
+                  >
+                    {cargandoMas ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-4 w-4" />
+                    )}
+                    <span>Cargar más transacciones ({transacciones.length} de {totalRegistros})</span>
+                  </button>
+                )}
+
+                {/* Navegación Anterior / Siguiente */}
+                <div className="flex items-center gap-2 self-center sm:self-auto">
+                  <button
+                    type="button"
+                    disabled={paginaActual <= 1 || cargandoTransacciones}
+                    onClick={() => {
+                      const nueva = Math.max(1, paginaActual - 1);
+                      cargarTransacciones(nueva, false);
+                    }}
+                    className="flex items-center gap-1 rounded-2xl border border-gray-200 dark:border-slate-800 bg-gray-50/70 dark:bg-[#111726] px-3.5 py-2 text-xs font-bold text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:pointer-events-none transition active:scale-95"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                    <span>Anterior</span>
+                  </button>
+
+                  <div className="px-3 py-1.5 rounded-xl bg-gray-100/70 dark:bg-slate-800 text-xs font-bold text-gray-700 dark:text-slate-300">
+                    Página <span className="text-indigo-600 dark:text-indigo-400 font-extrabold">{paginaActual}</span> de{' '}
+                    <span>{totalPaginas}</span>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={paginaActual >= totalPaginas || cargandoTransacciones}
+                    onClick={() => {
+                      const nueva = Math.min(totalPaginas, paginaActual + 1);
+                      cargarTransacciones(nueva, false);
+                    }}
+                    className="flex items-center gap-1 rounded-2xl border border-gray-200 dark:border-slate-800 bg-gray-50/70 dark:bg-[#111726] px-3.5 py-2 text-xs font-bold text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:pointer-events-none transition active:scale-95"
+                  >
+                    <span>Siguiente</span>
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </main>
