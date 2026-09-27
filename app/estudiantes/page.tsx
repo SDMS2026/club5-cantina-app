@@ -78,6 +78,7 @@ import {
 } from '@/lib/constants';
 import { Cliente } from '@/types/pos';
 import { useModalDragScroll } from '@/lib/useModalDragScroll';
+import { useDraggableScroll } from '@/lib/useDraggableScroll';
 import {
   obtenerSaldosTodosClientes,
   procesarAbonoCliente,
@@ -128,6 +129,7 @@ export default function EstudiantesPage() {
   const [filtroGrado, setFiltroGrado] = useState<string>('todos');
   const [filtroEstado, setFiltroEstado] = useState<'todos' | 'con_deuda' | 'con_saldo_favor' | 'solvente'>('todos');
   const [popoverGradoAbierto, setPopoverGradoAbierto] = useState<boolean>(false);
+  const { ref: draggableFiltrosRef, events: draggableFiltrosEvents } = useDraggableScroll();
 
   // Notificaciones Toast
   const [notificacion, setNotificacion] = useState<{ tipo: 'exito' | 'info' | 'error'; texto: string } | null>(null);
@@ -1227,22 +1229,26 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
             )}
           </div>
 
-          <div className="flex items-center gap-2 overflow-x-auto pb-0.5 no-scrollbar">
+          <div
+            ref={draggableFiltrosRef}
+            {...draggableFiltrosEvents}
+            className="flex items-center gap-2 overflow-x-auto pb-1.5 pt-0.5 w-full min-w-0 max-w-full touch-scroll-ios scrollbar-none select-none cursor-grab active:cursor-grabbing"
+          >
             {/* Popover Grado / Sección */}
             <Popover.Root open={popoverGradoAbierto} onOpenChange={setPopoverGradoAbierto}>
               <Popover.Trigger asChild>
                 <button
                   type="button"
-                  className="flex items-center gap-2 rounded-2xl border border-gray-200/90 bg-gray-50/70 px-3.5 py-2 text-xs font-semibold text-gray-700 shadow-2xs hover:border-gray-300 hover:bg-white transition"
+                  className="flex items-center gap-2 shrink-0 whitespace-nowrap rounded-2xl border border-gray-200/90 bg-gray-50/70 px-3.5 py-2 text-xs font-semibold text-gray-700 shadow-2xs hover:border-gray-300 hover:bg-white transition"
                 >
-                  <GraduationCap className="h-4 w-4 text-indigo-600" />
+                  <GraduationCap className="h-4 w-4 text-indigo-600 shrink-0" />
                   <span>
                     {filtroGrado === 'todos'
                       ? `Todos los Niveles (${gradosDisponibles.length})`
                       : filtroGrado}
                   </span>
                   <ChevronDown
-                    className={`h-3.5 w-3.5 text-gray-400 transition-transform ${
+                    className={`h-3.5 w-3.5 text-gray-400 shrink-0 transition-transform ${
                       popoverGradoAbierto ? 'rotate-180 text-gray-700' : ''
                     }`}
                   />
@@ -1289,9 +1295,9 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
                         >
                           <span className="flex items-center gap-1.5">
                             {esProf ? (
-                              <Briefcase className="h-3 w-3 text-amber-600" />
+                              <Briefcase className="h-3 w-3 text-amber-600 shrink-0" />
                             ) : (
-                              <GraduationCap className="h-3 w-3 text-indigo-500" />
+                              <GraduationCap className="h-3 w-3 text-indigo-500 shrink-0" />
                             )}
                             {g}
                           </span>
@@ -1305,11 +1311,11 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
             </Popover.Root>
 
             {/* Pestañas de Estado */}
-            <div className="flex items-center rounded-2xl border border-gray-200/90 bg-gray-50/70 p-1">
+            <div className="flex items-center shrink-0 whitespace-nowrap rounded-2xl border border-gray-200/90 bg-gray-50/70 p-1">
               <button
                 type="button"
                 onClick={() => setFiltroEstado('todos')}
-                className={`rounded-xl px-3 py-1 text-xs font-bold transition ${
+                className={`rounded-xl px-3 py-1.5 text-xs font-bold shrink-0 whitespace-nowrap transition ${
                   filtroEstado === 'todos'
                     ? 'bg-white text-gray-900 shadow-2xs'
                     : 'text-gray-500 hover:text-gray-900'
@@ -1320,7 +1326,7 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
               <button
                 type="button"
                 onClick={() => setFiltroEstado('con_deuda')}
-                className={`flex items-center gap-1 rounded-xl px-3 py-1 text-xs font-bold transition ${
+                className={`flex items-center gap-1 rounded-xl px-3 py-1.5 text-xs font-bold shrink-0 whitespace-nowrap transition ${
                   filtroEstado === 'con_deuda'
                     ? 'bg-amber-100 text-amber-950 shadow-2xs'
                     : 'text-gray-500 hover:text-gray-900'
@@ -1336,7 +1342,7 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
               <button
                 type="button"
                 onClick={() => setFiltroEstado('con_saldo_favor')}
-                className={`flex items-center gap-1 rounded-xl px-3 py-1 text-xs font-bold transition ${
+                className={`flex items-center gap-1 rounded-xl px-3 py-1.5 text-xs font-bold shrink-0 whitespace-nowrap transition ${
                   filtroEstado === 'con_saldo_favor'
                     ? 'bg-emerald-100 text-emerald-950 shadow-2xs'
                     : 'text-gray-500 hover:text-gray-900'
@@ -1352,7 +1358,7 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
               <button
                 type="button"
                 onClick={() => setFiltroEstado('solvente')}
-                className={`rounded-xl px-3 py-1 text-xs font-bold transition ${
+                className={`rounded-xl px-3 py-1.5 text-xs font-bold shrink-0 whitespace-nowrap transition ${
                   filtroEstado === 'solvente'
                     ? 'bg-emerald-100 text-emerald-950 shadow-2xs'
                     : 'text-gray-500 hover:text-gray-900'
@@ -1370,10 +1376,10 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
                 cargarMetricasDirectorio();
               }}
               disabled={cargandoClientes}
-              className="flex items-center gap-1.5 rounded-2xl border border-gray-200/80 bg-white px-3 py-2 text-xs font-semibold text-gray-700 shadow-2xs hover:bg-gray-50 transition disabled:opacity-60"
+              className="flex items-center gap-1.5 shrink-0 rounded-2xl border border-gray-200/80 bg-white px-3 py-2 text-xs font-semibold text-gray-700 shadow-2xs hover:bg-gray-50 transition disabled:opacity-60"
               title="Recargar directorio"
             >
-              <RefreshCw className={`h-3.5 w-3.5 ${cargandoClientes ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`h-3.5 w-3.5 shrink-0 ${cargandoClientes ? 'animate-spin' : ''}`} />
             </button>
           </div>
         </div>
