@@ -44,6 +44,36 @@ interface RespuestaVozPos {
   } | null;
 }
 
+function sanitizarTranscripcion(texto: string): string {
+  if (!texto) return '';
+  let str = texto.trim().replace(/\s+/g, ' ');
+
+  // 1. Detectar si la frase entera está repetida exactamente dos veces:
+  // Ej: "Pastelito de queso por pago móvil Pastelito de queso por pago móvil"
+  const palabras = str.split(' ');
+  if (palabras.length >= 4 && palabras.length % 2 === 0) {
+    const mitad = palabras.length / 2;
+    const primeraMitad = palabras.slice(0, mitad).join(' ').toLowerCase();
+    const segundaMitad = palabras.slice(mitad).join(' ').toLowerCase();
+    if (primeraMitad === segundaMitad) {
+      str = palabras.slice(0, mitad).join(' ');
+    }
+  }
+
+  // 2. Detectar repetición de las últimas N palabras idénticas a las N anteriores
+  const palabrasRev = str.split(' ');
+  for (let n = Math.floor(palabrasRev.length / 2); n >= 2; n--) {
+    const sub1 = palabrasRev.slice(-n).join(' ').toLowerCase();
+    const sub2 = palabrasRev.slice(-2 * n, -n).join(' ').toLowerCase();
+    if (sub1 === sub2) {
+      str = palabrasRev.slice(0, -n).join(' ');
+      break;
+    }
+  }
+
+  return str.trim();
+}
+
 export async function POST(req: NextRequest) {
   if (isMaintenanceMode()) {
     return NextResponse.json(
@@ -177,7 +207,9 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
-    const texto = body?.texto?.trim();
+
+    const textoBruto = typeof body?.texto === 'string' ? body.texto.trim() : '';
+    const texto = sanitizarTranscripcion(textoBruto);
 
     if (!texto) {
       return NextResponse.json(
@@ -298,8 +330,17 @@ ESQUEMA OBLIGATORIO DE RESPUESTA JSON:
 
     const userPrompt = `Transcripción dictada por voz: "${texto}"`;
 
-    // 4. Llamar a la API REST de Gemini (con fallback dinámico de modelos)
-    const modelosCandidatos = ['gemini-3.6-flash', 'gemini-flash-latest', 'gemini-1.5-flash'];
+    // 4. Llamar a la API REST de Gemini (con fallback dinámico de modelos actualizados)
+    const modelosCandidatos = [
+      'gemini-3.8-flash',
+      'gemini-3.7-flash',
+      'gemini-3.6-flash',
+      'gemini-3.5-flash',
+      'gemini-flash-latest',
+      'gemini-flash-lite-latest',
+      'gemini-2.5-flash',
+      'gemini-1.5-flash',
+    ];
     const geminiReqBody = {
       contents: [
         {
@@ -334,16 +375,30 @@ ESQUEMA OBLIGATORIO DE RESPUESTA JSON:
         break;
       } else {
         const errText = await response.text();
-        ultimoError = `[${modelo}] (${response.status}): ${errText}`;
-        console.warn(`Intento con ${modelo} falló:`, response.status, errText);
+        let parsedMessage = '';
+        try {
+          const parsedObj = JSON.parse(errText);
+          parsedMessage = parsedObj.error?.message || errText;
+        } catch {
+          parsedMessage = errText;
+        }
+
+        ultimoError = `[${modelo}] (${response.status}): ${parsedMessage}`;
+        console.warn(`Intento con ${modelo} falló:`, response.status, parsedMessage);
+
         if (response.status === 400 || response.status === 403) {
           return NextResponse.json(
             {
               error: `Error de autenticación con Gemini API (${response.status})`,
-              detalles: errText,
+              detalles: parsedMessage,
             },
             { status: response.status }
           );
+        }
+
+        // Si es 503 o 429, pequeña pausa antes del siguiente modelo para aliviar picos momentáneos
+        if (response.status === 503 || response.status === 429) {
+          await new Promise((resolve) => setTimeout(resolve, 300));
         }
       }
     }

@@ -95,6 +95,37 @@ const EJEMPLOS_PEDIDOS = [
   'Una empanada de queso, una malta y anótalo a la cuenta de Sofía Martínez de 5to A',
 ];
 
+// Helper para sanitizar y eliminar frases y palabras duplicadas por SpeechRecognition
+function sanitizarTranscripcion(texto: string): string {
+  if (!texto) return '';
+  let str = texto.trim().replace(/\s+/g, ' ');
+
+  // 1. Detectar si la frase entera está repetida exactamente dos veces:
+  // Ej: "Pastelito de queso por pago móvil Pastelito de queso por pago móvil"
+  const palabras = str.split(' ');
+  if (palabras.length >= 4 && palabras.length % 2 === 0) {
+    const mitad = palabras.length / 2;
+    const primeraMitad = palabras.slice(0, mitad).join(' ').toLowerCase();
+    const segundaMitad = palabras.slice(mitad).join(' ').toLowerCase();
+    if (primeraMitad === segundaMitad) {
+      return palabras.slice(0, mitad).join(' ');
+    }
+  }
+
+  // 2. Detectar repetición de las últimas N palabras idénticas a las N anteriores
+  const palabrasRev = str.split(' ');
+  for (let n = Math.floor(palabrasRev.length / 2); n >= 2; n--) {
+    const sub1 = palabrasRev.slice(-n).join(' ').toLowerCase();
+    const sub2 = palabrasRev.slice(-2 * n, -n).join(' ').toLowerCase();
+    if (sub1 === sub2) {
+      str = palabrasRev.slice(0, -n).join(' ');
+      break;
+    }
+  }
+
+  return str.trim();
+}
+
 export function VoiceOrderModal({
   productos = [],
   clientes = [],
@@ -213,7 +244,7 @@ export function VoiceOrderModal({
         setEscuchando(true);
       };
 
-      // Procesar únicamente el buffer con event.resultIndex para evitar bucles de palabras repetidas
+      // Procesar buffer de SpeechRecognition con prevención estricta de duplicación (iOS Safari / Chrome)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       recognition.onresult = (event: any) => {
         let interimTranscript = '';
@@ -225,25 +256,43 @@ export function VoiceOrderModal({
           if (item.isFinal) {
             const fraseLimpia = texto.trim();
             if (fraseLimpia) {
-              const palabrasActuales = finalTranscriptRef.current.trim().split(/\s+/);
-              const ultimaPalabra = palabrasActuales[palabrasActuales.length - 1]?.toLowerCase();
-              const primeraNueva = fraseLimpia.split(/\s+/)[0]?.toLowerCase();
+              const actual = finalTranscriptRef.current.trim();
+              const actualNorm = actual.toLowerCase();
+              const nuevaNorm = fraseLimpia.toLowerCase();
 
-              // Evitar bucles de repetición inmediata (agrega agrega... / listo listo...)
-              if (
-                ultimaPalabra &&
-                primeraNueva &&
-                ultimaPalabra === primeraNueva &&
-                finalTranscriptRef.current.length > 0
-              ) {
-                const resto = fraseLimpia.split(/\s+/).slice(1).join(' ');
-                if (resto) {
-                  finalTranscriptRef.current = `${finalTranscriptRef.current} ${resto}`.trim();
-                }
+              // Prevenir duplicaciones de frases repetidas en WebKit/Safari
+              if (!actual) {
+                finalTranscriptRef.current = fraseLimpia;
+              } else if (actualNorm === nuevaNorm || actualNorm.endsWith(nuevaNorm)) {
+                // Frase ya capturada idéntica o al final
+              } else if (nuevaNorm.startsWith(actualNorm)) {
+                // La nueva actualización contiene todo el enunciado acumulado
+                finalTranscriptRef.current = fraseLimpia;
+              } else if (actualNorm.includes(nuevaNorm)) {
+                // Subcadena ya existente
               } else {
-                finalTranscriptRef.current = finalTranscriptRef.current
-                  ? `${finalTranscriptRef.current} ${fraseLimpia}`
-                  : fraseLimpia;
+                // Detección de solapamiento de palabras
+                const palabrasActuales = actual.split(/\s+/);
+                const palabrasNuevas = fraseLimpia.split(/\s+/);
+                let solapamiento = 0;
+                const maxCheck = Math.min(palabrasActuales.length, palabrasNuevas.length);
+                for (let k = maxCheck; k >= 1; k--) {
+                  const finActual = palabrasActuales.slice(-k).join(' ').toLowerCase();
+                  const inicioNuevo = palabrasNuevas.slice(0, k).join(' ').toLowerCase();
+                  if (finActual === inicioNuevo) {
+                    solapamiento = k;
+                    break;
+                  }
+                }
+
+                if (solapamiento > 0) {
+                  const noSolapado = palabrasNuevas.slice(solapamiento).join(' ');
+                  if (noSolapado) {
+                    finalTranscriptRef.current = `${actual} ${noSolapado}`.trim();
+                  }
+                } else {
+                  finalTranscriptRef.current = `${actual} ${fraseLimpia}`.trim();
+                }
               }
             }
           } else {
@@ -257,7 +306,7 @@ export function VoiceOrderModal({
           .trim();
 
         if (acumulado) {
-          setTranscripcion(acumulado);
+          setTranscripcion(sanitizarTranscripcion(acumulado));
         }
       };
 
@@ -327,24 +376,31 @@ export function VoiceOrderModal({
     if (escuchando) {
       detenerReconocimiento();
     } else {
+      // Limpiar y resetear el buffer al pulsar el botón para iniciar una nueva captura
+      finalTranscriptRef.current = '';
+      setTranscripcion('');
+      setErrorMsg(null);
+      setClienteInexistente(null);
       iniciarReconocimiento();
     }
   };
 
   // Interpretar con Gemini y pasar a la pantalla de confirmación previa
   const procesarConGemini = async (textoAProcesar?: string) => {
-    const texto = (textoAProcesar ?? transcripcion).trim();
+    // 1. Detener reconocimiento inmediatamente y resetear buffer antes de enviar al backend
+    detenerReconocimiento();
+    const textoBruto = (textoAProcesar ?? transcripcion).trim();
+    const texto = sanitizarTranscripcion(textoBruto);
+    finalTranscriptRef.current = '';
+
     if (!texto) {
       setErrorMsg('Por favor dicta o escribe un pedido antes de procesar.');
       return;
     }
 
-    if (escuchando) {
-      detenerReconocimiento();
-    }
-
     setProcesando(true);
     setErrorMsg(null);
+    setClienteInexistente(null);
 
     try {
       const res = await fetch('/api/voz-pos', {
@@ -1038,6 +1094,8 @@ export function VoiceOrderModal({
                         onClick={() => {
                           finalTranscriptRef.current = '';
                           setTranscripcion('');
+                          setErrorMsg(null);
+                          setClienteInexistente(null);
                         }}
                         className="text-[11px] font-semibold text-gray-400 hover:text-rose-600 transition flex items-center gap-1"
                       >
