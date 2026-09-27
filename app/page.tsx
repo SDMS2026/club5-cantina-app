@@ -8,6 +8,7 @@ import { ProductCatalog } from '@/components/ProductCatalog';
 import { Cart } from '@/components/Cart';
 import { PaymentModal } from '@/components/PaymentModal';
 import { VoiceOrderModal } from '@/components/VoiceOrderModal';
+import { AbonoModal } from '@/components/AbonoModal';
 import { Cliente, Producto, ItemCarrito, MetodoPagoId } from '@/types/pos';
 import { obtenerTasaBCV, TASA_BCV_FALLBACK_DEFAULT } from '@/lib/dolarApi';
 import { supabase } from '@/lib/supabaseClient';
@@ -80,6 +81,7 @@ export default function PosPage() {
   const [itemsCarrito, setItemsCarrito] = useState<ItemCarrito[]>([]);
   const [modalPagoAbierto, setModalPagoAbierto] = useState<boolean>(false);
   const [modalOrdenMovilAbierto, setModalOrdenMovilAbierto] = useState<boolean>(false);
+  const [modalAbonoAbierto, setModalAbonoAbierto] = useState<boolean>(false);
 
   // Deslizamiento vertical y arrastre (drag-to-scroll) para móviles y emuladores con Body Scroll Lock
   const dragScrollOrden = useModalDragScroll({
@@ -439,6 +441,7 @@ export default function PosPage() {
         cargandoTasa={cargandoTasa}
         onRefrescarTasa={cargarTasa}
         ultimaActualizacion={ultimaActualizacionTasa}
+        onAbrirAbono={() => setModalAbonoAbierto(true)}
       />
 
       {/* Notificación Flotante */}
@@ -836,6 +839,25 @@ export default function PosPage() {
         tasaBcv={tasaBcv}
         metodoInicial={metodoPagoSugerido}
         onTransaccionExitosa={handleTransaccionExitosa}
+      />
+
+      {/* Modal para Registrar Abono / Saldo a Favor directamente desde el POS */}
+      <AbonoModal
+        abierto={modalAbonoAbierto}
+        onCerrar={() => setModalAbonoAbierto(false)}
+        clientes={clientes}
+        saldosClientes={saldosClientes}
+        tasaBcv={tasaBcv}
+        clientePreseleccionado={clienteSeleccionado}
+        onAbonoExitoso={(mensaje) => {
+          setNotificacion({
+            tipo: 'exito',
+            texto: mensaje,
+          });
+          setTimeout(() => setNotificacion(null), 4500);
+          obtenerSaldosTodosClientes().then(setSaldosClientes).catch(console.error);
+          cargarClientes();
+        }}
       />
     </div>
   );

@@ -3,7 +3,7 @@
 import React from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { RefreshCw, TrendingUp, ShieldCheck, Menu } from 'lucide-react';
+import { RefreshCw, TrendingUp, ShieldCheck, Menu, PiggyBank } from 'lucide-react';
 import { formatBs } from '@/lib/utils';
 import { NotificationBell } from './NotificationBell';
 import { useSidebar } from './SidebarContext';
@@ -14,6 +14,7 @@ interface HeaderProps {
   cargandoTasa: boolean;
   onRefrescarTasa: () => void;
   ultimaActualizacion?: Date | null;
+  onAbrirAbono?: () => void;
 }
 
 export function Header({
@@ -21,6 +22,7 @@ export function Header({
   cargandoTasa,
   onRefrescarTasa,
   ultimaActualizacion,
+  onAbrirAbono,
 }: HeaderProps) {
   const { abierto, toggleSidebar } = useSidebar();
   const { isKirby } = useTheme();
@@ -94,8 +96,21 @@ export function Header({
           </Link>
         </div>
 
-        {/* Lado Derecho: Campana de Notificaciones + Status */}
+        {/* Lado Derecho: Abono + Campana de Notificaciones + Status */}
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          {/* Botón de Abono en verde (solo icono para ahorrar espacio) a la izquierda de Notificaciones */}
+          {onAbrirAbono && (
+            <button
+              type="button"
+              onClick={onAbrirAbono}
+              title="Registrar Abono / Saldo a Favor"
+              aria-label="Registrar Abono"
+              className="relative flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-xl sm:rounded-2xl border border-emerald-300/80 dark:border-emerald-700/80 bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 shadow-2xs transition-all hover:bg-emerald-100 dark:hover:bg-emerald-900/60 hover:border-emerald-400 active:scale-95 shrink-0"
+            >
+              <PiggyBank className="h-4 w-4 sm:h-5 sm:w-5" />
+            </button>
+          )}
+
           {/* Botón de Notificaciones Globales */}
           <NotificationBell />
 

@@ -27,6 +27,7 @@ import {
 import { Cliente } from '@/types/pos';
 import { supabase } from '@/lib/supabaseClient';
 import { useModalDragScroll } from '@/lib/useModalDragScroll';
+import { FlagIcon } from '@/components/FlagIcon';
 import {
   esProfesorOPersonal,
   esRepresentante,
@@ -218,6 +219,7 @@ export function ClientSelector({
   const [gradoBaseSeleccionado, setGradoBaseSeleccionado] = useState('1er Grado');
   const [mostrandoInputSeccionExtra, setMostrandoInputSeccionExtra] = useState(false);
   const [seccionPersonalizadaInput, setSeccionPersonalizadaInput] = useState('');
+  const [popoverPrefijoAbierto, setPopoverPrefijoAbierto] = useState(false);
 
   // Helper para saldo unificado
   const getSaldoCliente = (c: Cliente): number => {
@@ -347,6 +349,7 @@ export function ClientSelector({
     setMostrandoInputSeccionExtra(false);
     setSeccionPersonalizadaInput('');
     setPopoverGradoModalAbierto(false);
+    setPopoverPrefijoAbierto(false);
     setAbierto(false); // Cierra el popover de selección
     setModalRegistroAbierto(true); // Abre el modal de alta rápida
   };
@@ -1400,19 +1403,54 @@ export function ClientSelector({
                   )}
                 </label>
                 <div className="flex gap-2">
-                  <div className="relative w-28 shrink-0">
-                    <select
-                      value={nuevoPrefijo}
-                      onChange={(e) => setNuevoPrefijo(e.target.value)}
-                      className="w-full appearance-none rounded-2xl border border-gray-200/90 bg-gray-50/60 py-2.5 pl-3 pr-7 text-xs font-bold text-gray-900 outline-none transition focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-100 cursor-pointer font-mono"
-                    >
-                      {PREFIJOS_TELEFONICOS.map((pref) => (
-                        <option key={pref.codigo} value={pref.codigo}>
-                          {pref.bandera} {pref.codigo}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown className="absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                  <div className="relative shrink-0">
+                    <Popover.Root open={popoverPrefijoAbierto} onOpenChange={setPopoverPrefijoAbierto}>
+                      <Popover.Trigger asChild>
+                        <button
+                          type="button"
+                          className="flex items-center gap-1.5 rounded-2xl border border-gray-200/90 bg-gray-50/60 py-2.5 px-3 text-xs font-bold text-gray-900 shadow-2xs hover:border-gray-300 hover:bg-white transition shrink-0"
+                        >
+                          <FlagIcon codigo={nuevoPrefijo} className="w-5 h-3.5" />
+                          <span className="font-mono">{nuevoPrefijo}</span>
+                          <ChevronDown className={`h-3 w-3 text-gray-400 transition-transform ${popoverPrefijoAbierto ? 'rotate-180 text-gray-700' : ''}`} />
+                        </button>
+                      </Popover.Trigger>
+                      <Popover.Portal>
+                        <Popover.Content
+                          className="z-50 w-56 rounded-2xl border border-gray-200 bg-white p-1.5 shadow-xl outline-none backdrop-blur-lg animate-in fade-in-0 zoom-in-95 max-h-56 overflow-y-auto overscroll-contain"
+                          align="start"
+                          sideOffset={6}
+                        >
+                          <div className="space-y-0.5">
+                            {PREFIJOS_TELEFONICOS.map((p) => {
+                              const esActivo = nuevoPrefijo === p.codigo;
+                              return (
+                                <button
+                                  key={p.codigo}
+                                  type="button"
+                                  onClick={() => {
+                                    setNuevoPrefijo(p.codigo);
+                                    setPopoverPrefijoAbierto(false);
+                                  }}
+                                  className={`flex w-full items-center justify-between rounded-xl px-2.5 py-1.5 text-xs font-semibold transition ${
+                                    esActivo
+                                      ? 'bg-indigo-50 text-indigo-900 font-bold'
+                                      : 'text-gray-700 hover:bg-gray-50'
+                                  }`}
+                                >
+                                  <span className="flex items-center gap-2">
+                                    <FlagIcon codigo={p.codigo} className="w-5 h-3.5" />
+                                    <span className="font-mono font-bold">{p.codigo}</span>
+                                    <span className="text-[11px] text-gray-400 truncate max-w-[90px]">{p.pais}</span>
+                                  </span>
+                                  {esActivo && <Check className="h-3.5 w-3.5 text-indigo-600 shrink-0 ml-1" />}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </Popover.Content>
+                      </Popover.Portal>
+                    </Popover.Root>
                   </div>
 
                   <div className="relative flex-1">

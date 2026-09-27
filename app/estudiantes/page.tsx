@@ -60,6 +60,7 @@ import {
 import { NotificationBell } from '@/components/NotificationBell';
 import { refrescarNotificacionesGlobales } from '@/components/NotificationsContext';
 import { useSidebar } from '@/components/SidebarContext';
+import { FlagIcon } from '@/components/FlagIcon';
 import {
   PREFIJOS_TELEFONICOS,
   CATEGORIAS_NIVELES,
@@ -2171,9 +2172,9 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
                     <Popover.Trigger asChild>
                       <button
                         type="button"
-                        className="flex items-center gap-1.5 rounded-2xl border border-gray-200 bg-gray-50/70 px-3 py-3 sm:py-2.5 text-base sm:text-xs font-bold text-gray-800 hover:bg-white hover:border-gray-300 transition shrink-0 shadow-2xs"
+                        className="flex items-center gap-2 rounded-2xl border border-gray-200 bg-gray-50/70 px-3 py-3 sm:py-2.5 text-base sm:text-xs font-bold text-gray-800 hover:bg-white hover:border-gray-300 transition shrink-0 shadow-2xs"
                       >
-                        <span className="text-sm">{prefijoSeleccionadoObj?.bandera || '🇻🇪'}</span>
+                        <FlagIcon codigo={modalForm.telefono_prefijo} className="w-5 h-3.5" />
                         <span className="font-mono">{modalForm.telefono_prefijo}</span>
                         <ChevronDown className={`h-3 w-3 text-gray-400 transition-transform ${popoverPrefijoModalAbierto ? 'rotate-180 text-gray-700' : ''}`} />
                       </button>
@@ -2205,7 +2206,7 @@ Cualquier consulta o para gestionar su pedido en la cantina, estamos a su comple
                                 }`}
                               >
                                 <span className="flex items-center gap-2">
-                                  <span className="text-sm">{p.bandera}</span>
+                                  <FlagIcon codigo={p.codigo} className="w-5 h-3.5" />
                                   <span className="font-mono font-bold">{p.codigo}</span>
                                   <span className="text-[11px] text-gray-400 truncate max-w-[90px]">{p.pais}</span>
                                 </span>

@@ -2,19 +2,21 @@ export interface PrefijoTelefonico {
   codigo: string;
   pais: string;
   bandera: string;
+  iso: string;
 }
 
 export const PREFIJOS_TELEFONICOS: PrefijoTelefonico[] = [
-  { codigo: '+58', pais: 'Venezuela', bandera: '🇻🇪' },
-  { codigo: '+1', pais: 'EE.UU. / Canadá', bandera: '🇺🇸' },
-  { codigo: '+34', pais: 'España', bandera: '🇪🇸' },
-  { codigo: '+57', pais: 'Colombia', bandera: '🇨🇴' },
-  { codigo: '+56', pais: 'Chile', bandera: '🇨🇱' },
-  { codigo: '+54', pais: 'Argentina', bandera: '🇦🇷' },
-  { codigo: '+507', pais: 'Panamá', bandera: '🇵🇦' },
-  { codigo: '+52', pais: 'México', bandera: '🇲🇽' },
-  { codigo: '+51', pais: 'Perú', bandera: '🇵🇪' },
-  { codigo: '+55', pais: 'Brasil', bandera: '🇧🇷' },
+  { codigo: '+58', pais: 'Venezuela', bandera: '🇻🇪', iso: 've' },
+  { codigo: '+33', pais: 'Francia', bandera: '🇫🇷', iso: 'fr' },
+  { codigo: '+1', pais: 'EE.UU. / Canadá', bandera: '🇺🇸', iso: 'us' },
+  { codigo: '+34', pais: 'España', bandera: '🇪🇸', iso: 'es' },
+  { codigo: '+57', pais: 'Colombia', bandera: '🇨🇴', iso: 'co' },
+  { codigo: '+56', pais: 'Chile', bandera: '🇨🇱', iso: 'cl' },
+  { codigo: '+54', pais: 'Argentina', bandera: '🇦🇷', iso: 'ar' },
+  { codigo: '+507', pais: 'Panamá', bandera: '🇵🇦', iso: 'pa' },
+  { codigo: '+52', pais: 'México', bandera: '🇲🇽', iso: 'mx' },
+  { codigo: '+51', pais: 'Perú', bandera: '🇵🇪', iso: 'pe' },
+  { codigo: '+55', pais: 'Brasil', bandera: '🇧🇷', iso: 'br' },
 ];
 
 export interface GrupoGrado {
