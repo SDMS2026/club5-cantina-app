@@ -258,9 +258,6 @@ export default function PosPage() {
 
     if (metodoPago) {
       setMetodoPagoSugerido(metodoPago);
-      if (metodoPago === 'saldo_favor') {
-        setModalPagoAbierto(true);
-      }
     }
 
     setNotificacion({
@@ -276,6 +273,16 @@ export default function PosPage() {
       return existe ? prev : [nuevoCliente, ...prev];
     });
     setClienteSeleccionado(nuevoCliente);
+  };
+
+  const handleVentaExitosaPorVoz = (mensaje: string) => {
+    obtenerSaldosTodosClientes().then(setSaldosClientes).catch(console.error);
+    refrescarNotificacionesGlobales();
+    setNotificacion({
+      tipo: 'exito',
+      texto: mensaje,
+    });
+    setTimeout(() => setNotificacion(null), 4500);
   };
 
   const handleVentaFiadaPorVoz = (mensaje: string) => {
@@ -487,6 +494,7 @@ export default function PosPage() {
                 saldosClientes={saldosClientes}
                 onClienteCreado={handleClienteCreadoPorVoz}
                 onCargarAlCarrito={handleCargarAlCarritoPorVoz}
+                onVentaExitosa={handleVentaExitosaPorVoz}
                 onVentaFiadaExitosa={handleVentaFiadaPorVoz}
                 onAbonoExitoso={handleAbonoPorVoz}
                 onAlerta={handleAlertaPorVoz}
@@ -551,6 +559,7 @@ export default function PosPage() {
                 saldosClientes={saldosClientes}
                 onClienteCreado={handleClienteCreadoPorVoz}
                 onCargarAlCarrito={handleCargarAlCarritoPorVoz}
+                onVentaExitosa={handleVentaExitosaPorVoz}
                 onVentaFiadaExitosa={handleVentaFiadaPorVoz}
                 onAbonoExitoso={handleAbonoPorVoz}
                 onAlerta={handleAlertaPorVoz}
@@ -707,6 +716,7 @@ export default function PosPage() {
                 saldosClientes={saldosClientes}
                 onClienteCreado={handleClienteCreadoPorVoz}
                 onCargarAlCarrito={handleCargarAlCarritoPorVoz}
+                onVentaExitosa={handleVentaExitosaPorVoz}
                 onVentaFiadaExitosa={handleVentaFiadaPorVoz}
                 onAbonoExitoso={handleAbonoPorVoz}
                 onAlerta={handleAlertaPorVoz}

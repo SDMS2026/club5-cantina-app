@@ -39,6 +39,7 @@ import { Cliente, Producto, MetodoPagoId } from '@/types/pos';
 import { ResumenSaldoCliente, procesarAbonoCliente } from '@/lib/clientBalance';
 import { formatUSD, formatBs, calcularConversionBs, sanitizeDecimalInput, handleDecimalKeyDown } from '@/lib/utils';
 import { supabase } from '@/lib/supabaseClient';
+import { refrescarNotificacionesGlobales } from '@/components/NotificationsContext';
 
 export interface PedidoVozResultado {
   accion?: 'orden_pos' | 'abono_saldo_favor' | 'guardar_vuelto';
@@ -78,6 +79,7 @@ export interface VoiceOrderModalProps {
     cliente: Cliente | null,
     metodoPago?: MetodoPagoId
   ) => void;
+  onVentaExitosa?: (mensaje: string) => void;
   onVentaFiadaExitosa?: (mensaje: string) => void;
   onAbonoExitoso?: (mensaje: string) => void;
   onAlerta?: (tipo: 'error' | 'advertencia' | 'exito' | 'info', texto: string) => void;
@@ -100,6 +102,7 @@ export function VoiceOrderModal({
   saldosClientes = {},
   onClienteCreado,
   onCargarAlCarrito,
+  onVentaExitosa,
   onVentaFiadaExitosa,
   onAbonoExitoso,
   onAlerta,
@@ -119,7 +122,7 @@ export function VoiceOrderModal({
   const [paso, setPaso] = useState<'dictado' | 'confirmacion'>('dictado');
 
   // Estados de la pantalla de confirmación previa
-  const [accionConfirmacion, setAccionConfirmacion] = useState<'cargar_carrito' | 'fiar' | 'abono'>('cargar_carrito');
+  const [accionConfirmacion, setAccionConfirmacion] = useState<'cobrar_venta' | 'fiar' | 'abono' | 'cargar_carrito'>('cobrar_venta');
   const [clienteIdSeleccionado, setClienteIdSeleccionado] = useState<string | null>(null);
   const [cambiandoCliente, setCambiandoCliente] = useState<boolean>(false);
   const [busquedaCliente, setBusquedaCliente] = useState<string>('');
@@ -135,6 +138,7 @@ export function VoiceOrderModal({
   }[]>([]);
   const [montoAbono, setMontoAbono] = useState<string>('');
   const [metodoPagoSugerido, setMetodoPagoSugerido] = useState<MetodoPagoId>('efectivo_usd');
+  const [referenciaPagoMovil, setReferenciaPagoMovil] = useState<string>('');
   const [metodoPagoAbono, setMetodoPagoAbono] = useState<string>('efectivo_usd');
   const [productoAAgregarId, setProductoAAgregarId] = useState<string>('');
   const [confirmando, setConfirmando] = useState<boolean>(false);
@@ -387,7 +391,7 @@ export function VoiceOrderModal({
       setClienteInexistente(null);
 
       // 1. Determinar Acción interpretada
-      let accionSugerida: 'cargar_carrito' | 'fiar' | 'abono' = 'cargar_carrito';
+      let accionSugerida: 'cobrar_venta' | 'fiar' | 'abono' | 'cargar_carrito' = 'cobrar_venta';
       if (data.accion === 'abono_saldo_favor' || data.accion === 'guardar_vuelto') {
         accionSugerida = 'abono';
       } else if (data.metodo_pago_sugerido === 'pendiente' || data.pagado === false) {
@@ -428,7 +432,13 @@ export function VoiceOrderModal({
       // 4. Monto de abono
       setMontoAbono(data.monto_abono_usd && data.monto_abono_usd > 0 ? String(data.monto_abono_usd) : '');
 
-      // 5. Métodos de pago
+      // 5. Métodos de pago y referencia
+      if (data.numero_referencia) {
+        setReferenciaPagoMovil(data.numero_referencia);
+      } else {
+        setReferenciaPagoMovil('');
+      }
+
       if (data.metodo_pago_sugerido) {
         setMetodoPagoSugerido(data.metodo_pago_sugerido);
         setMetodoPagoAbono(data.metodo_pago_sugerido);
@@ -461,6 +471,7 @@ export function VoiceOrderModal({
       setErrorConfirmacion(null);
       setNuevoCliente(null);
       setItemsConfirmados([]);
+      setReferenciaPagoMovil('');
       setCambiandoCliente(false);
       setBusquedaCliente('');
       setConfirmando(false);
@@ -473,6 +484,7 @@ export function VoiceOrderModal({
       setErrorConfirmacion(null);
       setNuevoCliente(null);
       setItemsConfirmados([]);
+      setReferenciaPagoMovil('');
       setCambiandoCliente(false);
       setBusquedaCliente('');
       setConfirmando(false);
@@ -585,7 +597,130 @@ export function VoiceOrderModal({
       }
 
       // 2. Ejecución según la Acción
-      if (accionConfirmacion === 'cargar_carrito') {
+      if (accionConfirmacion === 'cobrar_venta') {
+        if (itemsConfirmados.length === 0) {
+          throw new Error('Debes incluir al menos un producto para registrar y procesar la venta.');
+        }
+
+        const totalUsd = itemsConfirmados.reduce(
+          (sum, item) => sum + item.producto.precio_usd * item.cantidad,
+          0
+        );
+
+        if (metodoPagoSugerido === 'saldo_favor') {
+          if (!cliId) {
+            throw new Error('Para pagar con Saldo a Favor debes seleccionar o ingresar un cliente registrado.');
+          }
+          if (saldoClienteActivo <= 0) {
+            throw new Error('El cliente no cuenta con saldo a favor disponible ($0.00). Selecciona otro método de pago.');
+          }
+        }
+
+        let metodoFinal: string = metodoPagoSugerido;
+        if (metodoPagoSugerido === 'pago_movil' && referenciaPagoMovil.trim()) {
+          metodoFinal = `pago_movil#ref:${referenciaPagoMovil.trim()}`;
+        }
+
+        let ventaGuardada = false;
+
+        // Intentar guardar primero a través del endpoint /api/voz-pos
+        try {
+          const resp = await fetch('/api/voz-pos', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              accion: 'guardar_venta',
+              cliente_id: cliId || null,
+              items: itemsConfirmados.map((it) => ({
+                producto_id: it.producto.id,
+                cantidad: it.cantidad,
+                precio_unitario_usd: it.producto.precio_usd,
+              })),
+              monto_total_usd: totalUsd,
+              tasa_bcv: tasaBcv,
+              metodo_pago: metodoFinal,
+              numero_referencia: referenciaPagoMovil.trim() || null,
+              pagado: true,
+            }),
+          });
+
+          if (resp.ok) {
+            ventaGuardada = true;
+          }
+        } catch (apiErr) {
+          console.warn('API /api/voz-pos falló, guardando directo en Supabase:', apiErr);
+        }
+
+        // Si la API no lo procesó o falló, guardar directo en Supabase
+        if (!ventaGuardada) {
+          const { data: consumo, error: errConsumo } = await supabase
+            .from('consumos')
+            .insert({
+              cliente_id: cliId || null,
+              monto_total_usd: totalUsd,
+              tasa_bcv_historica: tasaBcv,
+              metodo_pago: metodoFinal,
+              pagado: true,
+            })
+            .select()
+            .single();
+
+          if (errConsumo || !consumo) {
+            throw new Error(errConsumo?.message || 'Error guardando venta en Supabase');
+          }
+
+          const detalles = itemsConfirmados.map((it) => ({
+            consumo_id: consumo.id,
+            producto_id: it.producto.id,
+            cantidad: it.cantidad,
+            precio_unitario_usd: it.producto.precio_usd,
+          }));
+
+          const { error: errDet } = await supabase.from('consumo_detalles').insert(detalles);
+          if (errDet) {
+            console.error('Error guardando detalles de consumo:', errDet);
+          }
+
+          if (cliId && metodoPagoSugerido === 'saldo_favor') {
+            try {
+              const { data: cliData } = await supabase
+                .from('clientes')
+                .select('saldo')
+                .eq('id', cliId)
+                .single();
+              const saldoActual = Number(cliData?.saldo || 0);
+              const nuevoSaldo = Math.round((saldoActual - totalUsd) * 100) / 100;
+              await supabase.from('clientes').update({ saldo: nuevoSaldo }).eq('id', cliId);
+            } catch (e) {
+              console.error('Error actualizando saldo cliente:', e);
+            }
+          }
+        }
+
+        refrescarNotificacionesGlobales();
+
+        const nombreCli = clienteObj?.nombre_estudiante || 'Venta General';
+        const msgExito = `¡Venta de $${totalUsd.toFixed(2)} procesada exitosamente en el historial para ${nombreCli}!`;
+
+        if (onVentaExitosa) {
+          onVentaExitosa(msgExito);
+        } else if (onAlerta) {
+          onAlerta('exito', msgExito);
+        }
+
+        if (onPedidoProcesado) {
+          onPedidoProcesado({
+            accion: 'orden_pos',
+            cliente_id: cliId,
+            items: itemsConfirmados.map((it) => ({ producto_id: it.producto.id, cantidad: it.cantidad })),
+            pagado: true,
+            metodo_pago_sugerido: metodoPagoSugerido,
+            resumen_interpretado: msgExito,
+          });
+        }
+
+        handleOpenChange(false);
+      } else if (accionConfirmacion === 'cargar_carrito') {
         if (itemsConfirmados.length === 0) {
           throw new Error('Debes incluir al menos un producto para cargar al carrito.');
         }
@@ -617,6 +752,11 @@ export function VoiceOrderModal({
           0
         );
 
+        let metodoFinalFiado = 'pendiente';
+        if (referenciaPagoMovil.trim()) {
+          metodoFinalFiado = `pendiente#ref:${referenciaPagoMovil.trim()}`;
+        }
+
         // Insertar consumo fiado en Supabase
         const { data: consumo, error: errConsumo } = await supabase
           .from('consumos')
@@ -624,7 +764,7 @@ export function VoiceOrderModal({
             cliente_id: cliId,
             monto_total_usd: totalUsd,
             tasa_bcv_historica: tasaBcv,
-            metodo_pago: 'pendiente',
+            metodo_pago: metodoFinalFiado,
             pagado: false,
           })
           .select()
@@ -657,6 +797,8 @@ export function VoiceOrderModal({
           console.error('Error actualizando saldo cliente fiado:', e);
         }
 
+        refrescarNotificacionesGlobales();
+
         const nombreCli = clienteObj?.nombre_estudiante || 'el cliente';
         if (onVentaFiadaExitosa) {
           onVentaFiadaExitosa(`¡Consumo fiado de $${totalUsd.toFixed(2)} registrado para ${nombreCli}!`);
@@ -672,12 +814,19 @@ export function VoiceOrderModal({
           throw new Error('Ingresa un monto de abono válido mayor a 0.');
         }
 
+        let metodoFinalAbono = metodoPagoAbono;
+        if (metodoPagoAbono === 'pago_movil' && referenciaPagoMovil.trim()) {
+          metodoFinalAbono = `pago_movil#ref:${referenciaPagoMovil.trim()}`;
+        }
+
         const res = await procesarAbonoCliente({
           clienteId: cliId,
           montoUsd: montoNum,
-          metodoPago: metodoPagoAbono,
+          metodoPago: metodoFinalAbono,
           tasaBcv: tasaBcv,
         });
+
+        refrescarNotificacionesGlobales();
 
         if (onAbonoExitoso) {
           const nombreCli = clienteObj?.nombre_estudiante || 'el cliente';
@@ -1070,29 +1219,29 @@ export function VoiceOrderModal({
                     <span>Acción a Realizar *</span>
                     <span className="text-[10px] text-gray-500 font-normal">Toca para cambiar</span>
                   </label>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    {/* Cargar al Carrito */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {/* Cobrar Venta Directa */}
                     <button
                       type="button"
-                      onClick={() => setAccionConfirmacion('cargar_carrito')}
-                      className={`p-2.5 rounded-2xl border text-left flex items-center sm:flex-col sm:items-start gap-2 transition ${
-                        accionConfirmacion === 'cargar_carrito'
+                      onClick={() => setAccionConfirmacion('cobrar_venta')}
+                      className={`p-2.5 rounded-2xl border text-left flex flex-col items-start gap-1.5 transition ${
+                        accionConfirmacion === 'cobrar_venta'
                           ? 'border-emerald-600 bg-emerald-50/90 dark:bg-emerald-950/40 text-emerald-950 dark:text-emerald-200 ring-2 ring-emerald-500/20 shadow-xs'
                           : 'border-gray-200/80 dark:border-slate-800 bg-white dark:bg-[#111726] text-gray-700 dark:text-slate-300 hover:bg-gray-50'
                       }`}
                     >
                       <div
-                        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${
-                          accionConfirmacion === 'cargar_carrito'
+                        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-xl ${
+                          accionConfirmacion === 'cobrar_venta'
                             ? 'bg-emerald-600 text-white'
                             : 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700'
                         }`}
                       >
-                        <ShoppingCart className="h-4 w-4" />
+                        <CheckCircle2 className="h-4 w-4" />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <div className="text-xs font-bold truncate">Cargar al Carrito</div>
-                        <div className="text-[10px] text-gray-500 dark:text-slate-400 truncate">Venta lista para caja</div>
+                        <div className="text-xs font-bold truncate">Cobrar Venta</div>
+                        <div className="text-[10px] text-gray-500 dark:text-slate-400 truncate">Guardar en historial</div>
                       </div>
                     </button>
 
@@ -1100,14 +1249,14 @@ export function VoiceOrderModal({
                     <button
                       type="button"
                       onClick={() => setAccionConfirmacion('fiar')}
-                      className={`p-2.5 rounded-2xl border text-left flex items-center sm:flex-col sm:items-start gap-2 transition ${
+                      className={`p-2.5 rounded-2xl border text-left flex flex-col items-start gap-1.5 transition ${
                         accionConfirmacion === 'fiar'
                           ? 'border-amber-500 bg-amber-50/90 dark:bg-amber-950/40 text-amber-950 dark:text-amber-200 ring-2 ring-amber-500/20 shadow-xs'
                           : 'border-gray-200/80 dark:border-slate-800 bg-white dark:bg-[#111726] text-gray-700 dark:text-slate-300 hover:bg-gray-50'
                       }`}
                     >
                       <div
-                        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${
+                        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-xl ${
                           accionConfirmacion === 'fiar'
                             ? 'bg-amber-500 text-white'
                             : 'bg-amber-100 dark:bg-amber-950 text-amber-700'
@@ -1116,7 +1265,7 @@ export function VoiceOrderModal({
                         <Receipt className="h-4 w-4" />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <div className="text-xs font-bold truncate">Fiar (Cuenta Cantina)</div>
+                        <div className="text-xs font-bold truncate">Fiar (Cuenta)</div>
                         <div className="text-[10px] text-gray-500 dark:text-slate-400 truncate">Anotar deuda al alumno</div>
                       </div>
                     </button>
@@ -1125,14 +1274,14 @@ export function VoiceOrderModal({
                     <button
                       type="button"
                       onClick={() => setAccionConfirmacion('abono')}
-                      className={`p-2.5 rounded-2xl border text-left flex items-center sm:flex-col sm:items-start gap-2 transition ${
+                      className={`p-2.5 rounded-2xl border text-left flex flex-col items-start gap-1.5 transition ${
                         accionConfirmacion === 'abono'
                           ? 'border-indigo-600 bg-indigo-50/90 dark:bg-indigo-950/40 text-indigo-950 dark:text-indigo-200 ring-2 ring-indigo-500/20 shadow-xs'
                           : 'border-gray-200/80 dark:border-slate-800 bg-white dark:bg-[#111726] text-gray-700 dark:text-slate-300 hover:bg-gray-50'
                       }`}
                     >
                       <div
-                        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${
+                        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-xl ${
                           accionConfirmacion === 'abono'
                             ? 'bg-indigo-600 text-white'
                             : 'bg-indigo-100 dark:bg-indigo-950 text-indigo-700'
@@ -1143,6 +1292,31 @@ export function VoiceOrderModal({
                       <div className="min-w-0 flex-1">
                         <div className="text-xs font-bold truncate">Registrar Abono</div>
                         <div className="text-[10px] text-gray-500 dark:text-slate-400 truncate">Saldo a favor o pago</div>
+                      </div>
+                    </button>
+
+                    {/* Cargar al Carrito */}
+                    <button
+                      type="button"
+                      onClick={() => setAccionConfirmacion('cargar_carrito')}
+                      className={`p-2.5 rounded-2xl border text-left flex flex-col items-start gap-1.5 transition ${
+                        accionConfirmacion === 'cargar_carrito'
+                          ? 'border-slate-600 bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100 ring-2 ring-slate-500/20 shadow-xs'
+                          : 'border-gray-200/80 dark:border-slate-800 bg-white dark:bg-[#111726] text-gray-700 dark:text-slate-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      <div
+                        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-xl ${
+                          accionConfirmacion === 'cargar_carrito'
+                            ? 'bg-slate-700 text-white'
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-600'
+                        }`}
+                      >
+                        <ShoppingCart className="h-4 w-4" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-bold truncate">Solo Carrito</div>
+                        <div className="text-[10px] text-gray-500 dark:text-slate-400 truncate">Cargar a la orden</div>
                       </div>
                     </button>
                   </div>
@@ -1392,8 +1566,8 @@ export function VoiceOrderModal({
                   )}
                 </div>
 
-                {/* 3. PRODUCTOS ENTENDIDOS (VISIBLE SI ACCION ES 'cargar_carrito' O 'fiar') */}
-                {(accionConfirmacion === 'cargar_carrito' || accionConfirmacion === 'fiar') && (
+                {/* 3. PRODUCTOS ENTENDIDOS (VISIBLE SI ACCION ES 'cobrar_venta', 'cargar_carrito' O 'fiar') */}
+                {(accionConfirmacion === 'cobrar_venta' || accionConfirmacion === 'cargar_carrito' || accionConfirmacion === 'fiar') && (
                   <div className="rounded-2xl border border-gray-200/90 dark:border-slate-800 bg-gray-50/70 dark:bg-[#111726] p-3 space-y-2.5">
                     <div className="flex items-center justify-between">
                       <label className="text-xs font-bold text-gray-800 dark:text-slate-200 flex items-center gap-1.5">
@@ -1508,26 +1682,25 @@ export function VoiceOrderModal({
                       </div>
                     </div>
 
-                    {/* Método de Pago Sugerido si es Cargar al Carrito */}
-                    {accionConfirmacion === 'cargar_carrito' && (
-                      <div className="pt-2 border-t border-gray-200/80 dark:border-slate-800">
-                        <label className="text-[11px] font-semibold text-gray-700 dark:text-slate-300 block mb-1">
-                          Método de Pago Sugerido en Caja:
+                    {/* Método de Pago y Referencia si es Cobrar Venta o Cargar al Carrito */}
+                    {(accionConfirmacion === 'cobrar_venta' || accionConfirmacion === 'cargar_carrito') && (
+                      <div className="pt-2 border-t border-gray-200/80 dark:border-slate-800 space-y-2">
+                        <label className="text-[11px] font-semibold text-gray-700 dark:text-slate-300 block">
+                          Método de Pago {accionConfirmacion === 'cobrar_venta' ? 'a Registrar:' : 'Sugerido en Caja:'}
                         </label>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                        <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5">
                           {[
                             { id: 'efectivo_usd' as MetodoPagoId, label: 'Efectivo $' },
                             { id: 'efectivo_bs' as MetodoPagoId, label: 'Efectivo Bs.' },
                             { id: 'pago_movil' as MetodoPagoId, label: 'Pago Móvil' },
                             { id: 'punto_debito' as MetodoPagoId, label: 'Punto Débito' },
                             { id: 'saldo_favor' as MetodoPagoId, label: 'Saldo a Favor' },
-                            { id: 'pendiente' as MetodoPagoId, label: 'Cuenta Cantina' },
                           ].map((met) => (
                             <button
                               key={met.id}
                               type="button"
                               onClick={() => setMetodoPagoSugerido(met.id)}
-                              className={`py-1 px-2 rounded-xl text-[11px] font-bold border transition ${
+                              className={`py-1.5 px-2 rounded-xl text-[11px] font-bold border transition ${
                                 metodoPagoSugerido === met.id
                                   ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
                                   : 'bg-white dark:bg-[#0D111A] text-gray-700 dark:text-slate-300 border-gray-200 dark:border-slate-800 hover:bg-gray-50'
@@ -1537,6 +1710,26 @@ export function VoiceOrderModal({
                             </button>
                           ))}
                         </div>
+
+                        {/* Campo de Referencia de Pago Móvil en Modal de Voz */}
+                        {metodoPagoSugerido === 'pago_movil' && (
+                          <div className="mt-2 rounded-xl border border-sky-200 dark:border-sky-900 bg-sky-50/70 dark:bg-sky-950/40 p-2.5 space-y-1 animate-in fade-in">
+                            <label className="text-[10px] font-bold text-sky-900 dark:text-sky-200 flex items-center gap-1.5">
+                              <Smartphone className="h-3.5 w-3.5 text-sky-600" />
+                              Número de Referencia de Pago Móvil (Opcional):
+                            </label>
+                            <input
+                              type="text"
+                              value={referenciaPagoMovil}
+                              onChange={(e) => setReferenciaPagoMovil(e.target.value)}
+                              placeholder="Ej: 4 últimos dígitos o comprobante completo (0123)"
+                              className="w-full rounded-xl border border-sky-200 dark:border-sky-800 bg-white dark:bg-slate-900 px-3 py-1.5 text-xs font-mono font-bold text-gray-900 dark:text-white placeholder:font-normal focus:outline-none focus:border-sky-500"
+                            />
+                            <p className="text-[9px] text-sky-700 dark:text-sky-400">
+                              Se registrará en la transacción y aparecerá en el Historial de Transacciones.
+                            </p>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -1614,6 +1807,26 @@ export function VoiceOrderModal({
                           </button>
                         ))}
                       </div>
+
+                      {/* Campo de Referencia para Abono por Pago Móvil */}
+                      {metodoPagoAbono === 'pago_movil' && (
+                        <div className="mt-2 rounded-xl border border-sky-200 dark:border-sky-900 bg-sky-50/70 dark:bg-sky-950/40 p-2.5 space-y-1 animate-in fade-in">
+                          <label className="text-[10px] font-bold text-sky-900 dark:text-sky-200 flex items-center gap-1.5">
+                            <Smartphone className="h-3.5 w-3.5 text-sky-600" />
+                            Número de Referencia de Pago Móvil (Opcional):
+                          </label>
+                          <input
+                            type="text"
+                            value={referenciaPagoMovil}
+                            onChange={(e) => setReferenciaPagoMovil(e.target.value)}
+                            placeholder="Ej: 4 últimos dígitos o comprobante completo (0123)"
+                            className="w-full rounded-xl border border-sky-200 dark:border-sky-800 bg-white dark:bg-slate-900 px-3 py-1.5 text-xs font-mono font-bold text-gray-900 dark:text-white placeholder:font-normal focus:outline-none focus:border-sky-500"
+                          />
+                          <p className="text-[9px] text-sky-700 dark:text-sky-400">
+                            Se registrará en el recibo de abono y en el Historial de Transacciones.
+                          </p>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}

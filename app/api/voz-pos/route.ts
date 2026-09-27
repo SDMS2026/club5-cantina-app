@@ -21,6 +21,7 @@ interface RespuestaVozPos {
   accion: 'orden_pos' | 'abono_saldo_favor' | 'guardar_vuelto';
   monto_abono_usd?: number;
   metodo_pago_sugerido?: 'efectivo_usd' | 'efectivo_bs' | 'pago_movil' | 'punto_debito' | 'pendiente' | 'saldo_favor';
+  numero_referencia?: string | null;
   cliente_id: string | null;
   cliente_mencionado?: string | null;
   cliente_no_encontrado?: string | null;
@@ -53,6 +54,113 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json().catch(() => ({}));
+
+    // A. Guardar Venta / Transacción en Supabase (Historial de Transacciones en tiempo real)
+    if (body?.accion === 'guardar_venta' || body?.accion === 'procesar_venta') {
+      const {
+        cliente_id,
+        items,
+        monto_total_usd,
+        tasa_bcv,
+        metodo_pago,
+        numero_referencia,
+        pagado = true,
+      } = body;
+
+      if (!Array.isArray(items) || items.length === 0) {
+        return NextResponse.json(
+          { error: 'La orden debe contener al menos un producto para registrar la venta.' },
+          { status: 400 }
+        );
+      }
+
+      const totalUsd = Number(monto_total_usd) || 0;
+      const tasa = Number(tasa_bcv) || 1;
+
+      let metodoFinal = typeof metodo_pago === 'string' && metodo_pago.trim() ? metodo_pago.trim() : 'efectivo_usd';
+      if (metodoFinal === 'pago_movil' && typeof numero_referencia === 'string' && numero_referencia.trim()) {
+        metodoFinal = `pago_movil#ref:${numero_referencia.trim()}`;
+      }
+
+      // 1. Insertar en consumos
+      const { data: consumo, error: errConsumo } = await supabase
+        .from('consumos')
+        .insert({
+          cliente_id: cliente_id || null,
+          monto_total_usd: totalUsd,
+          tasa_bcv_historica: tasa,
+          metodo_pago: metodoFinal,
+          pagado: Boolean(pagado),
+        })
+        .select(`
+          id,
+          cliente_id,
+          monto_total_usd,
+          tasa_bcv_historica,
+          metodo_pago,
+          pagado,
+          fecha,
+          clientes (
+            id,
+            nombre_estudiante,
+            grado_seccion,
+            saldo
+          )
+        `)
+        .single();
+
+      if (errConsumo || !consumo) {
+        console.error('Error insertando consumo desde API voz:', errConsumo);
+        return NextResponse.json(
+          { error: 'Error al registrar la venta en Supabase', detalles: errConsumo?.message },
+          { status: 500 }
+        );
+      }
+
+      // 2. Insertar renglones de consumo_detalles
+      const detalles = items.map((it: any) => ({
+        consumo_id: consumo.id,
+        producto_id: it.producto_id,
+        cantidad: Number(it.cantidad) || 1,
+        precio_unitario_usd: Number(it.precio_unitario_usd) || 0,
+      }));
+
+      const { error: errDetalles } = await supabase
+        .from('consumo_detalles')
+        .insert(detalles);
+
+      if (errDetalles) {
+        console.error('Error insertando consumo_detalles desde API voz:', errDetalles);
+      }
+
+      // 3. Si fue fiado (pagado === false o metodo_pago === 'pendiente') o pagado con saldo_favor:
+      // Descontar del campo clientes.saldo (actualización de cuenta corriente del alumno)
+      if (cliente_id && (!pagado || metodoFinal === 'saldo_favor' || metodoFinal === 'pendiente')) {
+        try {
+          const { data: cli } = await supabase
+            .from('clientes')
+            .select('saldo')
+            .eq('id', cliente_id)
+            .single();
+
+          if (cli) {
+            const saldoActual = Number(cli.saldo || 0);
+            const nuevoSaldo = Math.round((saldoActual - totalUsd) * 100) / 100;
+            await supabase.from('clientes').update({ saldo: nuevoSaldo }).eq('id', cliente_id);
+          }
+        } catch (errSaldo) {
+          console.error('Error actualizando saldo cliente desde API voz:', errSaldo);
+        }
+      }
+
+      return NextResponse.json({
+        exito: true,
+        mensaje: `¡Venta de $${totalUsd.toFixed(2)} registrada exitosamente en Supabase!`,
+        consumo_id: consumo.id,
+        consumo,
+      });
+    }
+
     const headerKey = req.headers.get('x-gemini-api-key')?.trim();
     const bodyKey = typeof body?.apiKey === 'string' ? body.apiKey.trim() : '';
     const envKey = process.env.GEMINI_API_KEY?.trim() || '';
@@ -159,11 +267,15 @@ INSTRUCCIONES CLAVE DE INTERPRETACIÓN:
    - Coloca objeto nuevo_cliente ÚNICAMENTE si la frase pide explícitamente agregar o registrar a una persona al sistema (ej: "Añade al sistema al estudiante Mario Gómez, 5to grado...", "Registra al alumno...").
    - Si la persona solo dice "abona 10$ a Felipe" o "anótale a Felipe", NO es un registro nuevo (nuevo_cliente debe ser null, y cliente_mencionado debe ser "Felipe").
 
+6. Número de Referencia Bancaria / Pago Móvil ("numero_referencia"):
+   - Si la persona menciona un número de referencia o confirmación (ej: "referencia 1234", "ref 4567", "con pago móvil ref 8901"), extrae únicamente ese número/código como string. Si no se mencionó ninguna referencia, DEBES colocar null.
+
 ESQUEMA OBLIGATORIO DE RESPUESTA JSON:
 {
   "accion": "orden_pos" | "abono_saldo_favor" | "guardar_vuelto",
   "monto_abono_usd": 0.0,
   "metodo_pago_sugerido": "efectivo_usd" | "efectivo_bs" | "pago_movil" | "punto_debito" | "pendiente" | "saldo_favor",
+  "numero_referencia": "string_o_null",
   "cliente_mencionado": "Nombre mencionado o null",
   "cliente_id": "string_id_o_null",
   "nuevo_cliente": {
@@ -320,6 +432,10 @@ ESQUEMA OBLIGATORIO DE RESPUESTA JSON:
           : 'orden_pos',
       monto_abono_usd: Number(parsedResult.monto_abono_usd) || 0,
       metodo_pago_sugerido: parsedResult.metodo_pago_sugerido || (parsedResult.pagado === false ? 'pendiente' : 'efectivo_usd'),
+      numero_referencia:
+        typeof parsedResult.numero_referencia === 'string' && parsedResult.numero_referencia.trim()
+          ? parsedResult.numero_referencia.trim()
+          : null,
       cliente_id: clienteIdResuelto,
       cliente_mencionado: clienteMencionado,
       cliente_no_encontrado: clienteNoEncontrado,

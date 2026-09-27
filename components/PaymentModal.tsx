@@ -108,8 +108,8 @@ export function PaymentModal({
   metodoInicial,
   onTransaccionExitosa,
 }: PaymentModalProps) {
-  // Selección explícita: no auto-completa por defecto para evitar errores de cobro
-  const [metodoSeleccionado, setMetodoSeleccionado] = useState<MetodoPagoId | null>(metodoInicial || null);
+  // Selección obligatoria y explícita: siempre inicia en null al abrir la ventana
+  const [metodoSeleccionado, setMetodoSeleccionado] = useState<MetodoPagoId | null>(null);
   const [numeroReferencia, setNumeroReferencia] = useState<string>('');
   const [procesando, setProcesando] = useState(false);
   const [errorMensaje, setErrorMensaje] = useState<string | null>(null);
@@ -158,10 +158,14 @@ export function PaymentModal({
 
   useEffect(() => {
     if (abierto) {
-      setMetodoSeleccionado(metodoInicial || null);
+      // Obliga a que la cajera haga clic explícito en uno de los métodos de pago
+      setMetodoSeleccionado(null);
       setNumeroReferencia('');
+      setProcesando(false);
+      setErrorMensaje(null);
+      setExito(false);
     }
-  }, [abierto, metodoInicial]);
+  }, [abierto]);
 
   // Autodetección automática de divisa según el método de pago seleccionado
   useEffect(() => {
@@ -905,7 +909,13 @@ export function PaymentModal({
                     !metodoSeleccionado ||
                     (metodoSeleccionado === 'saldo_favor' && (!cliente || saldoDisponible <= 0))
                   }
-                  className="flex min-h-[44px] items-center justify-center gap-2 rounded-2xl bg-gray-900 px-5 py-2.5 text-xs font-bold text-white shadow-xs hover:bg-black active:scale-95 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                  className={`flex min-h-[44px] items-center justify-center gap-2 rounded-2xl px-5 py-2.5 text-xs font-bold transition active:scale-95 ${
+                    procesando ||
+                    !metodoSeleccionado ||
+                    (metodoSeleccionado === 'saldo_favor' && (!cliente || saldoDisponible <= 0))
+                      ? 'bg-gray-200 dark:bg-slate-800 text-gray-400 dark:text-slate-500 cursor-not-allowed opacity-60'
+                      : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs'
+                  }`}
                 >
                   {procesando ? (
                     <>
