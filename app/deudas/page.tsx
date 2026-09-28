@@ -27,6 +27,8 @@ import {
   Loader2,
   ChevronDown,
   ChevronUp,
+  ChevronLeft,
+  ChevronRight,
   PlusCircle,
   ArrowUpDown,
   Check,
@@ -488,6 +490,21 @@ export default function DeudasPage() {
 
     return lista;
   }, [cuentasAgrupadas, busqueda, filtroGrado, criterioOrden]);
+
+  // Paginación en Cuentas por Cobrar
+  const TAMANO_PAGINA_DEUDAS = 15;
+  const [paginaActualDeudas, setPaginaActualDeudas] = useState<number>(1);
+
+  useEffect(() => {
+    setPaginaActualDeudas(1);
+  }, [busqueda, filtroGrado, criterioOrden]);
+
+  const totalPaginasDeudas = Math.max(1, Math.ceil(cuentasFiltradas.length / TAMANO_PAGINA_DEUDAS));
+
+  const cuentasPaginadas = useMemo(() => {
+    const inicio = (paginaActualDeudas - 1) * TAMANO_PAGINA_DEUDAS;
+    return cuentasFiltradas.slice(inicio, inicio + TAMANO_PAGINA_DEUDAS);
+  }, [cuentasFiltradas, paginaActualDeudas, TAMANO_PAGINA_DEUDAS]);
 
   // Totales globales de deudas y saldos leyendo directamente clientes.saldo
   const granTotalUsd = useMemo(() => {
@@ -1243,7 +1260,7 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
         ) : (
           <div className="space-y-4">
             <AnimatePresence mode="popLayout">
-              {cuentasFiltradas.map((cuenta, index) => {
+              {cuentasPaginadas.map((cuenta, index) => {
                 const abierto = !!estudiantesDesplegados[cuenta.clienteKey];
                 const estudiante = cuenta.cliente?.nombre_estudiante || 'Venta General Ocasional';
                 const grado = cuenta.cliente?.grado_seccion || 'Sin sección asignada';
@@ -1517,6 +1534,44 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
                 );
               })}
             </AnimatePresence>
+
+            {/* Controles de Paginación para Cuentas por Cobrar */}
+            {cuentasFiltradas.length > TAMANO_PAGINA_DEUDAS && (
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 rounded-3xl border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#0D111A] p-3.5 sm:px-5 shadow-2xs mt-4">
+                <div className="text-xs text-gray-500 dark:text-slate-400 text-center sm:text-left">
+                  Mostrando <span className="font-bold text-gray-900 dark:text-slate-100">{(paginaActualDeudas - 1) * TAMANO_PAGINA_DEUDAS + 1}</span> -{' '}
+                  <span className="font-bold text-gray-900 dark:text-slate-100">{Math.min(paginaActualDeudas * TAMANO_PAGINA_DEUDAS, cuentasFiltradas.length)}</span> de{' '}
+                  <span className="font-bold text-indigo-600 dark:text-indigo-400">{cuentasFiltradas.length}</span> cuentas por cobrar
+                </div>
+
+                <div className="flex items-center gap-2 self-center sm:self-auto">
+                  <button
+                    type="button"
+                    disabled={paginaActualDeudas <= 1}
+                    onClick={() => setPaginaActualDeudas((p) => Math.max(1, p - 1))}
+                    className="flex items-center gap-1 rounded-2xl border border-gray-200 dark:border-slate-800 bg-gray-50/70 dark:bg-[#111726] px-3.5 py-2 text-xs font-bold text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:pointer-events-none transition active:scale-95"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                    <span>Anterior</span>
+                  </button>
+
+                  <div className="px-3 py-1.5 rounded-xl bg-gray-100/70 dark:bg-slate-800 text-xs font-bold text-gray-700 dark:text-slate-300">
+                    Página <span className="text-indigo-600 dark:text-indigo-400 font-extrabold">{paginaActualDeudas}</span> de{' '}
+                    <span>{totalPaginasDeudas}</span>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={paginaActualDeudas >= totalPaginasDeudas}
+                    onClick={() => setPaginaActualDeudas((p) => Math.min(totalPaginasDeudas, p + 1))}
+                    className="flex items-center gap-1 rounded-2xl border border-gray-200 dark:border-slate-800 bg-gray-50/70 dark:bg-[#111726] px-3.5 py-2 text-xs font-bold text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:pointer-events-none transition active:scale-95"
+                  >
+                    <span>Siguiente</span>
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </main>

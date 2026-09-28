@@ -117,44 +117,219 @@ const formatearFechaHora = (fechaIso?: string): { fecha: string; hora: string; e
 
 export interface GrupoDiaConsumos {
   diaKey: string;
-  etiquetaFecha: string;
+  etiquetaDia: string;
   totalDiaUsd: number;
   totalDiaBs: number;
   totalTransacciones: number;
   transacciones: TransaccionRegistro[];
 }
 
-const obtenerInfoDiaAgrupado = (fechaIso?: string): { diaKey: string; etiquetaFecha: string } => {
-  if (!fechaIso) return { diaKey: 'sin-fecha', etiquetaFecha: 'Sin fecha asignada' };
+export interface GrupoMesConsumos {
+  mesKey: string;
+  etiquetaMes: string;
+  totalMesUsd: number;
+  totalMesBs: number;
+  totalTransacciones: number;
+  dias: GrupoDiaConsumos[];
+}
+
+export interface GrupoAnoConsumos {
+  anoKey: string;
+  etiquetaAno: string;
+  totalAnoUsd: number;
+  totalAnoBs: number;
+  totalTransacciones: number;
+  meses: GrupoMesConsumos[];
+}
+
+const MESES_COMPLETOS = [
+  'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+  'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+];
+
+const obtenerInfoFechaAgrupada = (fechaIso?: string) => {
+  if (!fechaIso) {
+    return {
+      anoKey: 'sin-ano',
+      etiquetaAno: 'Sin año asignado',
+      mesKey: 'sin-mes',
+      etiquetaMes: 'Sin mes asignado',
+      diaKey: 'sin-fecha',
+      etiquetaDia: 'Sin fecha asignada',
+    };
+  }
   const d = new Date(fechaIso);
-  if (isNaN(d.getTime())) return { diaKey: 'sin-fecha', etiquetaFecha: 'Sin fecha asignada' };
+  if (isNaN(d.getTime())) {
+    return {
+      anoKey: 'sin-ano',
+      etiquetaAno: 'Sin año asignado',
+      mesKey: 'sin-mes',
+      etiquetaMes: 'Sin mes asignado',
+      diaKey: 'sin-fecha',
+      etiquetaDia: 'Sin fecha asignada',
+    };
+  }
 
   const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const mIndex = d.getMonth();
+  const mNum = String(mIndex + 1).padStart(2, '0');
   const diaNum = String(d.getDate()).padStart(2, '0');
-  const diaKey = `${y}-${m}-${diaNum}`;
+
+  const anoKey = String(y);
+  const etiquetaAno = `Año ${y}`;
+  const mesKey = `${y}-${mNum}`;
+  const etiquetaMes = `${MESES_COMPLETOS[mIndex]} ${y}`;
+  const diaKey = `${y}-${mNum}-${diaNum}`;
 
   const hoy = new Date();
   const ayer = new Date();
   ayer.setDate(hoy.getDate() - 1);
 
-  const meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
-  const mesStr = meses[d.getMonth()];
-  const dia = d.getDate();
+  const mesesCortos = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+  const mesCorto = mesesCortos[mIndex];
 
   const esMismoDia = (d1: Date, d2: Date) =>
     d1.getDate() === d2.getDate() &&
     d1.getMonth() === d2.getMonth() &&
     d1.getFullYear() === d2.getFullYear();
 
+  let etiquetaDia = `${diaNum} de ${MESES_COMPLETOS[mIndex]}`;
   if (esMismoDia(d, hoy)) {
-    return { diaKey, etiquetaFecha: `Hoy - ${dia} ${mesStr}` };
+    etiquetaDia = `Hoy - ${diaNum} ${mesCorto}`;
+  } else if (esMismoDia(d, ayer)) {
+    etiquetaDia = `Ayer - ${diaNum} ${mesCorto}`;
   }
-  if (esMismoDia(d, ayer)) {
-    return { diaKey, etiquetaFecha: `Ayer - ${dia} ${mesStr}` };
-  }
-  return { diaKey, etiquetaFecha: `${dia} ${mesStr} ${y}` };
+
+  return { anoKey, etiquetaAno, mesKey, etiquetaMes, diaKey, etiquetaDia };
 };
+
+function agruparTransaccionesPorAnoMesDia(
+  transacciones: TransaccionRegistro[],
+  tasaBcv: number
+): GrupoAnoConsumos[] {
+  const mapaAnos = new Map<string, {
+    anoKey: string;
+    etiquetaAno: string;
+    totalAnoUsd: number;
+    totalAnoBs: number;
+    totalTransacciones: number;
+    mapaMeses: Map<string, {
+      mesKey: string;
+      etiquetaMes: string;
+      totalMesUsd: number;
+      totalMesBs: number;
+      totalTransacciones: number;
+      mapaDias: Map<string, {
+        diaKey: string;
+        etiquetaDia: string;
+        totalDiaUsd: number;
+        totalDiaBs: number;
+        totalTransacciones: number;
+        transacciones: TransaccionRegistro[];
+      }>;
+    }>;
+  }>();
+
+  for (const t of transacciones) {
+    const { anoKey, etiquetaAno, mesKey, etiquetaMes, diaKey, etiquetaDia } = obtenerInfoFechaAgrupada(t.fecha);
+
+    if (!mapaAnos.has(anoKey)) {
+      mapaAnos.set(anoKey, {
+        anoKey,
+        etiquetaAno,
+        totalAnoUsd: 0,
+        totalAnoBs: 0,
+        totalTransacciones: 0,
+        mapaMeses: new Map(),
+      });
+    }
+
+    const gAno = mapaAnos.get(anoKey)!;
+    gAno.totalTransacciones += 1;
+
+    if (!gAno.mapaMeses.has(mesKey)) {
+      gAno.mapaMeses.set(mesKey, {
+        mesKey,
+        etiquetaMes,
+        totalMesUsd: 0,
+        totalMesBs: 0,
+        totalTransacciones: 0,
+        mapaDias: new Map(),
+      });
+    }
+
+    const gMes = gAno.mapaMeses.get(mesKey)!;
+    gMes.totalTransacciones += 1;
+
+    if (!gMes.mapaDias.has(diaKey)) {
+      gMes.mapaDias.set(diaKey, {
+        diaKey,
+        etiquetaDia,
+        totalDiaUsd: 0,
+        totalDiaBs: 0,
+        totalTransacciones: 0,
+        transacciones: [],
+      });
+    }
+
+    const gDia = gMes.mapaDias.get(diaKey)!;
+    gDia.totalTransacciones += 1;
+    gDia.transacciones.push(t);
+
+    const audit = parseConsumoAudit({ metodo_pago: t.metodo_pago, pagado: t.pagado });
+    if (!audit.esAnulado) {
+      const monto = Number(t.monto_total_usd || 0);
+      gDia.totalDiaUsd += monto;
+      gMes.totalMesUsd += monto;
+      gAno.totalAnoUsd += monto;
+    }
+  }
+
+  const listaAnos: GrupoAnoConsumos[] = [];
+
+  for (const gAno of mapaAnos.values()) {
+    gAno.totalAnoUsd = Math.round(gAno.totalAnoUsd * 100) / 100;
+    gAno.totalAnoBs = calcularConversionBs(gAno.totalAnoUsd, tasaBcv);
+
+    const listaMeses: GrupoMesConsumos[] = [];
+
+    for (const gMes of gAno.mapaMeses.values()) {
+      gMes.totalMesUsd = Math.round(gMes.totalMesUsd * 100) / 100;
+      gMes.totalMesBs = calcularConversionBs(gMes.totalMesUsd, tasaBcv);
+
+      const listaDias: GrupoDiaConsumos[] = [];
+
+      for (const gDia of gMes.mapaDias.values()) {
+        gDia.totalDiaUsd = Math.round(gDia.totalDiaUsd * 100) / 100;
+        gDia.totalDiaBs = calcularConversionBs(gDia.totalDiaUsd, tasaBcv);
+        listaDias.push(gDia);
+      }
+
+      listaDias.sort((a, b) => b.diaKey.localeCompare(a.diaKey));
+      listaMeses.push({
+        mesKey: gMes.mesKey,
+        etiquetaMes: gMes.etiquetaMes,
+        totalMesUsd: gMes.totalMesUsd,
+        totalMesBs: gMes.totalMesBs,
+        totalTransacciones: gMes.totalTransacciones,
+        dias: listaDias,
+      });
+    }
+
+    listaMeses.sort((a, b) => b.mesKey.localeCompare(a.mesKey));
+    listaAnos.push({
+      anoKey: gAno.anoKey,
+      etiquetaAno: gAno.etiquetaAno,
+      totalAnoUsd: gAno.totalAnoUsd,
+      totalAnoBs: gAno.totalAnoBs,
+      totalTransacciones: gAno.totalTransacciones,
+      meses: listaMeses,
+    });
+  }
+
+  listaAnos.sort((a, b) => b.anoKey.localeCompare(a.anoKey));
+  return listaAnos;
+}
 
 export default function TransaccionesPage() {
   const router = useRouter();
@@ -165,26 +340,63 @@ export default function TransaccionesPage() {
   const [tasaBcv, setTasaBcv] = useState<number>(TASA_BCV_FALLBACK_DEFAULT);
   const [cargandoTasa, setCargandoTasa] = useState<boolean>(true);
 
-  // 2. Transacciones y Paginación en Servidor (.range)
-  const TAMANO_PAGINA_TRANSACCIONES = 25;
+  // 2. Transacciones
   const [transacciones, setTransacciones] = useState<TransaccionRegistro[]>([]);
   const [cargandoTransacciones, setCargandoTransacciones] = useState<boolean>(true);
-  const [cargandoMas, setCargandoMas] = useState<boolean>(false);
-  const [paginaActual, setPaginaActual] = useState<number>(1);
-  const [totalRegistros, setTotalRegistros] = useState<number>(0);
 
   // 3. Filtros y Búsqueda con Debounce
   const [pestanaActiva, setPestanaActiva] = useState<'consumos' | 'liquidaciones'>('consumos');
-  const [diasDesplegados, setDiasDesplegados] = useState<Record<string, boolean>>({});
   const [liquidaciones, setLiquidaciones] = useState<TransaccionRegistro[]>([]);
   const [cargandoLiquidaciones, setCargandoLiquidaciones] = useState<boolean>(false);
   const [busquedaLiquidaciones, setBusquedaLiquidaciones] = useState<string>('');
 
+  // 4. Estados de Acordeón Jerárquico (Año -> Mes -> Día) para Consumos
+  const [anoExpandido, setAnoExpandido] = useState<string | null>(null);
+  const [mesExpandido, setMesExpandido] = useState<string | null>(null);
+  const [diaExpandido, setDiaExpandido] = useState<string | null>(null);
+  const [paginaDia, setPaginaDia] = useState<number>(1);
+
+  // 5. Estados de Acordeón Jerárquico (Año -> Mes -> Día) para Liquidaciones
+  const [anoExpandidoLiq, setAnoExpandidoLiq] = useState<string | null>(null);
+  const [mesExpandidoLiq, setMesExpandidoLiq] = useState<string | null>(null);
+  const [diaExpandidoLiq, setDiaExpandidoLiq] = useState<string | null>(null);
+  const [paginaDiaLiq, setPaginaDiaLiq] = useState<number>(1);
+
+  const toggleAno = (anoKey: string) => {
+    setAnoExpandido((prev) => (prev === anoKey ? null : anoKey));
+    setMesExpandido(null);
+    setDiaExpandido(null);
+    setPaginaDia(1);
+  };
+
+  const toggleMes = (mesKey: string) => {
+    setMesExpandido((prev) => (prev === mesKey ? null : mesKey));
+    setDiaExpandido(null);
+    setPaginaDia(1);
+  };
+
   const toggleDia = (diaKey: string) => {
-    setDiasDesplegados((prev) => ({
-      ...prev,
-      [diaKey]: !prev[diaKey],
-    }));
+    // "pero que sea solo una tarjeta del dia": solo una tarjeta de día abierta a la vez
+    setDiaExpandido((prev) => (prev === diaKey ? null : diaKey));
+    setPaginaDia(1);
+  };
+
+  const toggleAnoLiq = (anoKey: string) => {
+    setAnoExpandidoLiq((prev) => (prev === anoKey ? null : anoKey));
+    setMesExpandidoLiq(null);
+    setDiaExpandidoLiq(null);
+    setPaginaDiaLiq(1);
+  };
+
+  const toggleMesLiq = (mesKey: string) => {
+    setMesExpandidoLiq((prev) => (prev === mesKey ? null : mesKey));
+    setDiaExpandidoLiq(null);
+    setPaginaDiaLiq(1);
+  };
+
+  const toggleDiaLiq = (diaKey: string) => {
+    setDiaExpandidoLiq((prev) => (prev === diaKey ? null : diaKey));
+    setPaginaDiaLiq(1);
   };
 
   const [busqueda, setBusqueda] = useState<string>('');
@@ -332,144 +544,126 @@ export default function TransaccionesPage() {
     }
   }, [filtroFecha]);
 
-  // Cargar transacciones paginadas desde Supabase usando .range(from, to) y filtros en DB
-  const cargarTransacciones = useCallback(
-    async (paginaDestino: number = 1, esCargarMas: boolean = false) => {
-      if (esCargarMas) {
-        setCargandoMas(true);
-      } else {
-        setCargandoTransacciones(true);
-      }
+  // Tamaño máximo de transacciones por página adentro de cada día abierto
+  const TAMANO_PAGINA_JERARQUIA = 20;
 
-      try {
-        let query = supabase
-          .from('consumos')
-          .select(
-            `
+  // Cargar transacciones desde Supabase (sin corte a 25 para permitir agrupar todos los días 1-31)
+  const cargarTransacciones = useCallback(async () => {
+    setCargandoTransacciones(true);
+    try {
+      let query = supabase
+        .from('consumos')
+        .select(
+          `
+          id,
+          cliente_id,
+          monto_total_usd,
+          tasa_bcv_historica,
+          metodo_pago,
+          pagado,
+          fecha,
+          clientes (
             id,
-            cliente_id,
-            monto_total_usd,
-            tasa_bcv_historica,
-            metodo_pago,
-            pagado,
-            fecha,
-            clientes (
+            nombre_estudiante,
+            grado_seccion,
+            nombre_representante,
+            telefono_whatsapp,
+            saldo
+          ),
+          consumo_detalles (
+            id,
+            cantidad,
+            precio_unitario_usd,
+            producto_id,
+            productos (
               id,
-              nombre_estudiante,
-              grado_seccion,
-              nombre_representante,
-              telefono_whatsapp,
-              saldo
-            ),
-            consumo_detalles (
-              id,
-              cantidad,
-              precio_unitario_usd,
-              producto_id,
-              productos (
-                id,
-                nombre,
-                precio_usd,
-                imagen_url
-              )
+              nombre,
+              precio_usd,
+              imagen_url
             )
-          `,
-            { count: 'exact' }
-          );
+          )
+        `
+        );
 
-        // 1. Filtro en Base de Datos por Rango de Fecha (.gte)
-        if (filtroFecha === 'hoy') {
-          const hoy = new Date();
-          hoy.setHours(0, 0, 0, 0);
-          query = query.gte('fecha', hoy.toISOString());
-        } else if (filtroFecha === 'semana') {
-          const hace7 = new Date();
-          hace7.setDate(hace7.getDate() - 7);
-          hace7.setHours(0, 0, 0, 0);
-          query = query.gte('fecha', hace7.toISOString());
-        } else if (filtroFecha === 'mes') {
-          const hace30 = new Date();
-          hace30.setDate(hace30.getDate() - 30);
-          hace30.setHours(0, 0, 0, 0);
-          query = query.gte('fecha', hace30.toISOString());
-        }
-
-        // 2. Filtro en Base de Datos por Método de Pago / Estado
-        if (filtroMetodo === 'anuladas') {
-          query = query.ilike('metodo_pago', 'anulado%');
-        } else if (filtroMetodo === 'pendientes') {
-          query = query.eq('pagado', false).not('metodo_pago', 'ilike', 'anulado%');
-        } else if (filtroMetodo === 'pago_movil') {
-          query = query.ilike('metodo_pago', 'pago_movil%');
-        } else if (filtroMetodo === 'efectivo') {
-          query = query.or('metodo_pago.ilike.efectivo_usd%,metodo_pago.ilike.efectivo_bs%');
-        } else if (filtroMetodo === 'saldo_favor') {
-          query = query.or('metodo_pago.ilike.saldo_favor%,metodo_pago.ilike.mixto%');
-        }
-
-        // 3. Filtro en Base de Datos por Término de Búsqueda (.ilike en DB)
-        const term = busquedaDebounced.trim();
-        if (term) {
-          // Búsqueda cruzada eficiente en clientes y productos para encontrar IDs coincidentes
-          const [resClientes, resDetalles] = await Promise.all([
-            supabase
-              .from('clientes')
-              .select('id')
-              .or(
-                `nombre_estudiante.ilike.%${term}%,nombre_representante.ilike.%${term}%,grado_seccion.ilike.%${term}%`
-              )
-              .limit(80),
-            supabase
-              .from('consumo_detalles')
-              .select('consumo_id, productos!inner(nombre)')
-              .ilike('productos.nombre', `%${term}%`)
-              .limit(80),
-          ]);
-
-          const clientIds = (resClientes.data || []).map((c) => c.id).filter(Boolean);
-          const consumoIds = (resDetalles.data || []).map((d) => d.consumo_id).filter(Boolean);
-
-          const orClauses: string[] = [`metodo_pago.ilike.%${term}%`];
-          if (clientIds.length > 0) {
-            orClauses.push(`cliente_id.in.(${clientIds.join(',')})`);
-          }
-          if (consumoIds.length > 0) {
-            orClauses.push(`id.in.(${consumoIds.join(',')})`);
-          }
-          query = query.or(orClauses.join(','));
-        }
-
-        // 4. Paginación con .range(from, to)
-        const from = (paginaDestino - 1) * TAMANO_PAGINA_TRANSACCIONES;
-        const to = from + TAMANO_PAGINA_TRANSACCIONES - 1;
-
-        query = query.order('fecha', { ascending: false }).range(from, to);
-
-        const { data, count, error } = await query;
-
-        if (error) {
-          console.error('Error consultando historial de transacciones:', error);
-          mostrarNotificacion('error', 'Error al consultar historial.');
-        } else {
-          const items = (data as unknown as TransaccionRegistro[]) || [];
-          setTotalRegistros(count ?? items.length);
-          setPaginaActual(paginaDestino);
-
-          if (esCargarMas) {
-            setTransacciones((prev) => [...prev, ...items]);
-          } else {
-            setTransacciones(items);
-          }
-        }
-      } catch (err) {
-        console.error('Error inesperado cargando transacciones:', err);
-      } finally {
-        setCargandoTransacciones(false);
-        setCargandoMas(false);
+      // 1. Filtro en Base de Datos por Rango de Fecha (.gte)
+      if (filtroFecha === 'hoy') {
+        const hoy = new Date();
+        hoy.setHours(0, 0, 0, 0);
+        query = query.gte('fecha', hoy.toISOString());
+      } else if (filtroFecha === 'semana') {
+        const hace7 = new Date();
+        hace7.setDate(hace7.getDate() - 7);
+        hace7.setHours(0, 0, 0, 0);
+        query = query.gte('fecha', hace7.toISOString());
+      } else if (filtroFecha === 'mes') {
+        const hace30 = new Date();
+        hace30.setDate(hace30.getDate() - 30);
+        hace30.setHours(0, 0, 0, 0);
+        query = query.gte('fecha', hace30.toISOString());
       }
-    },
-    [filtroFecha, filtroMetodo, busquedaDebounced, mostrarNotificacion]
-  );
+
+      // 2. Filtro en Base de Datos por Método de Pago / Estado
+      if (filtroMetodo === 'anuladas') {
+        query = query.ilike('metodo_pago', 'anulado%');
+      } else if (filtroMetodo === 'pendientes') {
+        query = query.eq('pagado', false).not('metodo_pago', 'ilike', 'anulado%');
+      } else if (filtroMetodo === 'pago_movil') {
+        query = query.ilike('metodo_pago', 'pago_movil%');
+      } else if (filtroMetodo === 'efectivo') {
+        query = query.or('metodo_pago.ilike.efectivo_usd%,metodo_pago.ilike.efectivo_bs%');
+      } else if (filtroMetodo === 'saldo_favor') {
+        query = query.or('metodo_pago.ilike.saldo_favor%,metodo_pago.ilike.mixto%');
+      }
+
+      // 3. Filtro en Base de Datos por Término de Búsqueda (.ilike en DB)
+      const term = busquedaDebounced.trim();
+      if (term) {
+        const [resClientes, resDetalles] = await Promise.all([
+          supabase
+            .from('clientes')
+            .select('id')
+            .or(
+              `nombre_estudiante.ilike.%${term}%,nombre_representante.ilike.%${term}%,grado_seccion.ilike.%${term}%`
+            )
+            .limit(80),
+          supabase
+            .from('consumo_detalles')
+            .select('consumo_id, productos!inner(nombre)')
+            .ilike('productos.nombre', `%${term}%`)
+            .limit(80),
+        ]);
+
+        const clientIds = (resClientes.data || []).map((c) => c.id).filter(Boolean);
+        const consumoIds = (resDetalles.data || []).map((d) => d.consumo_id).filter(Boolean);
+
+        const orClauses: string[] = [`metodo_pago.ilike.%${term}%`];
+        if (clientIds.length > 0) {
+          orClauses.push(`cliente_id.in.(${clientIds.join(',')})`);
+        }
+        if (consumoIds.length > 0) {
+          orClauses.push(`id.in.(${consumoIds.join(',')})`);
+        }
+        query = query.or(orClauses.join(','));
+      }
+
+      // 4. Traer transacciones ordenadas descendente (hasta 2500 para agrupar año -> mes -> días 1 al 31)
+      query = query.order('fecha', { ascending: false }).limit(2500);
+
+      const { data, error } = await query;
+
+      if (error) {
+        console.error('Error consultando historial de transacciones:', error);
+        mostrarNotificacion('error', 'Error al consultar historial.');
+      } else {
+        const items = (data as unknown as TransaccionRegistro[]) || [];
+        setTransacciones(items);
+      }
+    } catch (err) {
+      console.error('Error inesperado cargando transacciones:', err);
+    } finally {
+      setCargandoTransacciones(false);
+    }
+  }, [filtroFecha, filtroMetodo, busquedaDebounced, mostrarNotificacion]);
 
   // Inicialización y recarga automática ante cambios de filtros o búsqueda
   useEffect(() => {
@@ -477,7 +671,7 @@ export default function TransaccionesPage() {
     cargarTasa();
   }, [cargarTasa]);
 
-  // Cargar historial de liquidaciones y abonos para auditoría contable
+  // Cargar historial de liquidaciones y abonos para auditoría contable (hasta 2500 registros)
   const cargarLiquidaciones = useCallback(async () => {
     setCargandoLiquidaciones(true);
     try {
@@ -515,7 +709,7 @@ export default function TransaccionesPage() {
         .eq('pagado', true)
         .not('metodo_pago', 'ilike', 'anulado%')
         .order('fecha', { ascending: false })
-        .limit(500);
+        .limit(2500);
 
       if (error) {
         console.error('Error cargando liquidaciones en Supabase:', error);
@@ -536,7 +730,7 @@ export default function TransaccionesPage() {
   }, []);
 
   useEffect(() => {
-    cargarTransacciones(1, false);
+    cargarTransacciones();
     cargarMetricasResumen();
     cargarLiquidaciones();
   }, [cargarTransacciones, cargarMetricasResumen, cargarLiquidaciones]);
@@ -546,14 +740,14 @@ export default function TransaccionesPage() {
     const channel = supabase
       .channel('transacciones_realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'consumos' }, () => {
-        cargarTransacciones(paginaActual, false);
+        cargarTransacciones();
         cargarMetricasResumen();
         cargarLiquidaciones();
       })
       .subscribe();
 
     const handleMiniRecarga = () => {
-      cargarTransacciones(paginaActual, false);
+      cargarTransacciones();
       cargarMetricasResumen();
       cargarLiquidaciones();
     };
@@ -564,7 +758,7 @@ export default function TransaccionesPage() {
       window.removeEventListener(EVENTO_MINI_RECARGA, handleMiniRecarga);
       supabase.removeChannel(channel);
     };
-  }, [paginaActual, cargarTransacciones, cargarMetricasResumen, cargarLiquidaciones]);
+  }, [cargarTransacciones, cargarMetricasResumen, cargarLiquidaciones]);
 
   // Manejo de la acción de anular transacción
   const handleConfirmarAnulacion = async () => {
@@ -589,7 +783,7 @@ export default function TransaccionesPage() {
       await ejecutarMiniRecarga({
         router,
         recargarDatosLocales: async () => {
-          await Promise.all([cargarTransacciones(paginaActual, false), cargarMetricasResumen(), cargarLiquidaciones()]);
+          await Promise.all([cargarTransacciones(), cargarMetricasResumen(), cargarLiquidaciones()]);
         },
       });
     } catch (err: unknown) {
@@ -599,44 +793,10 @@ export default function TransaccionesPage() {
     }
   };
 
-  // Como la búsqueda y filtros se ejecutan directamente en Supabase,
-  // transaccionesFiltradas es la lista resultante del servidor para esta página.
-  const transaccionesFiltradas = transacciones;
-
-  // Agrupamiento por fecha para acordeón collapsible compacto
-  const consumosAgrupadosPorDia = useMemo<GrupoDiaConsumos[]>(() => {
-    const mapa = new Map<string, GrupoDiaConsumos>();
-
-    for (const t of transaccionesFiltradas) {
-      const { diaKey, etiquetaFecha } = obtenerInfoDiaAgrupado(t.fecha);
-      if (!mapa.has(diaKey)) {
-        mapa.set(diaKey, {
-          diaKey,
-          etiquetaFecha,
-          totalDiaUsd: 0,
-          totalDiaBs: 0,
-          totalTransacciones: 0,
-          transacciones: [],
-        });
-      }
-
-      const grupo = mapa.get(diaKey)!;
-      grupo.totalTransacciones += 1;
-      grupo.transacciones.push(t);
-      const audit = parseConsumoAudit({ metodo_pago: t.metodo_pago, pagado: t.pagado });
-      if (!audit.esAnulado) {
-        grupo.totalDiaUsd += Number(t.monto_total_usd || 0);
-      }
-    }
-
-    const resultado = Array.from(mapa.values());
-    for (const g of resultado) {
-      g.totalDiaUsd = Math.round(g.totalDiaUsd * 100) / 100;
-      g.totalDiaBs = calcularConversionBs(g.totalDiaUsd, tasaBcv);
-    }
-    resultado.sort((a, b) => b.diaKey.localeCompare(a.diaKey));
-    return resultado;
-  }, [transaccionesFiltradas, tasaBcv]);
+  // Agrupamiento jerárquico Año -> Mes -> Día para Consumos
+  const consumosAgrupadosJerarquia = useMemo(() => {
+    return agruparTransaccionesPorAnoMesDia(transacciones, tasaBcv);
+  }, [transacciones, tasaBcv]);
 
   // Historial de liquidaciones filtrado por búsqueda
   const liquidacionesFiltradas = useMemo(() => {
@@ -655,6 +815,43 @@ export default function TransaccionesPage() {
     }
     return lista;
   }, [liquidaciones, busquedaLiquidaciones]);
+
+  // Agrupamiento jerárquico Año -> Mes -> Día para Liquidaciones
+  const liquidacionesAgrupadasJerarquia = useMemo(() => {
+    return agruparTransaccionesPorAnoMesDia(liquidacionesFiltradas, tasaBcv);
+  }, [liquidacionesFiltradas, tasaBcv]);
+
+  // Auto-desplegar primer año, mes y día cuando el usuario escribe en el buscador de consumos
+  useEffect(() => {
+    if (busquedaDebounced.trim() && consumosAgrupadosJerarquia.length > 0) {
+      const pAno = consumosAgrupadosJerarquia[0];
+      setAnoExpandido(pAno.anoKey);
+      if (pAno.meses.length > 0) {
+        const pMes = pAno.meses[0];
+        setMesExpandido(pMes.mesKey);
+        if (pMes.dias.length > 0) {
+          setDiaExpandido(pMes.dias[0].diaKey);
+          setPaginaDia(1);
+        }
+      }
+    }
+  }, [busquedaDebounced, consumosAgrupadosJerarquia]);
+
+  // Auto-desplegar primer año, mes y día cuando el usuario escribe en el buscador de liquidaciones
+  useEffect(() => {
+    if (busquedaLiquidaciones.trim() && liquidacionesAgrupadasJerarquia.length > 0) {
+      const pAno = liquidacionesAgrupadasJerarquia[0];
+      setAnoExpandidoLiq(pAno.anoKey);
+      if (pAno.meses.length > 0) {
+        const pMes = pAno.meses[0];
+        setMesExpandidoLiq(pMes.mesKey);
+        if (pMes.dias.length > 0) {
+          setDiaExpandidoLiq(pMes.dias[0].diaKey);
+          setPaginaDiaLiq(1);
+        }
+      }
+    }
+  }, [busquedaLiquidaciones, liquidacionesAgrupadasJerarquia]);
 
   const metricasLiquidaciones = useMemo(() => {
     const totalUsd = liquidacionesFiltradas.reduce((sum, item) => sum + Number(item.monto_total_usd || 0), 0);
@@ -675,11 +872,6 @@ export default function TransaccionesPage() {
     };
   }, [metricasData, tasaBcv]);
 
-  // Cálculos para paginación compacta
-  const totalPaginas = Math.max(1, Math.ceil(totalRegistros / TAMANO_PAGINA_TRANSACCIONES));
-  const indiceInicial = totalRegistros === 0 ? 0 : (paginaActual - 1) * TAMANO_PAGINA_TRANSACCIONES + 1;
-  const indiceFinal = Math.min(totalRegistros, paginaActual * TAMANO_PAGINA_TRANSACCIONES);
-
   if (!montado) {
     return (
       <div className="min-h-screen flex flex-col bg-[#FAFAFA] dark:bg-[#090D16]">
@@ -698,7 +890,7 @@ export default function TransaccionesPage() {
     <ErrorBoundary
       fallbackTitle="Historial de Transacciones"
       fallbackMessage="Ocurrió un error cargando el historial. Puedes reintentar sin riesgo de pérdida de datos."
-      onReset={() => cargarTransacciones(1, false)}
+      onReset={() => cargarTransacciones()}
     >
       <div className="min-h-screen flex flex-col bg-[#FAFAFA] dark:bg-[#090D16] text-gray-900 dark:text-slate-100">
       {/* Header Sticky con diseño unificado y navegación móvil */}
@@ -728,7 +920,7 @@ export default function TransaccionesPage() {
                   Historial de Transacciones
                 </h1>
                 <span className="rounded-full border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/60 px-1.5 py-0.2 text-[10px] sm:text-[11px] font-semibold text-indigo-700 dark:text-indigo-300 shrink-0">
-                  {totalRegistros}
+                  {transacciones.length}
                 </span>
               </div>
               <p className="text-[11px] sm:text-xs text-gray-500 dark:text-slate-400 hidden sm:block">
@@ -961,15 +1153,15 @@ export default function TransaccionesPage() {
               </div>
             </div>
 
-            {/* Listado Agrupado por Día (Acordeón Collapsible) */}
+            {/* Listado Agrupado Jerárquico: Año -> Mes -> Días (1 al 31) -> Tickets Paginados */}
             {cargandoTransacciones ? (
               <div className="rounded-3xl border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#0D111A] p-12 text-center shadow-2xs">
                 <Loader2 className="mx-auto h-8 w-8 animate-spin text-indigo-600 dark:text-indigo-400" />
                 <p className="mt-3 text-xs font-semibold text-gray-500 dark:text-slate-400">
-                  Cargando historial de consumos agrupados...
+                  Cargando transacciones desde Supabase...
                 </p>
               </div>
-            ) : consumosAgrupadosPorDia.length === 0 ? (
+            ) : consumosAgrupadosJerarquia.length === 0 ? (
               <div className="rounded-3xl border border-dashed border-gray-200 dark:border-slate-800 bg-white dark:bg-[#0D111A] p-12 text-center">
                 <FileText className="mx-auto h-10 w-10 text-gray-300 dark:text-slate-600" />
                 <h3 className="mt-2 text-sm font-bold text-gray-800 dark:text-slate-200">
@@ -980,53 +1172,53 @@ export default function TransaccionesPage() {
                 </p>
               </div>
             ) : (
-              <div className="space-y-3.5">
-                {consumosAgrupadosPorDia.map((grupo) => {
-                  const abierto = !!diasDesplegados[grupo.diaKey];
+              <div className="space-y-3">
+                {consumosAgrupadosJerarquia.map((gAno) => {
+                  const anoAbierto = anoExpandido === gAno.anoKey;
 
                   return (
                     <div
-                      key={grupo.diaKey}
+                      key={gAno.anoKey}
                       className="overflow-hidden rounded-3xl border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#0D111A] shadow-2xs transition"
                     >
-                      {/* Cabecera / Tarjeta Acordeón del Día */}
+                      {/* NIVEL 1: Div / Botón del AÑO */}
                       <button
                         type="button"
-                        onClick={() => toggleDia(grupo.diaKey)}
+                        onClick={() => toggleAno(gAno.anoKey)}
                         className="w-full flex flex-col sm:flex-row sm:items-center justify-between p-4 sm:px-5 hover:bg-gray-50/70 dark:hover:bg-[#111726]/60 transition text-left gap-3"
                       >
                         <div className="flex items-center gap-3">
-                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/40">
-                            <Calendar className="h-5 w-5" />
+                          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-indigo-100 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-900/60 font-black text-sm">
+                            {gAno.anoKey}
                           </div>
                           <div>
                             <div className="flex items-center gap-2 flex-wrap">
-                              <h3 className="text-sm font-bold text-gray-900 dark:text-slate-100">
-                                {grupo.etiquetaFecha}
-                              </h3>
+                              <h2 className="text-base font-black text-gray-900 dark:text-slate-100">
+                                {gAno.etiquetaAno}
+                              </h2>
                               <span className="rounded-full bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200/80 dark:border-indigo-800 px-2.5 py-0.5 text-[11px] font-bold text-indigo-700 dark:text-indigo-300">
-                                {grupo.totalTransacciones} {grupo.totalTransacciones === 1 ? 'ticket' : 'tickets'}
+                                {gAno.totalTransacciones} {gAno.totalTransacciones === 1 ? 'ticket' : 'tickets'} en el año
                               </span>
                             </div>
                             <span className="text-[11px] text-gray-400 mt-0.5 block">
-                              {abierto ? 'Clic para contraer' : 'Clic para desplegar tickets de este día'}
+                              {anoAbierto ? 'Clic para contraer año' : 'Clic para desplegar los meses de este año'}
                             </span>
                           </div>
                         </div>
 
                         <div className="flex items-center justify-between sm:justify-end gap-4 border-t sm:border-t-0 pt-2 sm:pt-0 border-gray-100 dark:border-slate-800">
                           <div className="text-left sm:text-right">
-                            <div className="text-base font-black text-gray-900 dark:text-slate-100">
-                              {formatUSD(grupo.totalDiaUsd)}
+                            <div className="text-base sm:text-lg font-black text-gray-900 dark:text-slate-100">
+                              {formatUSD(gAno.totalAnoUsd)}
                             </div>
                             <div className="text-[11px] font-mono text-amber-700 dark:text-amber-400 font-bold">
-                              {formatBs(grupo.totalDiaBs)}
+                              {formatBs(gAno.totalAnoBs)}
                             </div>
                           </div>
 
                           <div
-                            className={`p-1.5 rounded-xl border border-gray-200/80 dark:border-slate-800 bg-gray-50 dark:bg-[#111726] text-gray-600 dark:text-slate-300 transition-transform ${
-                              abierto ? 'rotate-180' : ''
+                            className={`p-2 rounded-xl border border-gray-200/80 dark:border-slate-800 bg-gray-50 dark:bg-[#111726] text-gray-600 dark:text-slate-300 transition-transform ${
+                              anoAbierto ? 'rotate-180' : ''
                             }`}
                           >
                             <ChevronDown className="h-4 w-4" />
@@ -1034,375 +1226,476 @@ export default function TransaccionesPage() {
                         </div>
                       </button>
 
-                      {/* Desglose de transacciones de ese día */}
-                      {abierto && (
-                        <div className="border-t border-gray-100 dark:border-slate-800/80 p-3 sm:p-4 bg-gray-50/40 dark:bg-[#0a0e17]/40 space-y-3">
-                          {/* Vista Móvil (< md) */}
-                          <div className="grid grid-cols-1 gap-2.5 md:hidden">
-                            <AnimatePresence>
-                              {grupo.transacciones.map((t) => {
-                                const audit = parseConsumoAudit({ metodo_pago: t.metodo_pago, pagado: t.pagado });
-                                const fechaObj = formatearFechaHora(t.fecha);
-                                const totalItems = t.consumo_detalles?.reduce((acc, i) => acc + i.cantidad, 0) || 0;
-                                const tasaHistorica = t.tasa_bcv_historica || tasaBcv;
-                                const totalBsEquiv = calcularConversionBs(t.monto_total_usd, tasaHistorica);
+                      {/* NIVEL 2: Contenedor de MESES */}
+                      {anoAbierto && (
+                        <div className="border-t border-gray-100 dark:border-slate-800/80 p-3 sm:p-4 bg-gray-50/30 dark:bg-[#0a0e17]/30 space-y-3">
+                          {gAno.meses.map((gMes) => {
+                            const mesAbierto = mesExpandido === gMes.mesKey;
 
-                                return (
-                                  <motion.div
-                                    key={t.id}
-                                    initial={{ opacity: 0, y: 8 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    exit={{ opacity: 0, scale: 0.95 }}
-                                    className={`rounded-2xl border p-3.5 shadow-2xs transition bg-white dark:bg-[#0D111A] ${
-                                      audit.esAnulado
-                                        ? 'border-rose-200/70 dark:border-rose-950/40 bg-rose-50/20 opacity-80'
-                                        : audit.esPendiente
-                                        ? 'border-amber-200/80 dark:border-amber-950/40'
-                                        : 'border-gray-200/90 dark:border-slate-800'
-                                    }`}
-                                  >
-                                    <div className="flex items-start justify-between gap-2">
-                                      <div className="flex flex-col">
-                                        <span className="text-xs font-bold text-gray-900 dark:text-slate-100 flex items-center gap-1.5">
-                                          <User className="h-3.5 w-3.5 text-indigo-600" />
-                                          {t.clientes ? (
-                                            <>
-                                              <span>{t.clientes.nombre_estudiante}</span>
-                                              {t.clientes.grado_seccion && (
-                                                <span className="text-[10px] text-gray-500 font-normal">
-                                                  ({t.clientes.grado_seccion})
-                                                </span>
-                                              )}
-                                            </>
-                                          ) : (
-                                            <span className="text-gray-600 dark:text-slate-400">Público General / Caja</span>
-                                          )}
-                                        </span>
-                                        <span className="text-[10px] text-gray-400 flex items-center gap-1 mt-0.5">
-                                          <Clock className="h-3 w-3" />
-                                          <span>{fechaObj.hora}</span>
+                            return (
+                              <div
+                                key={gMes.mesKey}
+                                className="overflow-hidden rounded-2xl border border-gray-200/80 dark:border-slate-800/90 bg-white dark:bg-[#0D111A] shadow-2xs transition"
+                              >
+                                {/* Botón del MES */}
+                                <button
+                                  type="button"
+                                  onClick={() => toggleMes(gMes.mesKey)}
+                                  className="w-full flex flex-col sm:flex-row sm:items-center justify-between p-3.5 sm:px-4 hover:bg-gray-50/70 dark:hover:bg-[#111726]/60 transition text-left gap-2.5"
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 border border-purple-100 dark:border-purple-900/40">
+                                      <Calendar className="h-4 w-4" />
+                                    </div>
+                                    <div>
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <h3 className="text-sm font-bold text-gray-900 dark:text-slate-100">
+                                          {gMes.etiquetaMes}
+                                        </h3>
+                                        <span className="rounded-full bg-purple-50 dark:bg-purple-950/60 border border-purple-200/80 dark:border-purple-800 px-2 py-0.2 text-[10px] font-bold text-purple-700 dark:text-purple-300">
+                                          {gMes.totalTransacciones} {gMes.totalTransacciones === 1 ? 'ticket' : 'tickets'}
                                         </span>
                                       </div>
-
-                                      <span
-                                        className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
-                                          audit.esAnulado
-                                            ? 'bg-rose-100 text-rose-800 border border-rose-200'
-                                            : audit.esPendiente
-                                            ? 'bg-amber-100 text-amber-800 border border-amber-200'
-                                            : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                                        }`}
-                                      >
-                                        {audit.estadoBadge.texto}
+                                      <span className="text-[10px] text-gray-400 mt-0.5 block">
+                                        {mesAbierto ? 'Clic para contraer mes' : 'Clic para desplegar los días (1 al 31)'}
                                       </span>
                                     </div>
+                                  </div>
 
-                                    {/* Resumen de Productos */}
-                                    <div className="mt-2.5 rounded-xl bg-gray-50 dark:bg-[#111726] p-2 text-xs text-gray-600 dark:text-slate-300">
-                                      <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-0.5">
-                                        Productos ({totalItems}):
-                                      </span>
-                                      <div className="line-clamp-2 text-[11px] leading-relaxed">
-                                        {t.consumo_detalles && t.consumo_detalles.length > 0 ? (
-                                          t.consumo_detalles.map((cd, idx) => (
-                                            <span key={cd.id || idx}>
-                                              {cd.cantidad}x {cd.productos?.nombre || 'Producto'}
-                                              {idx < (t.consumo_detalles?.length || 0) - 1 ? ', ' : ''}
-                                            </span>
-                                          ))
-                                        ) : (
-                                          <span className="italic text-gray-400">Sin desglose registrado</span>
-                                        )}
+                                  <div className="flex items-center justify-between sm:justify-end gap-3 border-t sm:border-t-0 pt-1.5 sm:pt-0 border-gray-100 dark:border-slate-800">
+                                    <div className="text-left sm:text-right">
+                                      <div className="text-sm font-black text-gray-900 dark:text-slate-100">
+                                        {formatUSD(gMes.totalMesUsd)}
+                                      </div>
+                                      <div className="text-[10px] font-mono text-amber-700 dark:text-amber-400 font-bold">
+                                        {formatBs(gMes.totalMesBs)}
                                       </div>
                                     </div>
 
-                                    {/* Método de Pago y Monto */}
-                                    <div className="mt-2.5 flex items-center justify-between border-t border-gray-100 dark:border-slate-800/80 pt-2">
-                                      <div className="flex flex-col">
-                                        <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
-                                          Método:
-                                        </span>
-                                        <div className="flex items-center gap-1 mt-0.5 flex-wrap">
-                                          <span className="text-xs font-bold text-gray-800 dark:text-slate-200">
-                                            {audit.nombreLegible}
-                                          </span>
-                                          {audit.referencia && (
-                                            <span className="rounded-md bg-sky-50 dark:bg-sky-950/60 border border-sky-200 text-sky-800 dark:text-sky-300 px-1.5 py-0.2 text-[10px] font-mono font-bold">
-                                              #{audit.referencia}
-                                            </span>
-                                          )}
-                                          {t.metodo_pago.includes('[Pago Familiar]') && (
-                                            <span className="rounded-md bg-purple-50 dark:bg-purple-950/60 border border-purple-200 text-purple-800 dark:text-purple-300 px-1.5 py-0.2 text-[10px] font-bold">
-                                              Familiar
-                                            </span>
-                                          )}
-                                        </div>
-                                      </div>
-
-                                      <div className="text-right">
-                                        <span
-                                          className={`font-mono text-base font-black ${
-                                            audit.esAnulado
-                                              ? 'line-through text-gray-400'
-                                              : 'text-gray-900 dark:text-slate-100'
-                                          }`}
-                                        >
-                                          {formatUSD(t.monto_total_usd)}
-                                        </span>
-                                        <span className="block font-mono text-[10px] text-gray-400">
-                                          {formatBs(totalBsEquiv)}
-                                        </span>
-                                      </div>
-                                    </div>
-
-                                    {/* Botones de Acción */}
-                                    <div className="mt-2.5 flex items-center gap-2">
-                                      <button
-                                        type="button"
-                                        onClick={() => setModalDetalle({ abierto: true, transaccion: t })}
-                                        className="flex-1 rounded-xl border border-gray-200 dark:border-slate-800 bg-white dark:bg-[#111726] py-1.5 text-xs font-bold text-gray-700 dark:text-slate-200 hover:bg-gray-50 transition active:scale-95 text-center"
-                                      >
-                                        Ver Ticket
-                                      </button>
-
-                                      {!audit.esAnulado && (
-                                        <button
-                                          type="button"
-                                          onClick={() =>
-                                            setModalAnular({
-                                              abierto: true,
-                                              transaccion: t,
-                                              procesando: false,
-                                              error: null,
-                                            })
-                                          }
-                                          className="rounded-xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/40 px-2.5 py-1.5 text-xs font-bold text-rose-700 dark:text-rose-300 hover:bg-rose-100 transition active:scale-95 flex items-center gap-1"
-                                        >
-                                          <RotateCcw className="h-3 w-3" />
-                                          <span>Anular</span>
-                                        </button>
-                                      )}
-                                    </div>
-                                  </motion.div>
-                                );
-                              })}
-                            </AnimatePresence>
-                          </div>
-
-                          {/* Vista Tabla Escritorio (>= md) */}
-                          <div className="hidden md:block overflow-hidden rounded-2xl border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#0D111A]">
-                            <table className="w-full text-left text-xs">
-                              <thead className="border-b border-gray-200/80 dark:border-slate-800 bg-gray-50/70 dark:bg-[#111726] text-gray-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">
-                                <tr>
-                                  <th className="py-3 pl-4 pr-3">Hora</th>
-                                  <th className="px-3 py-3">Cliente</th>
-                                  <th className="px-3 py-3">Artículos</th>
-                                  <th className="px-3 py-3">Método de Pago</th>
-                                  <th className="px-3 py-3">Total ($ / Bs)</th>
-                                  <th className="px-3 py-3">Estado</th>
-                                  <th className="py-3 pl-3 pr-4 text-right">Acciones</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-gray-100 dark:divide-slate-800/80">
-                                {grupo.transacciones.map((t) => {
-                                  const audit = parseConsumoAudit({
-                                    metodo_pago: t.metodo_pago,
-                                    pagado: t.pagado,
-                                  });
-                                  const fechaObj = formatearFechaHora(t.fecha);
-                                  const totalItems =
-                                    t.consumo_detalles?.reduce((acc, i) => acc + i.cantidad, 0) || 0;
-                                  const tasaHistorica = t.tasa_bcv_historica || tasaBcv;
-                                  const totalBsEquiv = calcularConversionBs(t.monto_total_usd, tasaHistorica);
-
-                                  return (
-                                    <tr
-                                      key={t.id}
-                                      className={`hover:bg-gray-50/70 dark:hover:bg-[#111726]/60 transition ${
-                                        audit.esAnulado ? 'bg-rose-50/15 opacity-75' : ''
+                                    <div
+                                      className={`p-1.5 rounded-lg border border-gray-200/80 dark:border-slate-800 bg-gray-50 dark:bg-[#111726] text-gray-600 dark:text-slate-300 transition-transform ${
+                                        mesAbierto ? 'rotate-180' : ''
                                       }`}
                                     >
-                                      <td className="py-2.5 pl-4 pr-3 whitespace-nowrap font-mono text-gray-600 dark:text-slate-400 font-bold">
-                                        {fechaObj.hora}
-                                      </td>
-                                      <td className="px-3 py-2.5">
-                                        {t.clientes ? (
-                                          <div>
-                                            <div className="font-bold text-gray-900 dark:text-slate-100">
-                                              {t.clientes.nombre_estudiante}
-                                            </div>
-                                            {t.clientes.grado_seccion && (
-                                              <div className="text-[10px] text-gray-500">
-                                                {t.clientes.grado_seccion}
-                                              </div>
-                                            )}
-                                          </div>
-                                        ) : (
-                                          <span className="text-gray-400 italic">Público General / Caja</span>
-                                        )}
-                                      </td>
-                                      <td className="px-3 py-2.5 max-w-[200px]">
-                                        <button
-                                          type="button"
-                                          onClick={() => setModalDetalle({ abierto: true, transaccion: t })}
-                                          className="text-left group"
-                                        >
-                                          <span className="font-bold text-gray-800 dark:text-slate-200 group-hover:text-indigo-600 transition block">
-                                            {totalItems} {totalItems === 1 ? 'artículo' : 'artículos'}
-                                          </span>
-                                          <span className="text-[11px] text-gray-400 truncate block max-w-[180px]">
-                                            {t.consumo_detalles && t.consumo_detalles.length > 0
-                                              ? t.consumo_detalles.map((c) => c.productos?.nombre).join(', ')
-                                              : 'Ver detalle'}
-                                          </span>
-                                        </button>
-                                      </td>
-                                      <td className="px-3 py-2.5">
-                                        <div className="flex items-center gap-1.5 flex-wrap">
-                                          <span className="font-bold text-gray-800 dark:text-slate-200">
-                                            {audit.nombreLegible}
-                                          </span>
-                                          {audit.referencia && (
-                                            <span className="rounded-md bg-sky-50 dark:bg-sky-950/60 border border-sky-200 text-sky-800 dark:text-sky-300 px-1.5 py-0.5 text-[10px] font-mono font-bold">
-                                              #{audit.referencia}
-                                            </span>
-                                          )}
-                                          {t.metodo_pago.includes('[Pago Familiar]') && (
-                                            <span className="rounded-md bg-purple-50 dark:bg-purple-950/60 border border-purple-200 text-purple-800 dark:text-purple-300 px-1.5 py-0.5 text-[10px] font-bold">
-                                              Familiar
-                                            </span>
-                                          )}
-                                        </div>
-                                      </td>
-                                      <td className="px-3 py-2.5 whitespace-nowrap">
+                                      <ChevronDown className="h-3.5 w-3.5" />
+                                    </div>
+                                  </div>
+                                </button>
+
+                                {/* NIVEL 3: Contenedor de DÍAS (1 al 31) */}
+                                {mesAbierto && (
+                                  <div className="border-t border-gray-100 dark:border-slate-800/80 p-2.5 sm:p-3 bg-gray-50/50 dark:bg-[#0a0e17]/50 space-y-2.5">
+                                    {gMes.dias.map((gDia) => {
+                                      const diaAbierto = diaExpandido === gDia.diaKey;
+                                      const totalPaginasDia = Math.max(1, Math.ceil(gDia.transacciones.length / TAMANO_PAGINA_JERARQUIA));
+                                      const transaccionesPaginadas = gDia.transacciones.slice(
+                                        (paginaDia - 1) * TAMANO_PAGINA_JERARQUIA,
+                                        paginaDia * TAMANO_PAGINA_JERARQUIA
+                                      );
+
+                                      return (
                                         <div
-                                          className={`font-mono font-black text-sm ${
-                                            audit.esAnulado
-                                              ? 'line-through text-gray-400'
-                                              : 'text-gray-900 dark:text-slate-100'
-                                          }`}
+                                          key={gDia.diaKey}
+                                          className="overflow-hidden rounded-xl border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#0D111A] shadow-2xs transition"
                                         >
-                                          {formatUSD(t.monto_total_usd)}
-                                        </div>
-                                        <div className="font-mono text-[10px] text-gray-400">
-                                          {formatBs(totalBsEquiv)}
-                                        </div>
-                                      </td>
-                                      <td className="px-3 py-2.5 whitespace-nowrap">
-                                        <span
-                                          className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
-                                            audit.esAnulado
-                                              ? 'bg-rose-100 text-rose-800 border border-rose-200'
-                                              : audit.esPendiente
-                                              ? 'bg-amber-100 text-amber-800 border border-amber-200'
-                                              : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                                          }`}
-                                        >
-                                          {audit.estadoBadge.texto}
-                                        </span>
-                                      </td>
-                                      <td className="py-2.5 pl-3 pr-4 text-right whitespace-nowrap">
-                                        <div className="flex items-center justify-end gap-1.5">
+                                          {/* Tarjeta del DÍA - Exclusive Accordion */}
                                           <button
                                             type="button"
-                                            onClick={() => setModalDetalle({ abierto: true, transaccion: t })}
-                                            className="rounded-xl border border-gray-200 dark:border-slate-800 px-2.5 py-1 text-xs font-semibold text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-[#141C2E] transition active:scale-95"
+                                            onClick={() => toggleDia(gDia.diaKey)}
+                                            className="w-full flex flex-col sm:flex-row sm:items-center justify-between p-3 sm:px-4 hover:bg-gray-50/70 dark:hover:bg-[#111726]/60 transition text-left gap-2.5"
                                           >
-                                            Ticket
+                                            <div className="flex items-center gap-2.5">
+                                              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/40">
+                                                <Clock className="h-4 w-4" />
+                                              </div>
+                                              <div>
+                                                <div className="flex items-center gap-2 flex-wrap">
+                                                  <h4 className="text-xs sm:text-sm font-bold text-gray-900 dark:text-slate-100">
+                                                    {gDia.etiquetaDia}
+                                                  </h4>
+                                                  <span className="rounded-full bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200/80 dark:border-indigo-800 px-2 py-0.2 text-[10px] font-bold text-indigo-700 dark:text-indigo-300">
+                                                    {gDia.totalTransacciones} {gDia.totalTransacciones === 1 ? 'ticket' : 'tickets'}
+                                                  </span>
+                                                </div>
+                                                <span className="text-[10px] text-gray-400 mt-0.5 block">
+                                                  {diaAbierto ? 'Clic para contraer' : 'Clic para desplegar tickets de este día'}
+                                                </span>
+                                              </div>
+                                            </div>
+
+                                            <div className="flex items-center justify-between sm:justify-end gap-3 border-t sm:border-t-0 pt-1.5 sm:pt-0 border-gray-100 dark:border-slate-800">
+                                              <div className="text-left sm:text-right">
+                                                <div className="text-xs sm:text-sm font-black text-gray-900 dark:text-slate-100">
+                                                  {formatUSD(gDia.totalDiaUsd)}
+                                                </div>
+                                                <div className="text-[10px] font-mono text-amber-700 dark:text-amber-400 font-bold">
+                                                  {formatBs(gDia.totalDiaBs)}
+                                                </div>
+                                              </div>
+
+                                              <div
+                                                className={`p-1.5 rounded-lg border border-gray-200/80 dark:border-slate-800 bg-gray-50 dark:bg-[#111726] text-gray-600 dark:text-slate-300 transition-transform ${
+                                                  diaAbierto ? 'rotate-180' : ''
+                                                }`}
+                                              >
+                                                <ChevronDown className="h-3.5 w-3.5" />
+                                              </div>
+                                            </div>
                                           </button>
-                                          {!audit.esAnulado && (
-                                            <button
-                                              type="button"
-                                              onClick={() =>
-                                                setModalAnular({
-                                                  abierto: true,
-                                                  transaccion: t,
-                                                  procesando: false,
-                                                  error: null,
-                                                })
-                                              }
-                                              className="rounded-xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/40 px-2 py-1 text-xs font-bold text-rose-700 dark:text-rose-300 hover:bg-rose-100 transition active:scale-95 flex items-center gap-1"
-                                            >
-                                              <RotateCcw className="h-3 w-3" />
-                                              <span>Anular</span>
-                                            </button>
+
+                                          {/* NIVEL 4: Contenido del DÍA abierto con tickets y paginación interna */}
+                                          {diaAbierto && (
+                                            <div className="border-t border-gray-100 dark:border-slate-800/80 p-2.5 sm:p-3 bg-gray-50/40 dark:bg-[#0a0e17]/40 space-y-3">
+                                              {/* Vista Móvil (< md) */}
+                                              <div className="grid grid-cols-1 gap-2.5 md:hidden">
+                                                <AnimatePresence>
+                                                  {transaccionesPaginadas.map((t) => {
+                                                    const audit = parseConsumoAudit({ metodo_pago: t.metodo_pago, pagado: t.pagado });
+                                                    const fechaObj = formatearFechaHora(t.fecha);
+                                                    const totalItems = t.consumo_detalles?.reduce((acc, i) => acc + i.cantidad, 0) || 0;
+                                                    const tasaHistorica = t.tasa_bcv_historica || tasaBcv;
+                                                    const totalBsEquiv = calcularConversionBs(t.monto_total_usd, tasaHistorica);
+
+                                                    return (
+                                                      <motion.div
+                                                        key={t.id}
+                                                        initial={{ opacity: 0, y: 8 }}
+                                                        animate={{ opacity: 1, y: 0 }}
+                                                        exit={{ opacity: 0, scale: 0.95 }}
+                                                        className={`rounded-2xl border p-3.5 shadow-2xs transition bg-white dark:bg-[#0D111A] ${
+                                                          audit.esAnulado
+                                                            ? 'border-rose-200/70 dark:border-rose-950/40 bg-rose-50/20 opacity-80'
+                                                            : audit.esPendiente
+                                                            ? 'border-amber-200/80 dark:border-amber-950/40'
+                                                            : 'border-gray-200/90 dark:border-slate-800'
+                                                        }`}
+                                                      >
+                                                        <div className="flex items-start justify-between gap-2">
+                                                          <div className="flex flex-col">
+                                                            <span className="text-xs font-bold text-gray-900 dark:text-slate-100 flex items-center gap-1.5">
+                                                              <User className="h-3.5 w-3.5 text-indigo-600" />
+                                                              {t.clientes ? (
+                                                                <>
+                                                                  <span>{t.clientes.nombre_estudiante}</span>
+                                                                  {t.clientes.grado_seccion && (
+                                                                    <span className="text-[10px] text-gray-500 font-normal">
+                                                                      ({t.clientes.grado_seccion})
+                                                                    </span>
+                                                                  )}
+                                                                </>
+                                                              ) : (
+                                                                <span className="text-gray-600 dark:text-slate-400">Público General / Caja</span>
+                                                              )}
+                                                            </span>
+                                                            <span className="text-[10px] text-gray-400 flex items-center gap-1 mt-0.5">
+                                                              <Clock className="h-3 w-3" />
+                                                              <span>{fechaObj.hora}</span>
+                                                            </span>
+                                                          </div>
+
+                                                          <span
+                                                            className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                                                              audit.esAnulado
+                                                                ? 'bg-rose-100 text-rose-800 border border-rose-200'
+                                                                : audit.esPendiente
+                                                                ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                                                                : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                                            }`}
+                                                          >
+                                                            {audit.estadoBadge.texto}
+                                                          </span>
+                                                        </div>
+
+                                                        {/* Resumen de Productos */}
+                                                        <div className="mt-2.5 rounded-xl bg-gray-50 dark:bg-[#111726] p-2 text-xs text-gray-600 dark:text-slate-300">
+                                                          <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-0.5">
+                                                            Productos ({totalItems}):
+                                                          </span>
+                                                          <div className="line-clamp-2 text-[11px] leading-relaxed">
+                                                            {t.consumo_detalles && t.consumo_detalles.length > 0 ? (
+                                                              t.consumo_detalles.map((cd, idx) => (
+                                                                <span key={cd.id || idx}>
+                                                                  {cd.cantidad}x {cd.productos?.nombre || 'Producto'}
+                                                                  {idx < (t.consumo_detalles?.length || 0) - 1 ? ', ' : ''}
+                                                                </span>
+                                                              ))
+                                                            ) : (
+                                                              <span className="italic text-gray-400">Sin desglose registrado</span>
+                                                            )}
+                                                          </div>
+                                                        </div>
+
+                                                        {/* Método de Pago y Monto */}
+                                                        <div className="mt-2.5 flex items-center justify-between border-t border-gray-100 dark:border-slate-800/80 pt-2">
+                                                          <div className="flex flex-col">
+                                                            <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
+                                                              Método:
+                                                            </span>
+                                                            <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+                                                              <span className="text-xs font-bold text-gray-800 dark:text-slate-200">
+                                                                {audit.nombreLegible}
+                                                              </span>
+                                                              {audit.referencia && (
+                                                                <span className="rounded-md bg-sky-50 dark:bg-sky-950/60 border border-sky-200 text-sky-800 dark:text-sky-300 px-1.5 py-0.2 text-[10px] font-mono font-bold">
+                                                                  #{audit.referencia}
+                                                                </span>
+                                                              )}
+                                                              {t.metodo_pago.includes('[Pago Familiar]') && (
+                                                                <span className="rounded-md bg-purple-50 dark:bg-purple-950/60 border border-purple-200 text-purple-800 dark:text-purple-300 px-1.5 py-0.2 text-[10px] font-bold">
+                                                                  Familiar
+                                                                </span>
+                                                              )}
+                                                            </div>
+                                                          </div>
+
+                                                          <div className="text-right">
+                                                            <span
+                                                              className={`font-mono text-base font-black ${
+                                                                audit.esAnulado
+                                                                  ? 'line-through text-gray-400'
+                                                                  : 'text-gray-900 dark:text-slate-100'
+                                                              }`}
+                                                            >
+                                                              {formatUSD(t.monto_total_usd)}
+                                                            </span>
+                                                            <span className="block font-mono text-[10px] text-gray-400">
+                                                              {formatBs(totalBsEquiv)}
+                                                            </span>
+                                                          </div>
+                                                        </div>
+
+                                                        {/* Botones de Acción */}
+                                                        <div className="mt-2.5 flex items-center gap-2">
+                                                          <button
+                                                            type="button"
+                                                            onClick={() => setModalDetalle({ abierto: true, transaccion: t })}
+                                                            className="flex-1 rounded-xl border border-gray-200 dark:border-slate-800 bg-white dark:bg-[#111726] py-1.5 text-xs font-bold text-gray-700 dark:text-slate-200 hover:bg-gray-50 transition active:scale-95 text-center"
+                                                          >
+                                                            Ver Ticket
+                                                          </button>
+
+                                                          {!audit.esAnulado && (
+                                                            <button
+                                                              type="button"
+                                                              onClick={() =>
+                                                                setModalAnular({
+                                                                  abierto: true,
+                                                                  transaccion: t,
+                                                                  procesando: false,
+                                                                  error: null,
+                                                                })
+                                                              }
+                                                              className="rounded-xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/40 px-2.5 py-1.5 text-xs font-bold text-rose-700 dark:text-rose-300 hover:bg-rose-100 transition active:scale-95 flex items-center gap-1"
+                                                            >
+                                                              <RotateCcw className="h-3 w-3" />
+                                                              <span>Anular</span>
+                                                            </button>
+                                                          )}
+                                                        </div>
+                                                      </motion.div>
+                                                    );
+                                                  })}
+                                                </AnimatePresence>
+                                              </div>
+
+                                              {/* Vista Tabla Escritorio (>= md) */}
+                                              <div className="hidden md:block overflow-hidden rounded-2xl border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#0D111A]">
+                                                <table className="w-full text-left text-xs">
+                                                  <thead className="border-b border-gray-200/80 dark:border-slate-800 bg-gray-50/70 dark:bg-[#111726] text-gray-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">
+                                                    <tr>
+                                                      <th className="py-3 pl-4 pr-3">Hora</th>
+                                                      <th className="px-3 py-3">Cliente</th>
+                                                      <th className="px-3 py-3">Artículos</th>
+                                                      <th className="px-3 py-3">Método de Pago</th>
+                                                      <th className="px-3 py-3">Total ($ / Bs)</th>
+                                                      <th className="px-3 py-3">Estado</th>
+                                                      <th className="py-3 pl-3 pr-4 text-right">Acciones</th>
+                                                    </tr>
+                                                  </thead>
+                                                  <tbody className="divide-y divide-gray-100 dark:divide-slate-800/80">
+                                                    {transaccionesPaginadas.map((t) => {
+                                                      const audit = parseConsumoAudit({
+                                                        metodo_pago: t.metodo_pago,
+                                                        pagado: t.pagado,
+                                                      });
+                                                      const fechaObj = formatearFechaHora(t.fecha);
+                                                      const totalItems =
+                                                        t.consumo_detalles?.reduce((acc, i) => acc + i.cantidad, 0) || 0;
+                                                      const tasaHistorica = t.tasa_bcv_historica || tasaBcv;
+                                                      const totalBsEquiv = calcularConversionBs(t.monto_total_usd, tasaHistorica);
+
+                                                      return (
+                                                        <tr
+                                                          key={t.id}
+                                                          className={`hover:bg-gray-50/70 dark:hover:bg-[#111726]/60 transition ${
+                                                            audit.esAnulado ? 'bg-rose-50/15 opacity-75' : ''
+                                                          }`}
+                                                        >
+                                                          <td className="py-2.5 pl-4 pr-3 whitespace-nowrap font-mono text-gray-600 dark:text-slate-400 font-bold">
+                                                            {fechaObj.hora}
+                                                          </td>
+                                                          <td className="px-3 py-2.5">
+                                                            {t.clientes ? (
+                                                              <div>
+                                                                <div className="font-bold text-gray-900 dark:text-slate-100">
+                                                                  {t.clientes.nombre_estudiante}
+                                                                </div>
+                                                                {t.clientes.grado_seccion && (
+                                                                  <div className="text-[10px] text-gray-500">
+                                                                    {t.clientes.grado_seccion}
+                                                                  </div>
+                                                                )}
+                                                              </div>
+                                                            ) : (
+                                                              <span className="text-gray-400 italic">Público General / Caja</span>
+                                                            )}
+                                                          </td>
+                                                          <td className="px-3 py-2.5 max-w-[200px]">
+                                                            <button
+                                                              type="button"
+                                                              onClick={() => setModalDetalle({ abierto: true, transaccion: t })}
+                                                              className="text-left group"
+                                                            >
+                                                              <span className="font-bold text-gray-800 dark:text-slate-200 group-hover:text-indigo-600 transition block">
+                                                                {totalItems} {totalItems === 1 ? 'artículo' : 'artículos'}
+                                                              </span>
+                                                              <span className="text-[11px] text-gray-400 truncate block max-w-[180px]">
+                                                                {t.consumo_detalles && t.consumo_detalles.length > 0
+                                                                  ? t.consumo_detalles.map((c) => c.productos?.nombre).join(', ')
+                                                                  : 'Ver detalle'}
+                                                              </span>
+                                                            </button>
+                                                          </td>
+                                                          <td className="px-3 py-2.5">
+                                                            <div className="flex items-center gap-1.5 flex-wrap">
+                                                              <span className="font-bold text-gray-800 dark:text-slate-200">
+                                                                {audit.nombreLegible}
+                                                              </span>
+                                                              {audit.referencia && (
+                                                                <span className="rounded-md bg-sky-50 dark:bg-sky-950/60 border border-sky-200 text-sky-800 dark:text-sky-300 px-1.5 py-0.5 text-[10px] font-mono font-bold">
+                                                                  #{audit.referencia}
+                                                                </span>
+                                                              )}
+                                                              {t.metodo_pago.includes('[Pago Familiar]') && (
+                                                                <span className="rounded-md bg-purple-50 dark:bg-purple-950/60 border border-purple-200 text-purple-800 dark:text-purple-300 px-1.5 py-0.5 text-[10px] font-bold">
+                                                                  Familiar
+                                                                </span>
+                                                              )}
+                                                            </div>
+                                                          </td>
+                                                          <td className="px-3 py-2.5 whitespace-nowrap">
+                                                            <div
+                                                              className={`font-mono font-black text-sm ${
+                                                                audit.esAnulado
+                                                                  ? 'line-through text-gray-400'
+                                                                  : 'text-gray-900 dark:text-slate-100'
+                                                              }`}
+                                                            >
+                                                              {formatUSD(t.monto_total_usd)}
+                                                            </div>
+                                                            <div className="font-mono text-[10px] text-gray-400">
+                                                              {formatBs(totalBsEquiv)}
+                                                            </div>
+                                                          </td>
+                                                          <td className="px-3 py-2.5 whitespace-nowrap">
+                                                            <span
+                                                              className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                                                                audit.esAnulado
+                                                                  ? 'bg-rose-100 text-rose-800 border border-rose-200'
+                                                                  : audit.esPendiente
+                                                                  ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                                                                  : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                                              }`}
+                                                            >
+                                                              {audit.estadoBadge.texto}
+                                                            </span>
+                                                          </td>
+                                                          <td className="py-2.5 pl-3 pr-4 text-right whitespace-nowrap">
+                                                            <div className="flex items-center justify-end gap-1.5">
+                                                              <button
+                                                                type="button"
+                                                                onClick={() => setModalDetalle({ abierto: true, transaccion: t })}
+                                                                className="rounded-xl border border-gray-200 dark:border-slate-800 px-2.5 py-1 text-xs font-semibold text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-[#141C2E] transition active:scale-95"
+                                                              >
+                                                                Ticket
+                                                              </button>
+                                                              {!audit.esAnulado && (
+                                                                <button
+                                                                  type="button"
+                                                                  onClick={() =>
+                                                                    setModalAnular({
+                                                                      abierto: true,
+                                                                      transaccion: t,
+                                                                      procesando: false,
+                                                                      error: null,
+                                                                    })
+                                                                  }
+                                                                  className="rounded-xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/40 px-2 py-1 text-xs font-bold text-rose-700 dark:text-rose-300 hover:bg-rose-100 transition active:scale-95 flex items-center gap-1"
+                                                                >
+                                                                  <RotateCcw className="h-3 w-3" />
+                                                                  <span>Anular</span>
+                                                                </button>
+                                                              )}
+                                                            </div>
+                                                          </td>
+                                                        </tr>
+                                                      );
+                                                    })}
+                                                  </tbody>
+                                                </table>
+                                              </div>
+
+                                              {/* PAGINACIÓN ADENTRO DE ESTE DÍA (Máximo 20 por página) */}
+                                              {gDia.transacciones.length > TAMANO_PAGINA_JERARQUIA && (
+                                                <div className="flex flex-col sm:flex-row items-center justify-between gap-3 rounded-2xl border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#0D111A] p-3 shadow-2xs mt-3">
+                                                  <div className="text-xs text-gray-500 dark:text-slate-400 text-center sm:text-left">
+                                                    Mostrando <span className="font-bold text-gray-900 dark:text-slate-100">{(paginaDia - 1) * TAMANO_PAGINA_JERARQUIA + 1}</span> -{' '}
+                                                    <span className="font-bold text-gray-900 dark:text-slate-100">{Math.min(paginaDia * TAMANO_PAGINA_JERARQUIA, gDia.transacciones.length)}</span> de{' '}
+                                                    <span className="font-bold text-indigo-600 dark:text-indigo-400">{gDia.transacciones.length}</span> tickets de este día
+                                                  </div>
+
+                                                  <div className="flex items-center gap-2 self-center sm:self-auto">
+                                                    <button
+                                                      type="button"
+                                                      disabled={paginaDia <= 1}
+                                                      onClick={() => setPaginaDia((p) => Math.max(1, p - 1))}
+                                                      className="flex items-center gap-1 rounded-xl border border-gray-200 dark:border-slate-800 bg-gray-50 dark:bg-[#111726] px-3 py-1.5 text-xs font-bold text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:pointer-events-none transition active:scale-95"
+                                                    >
+                                                      <ChevronLeft className="h-4 w-4" />
+                                                      <span>Anterior</span>
+                                                    </button>
+
+                                                    <div className="px-2.5 py-1 rounded-lg bg-gray-100 dark:bg-slate-800 text-xs font-bold text-gray-700 dark:text-slate-300">
+                                                      Página <span className="text-indigo-600 dark:text-indigo-400 font-extrabold">{paginaDia}</span> de {totalPaginasDia}
+                                                    </div>
+
+                                                    <button
+                                                      type="button"
+                                                      disabled={paginaDia >= totalPaginasDia}
+                                                      onClick={() => setPaginaDia((p) => Math.min(totalPaginasDia, p + 1))}
+                                                      className="flex items-center gap-1 rounded-xl border border-gray-200 dark:border-slate-800 bg-gray-50 dark:bg-[#111726] px-3 py-1.5 text-xs font-bold text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:pointer-events-none transition active:scale-95"
+                                                    >
+                                                      <span>Siguiente</span>
+                                                      <ChevronRight className="h-4 w-4" />
+                                                    </button>
+                                                  </div>
+                                                </div>
+                                              )}
+                                            </div>
                                           )}
                                         </div>
-                                      </td>
-                                    </tr>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
-                          </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
                     </div>
                   );
                 })}
-              </div>
-            )}
-
-            {/* Controles de Paginación en el Servidor (.range) */}
-            {totalRegistros > 0 && (
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 rounded-3xl border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#0D111A] p-3.5 sm:px-5 shadow-2xs">
-                {/* Resumen de conteo */}
-                <div className="text-xs text-gray-500 dark:text-slate-400 text-center sm:text-left">
-                  Mostrando <span className="font-bold text-gray-900 dark:text-slate-100">{indiceInicial}</span> -{' '}
-                  <span className="font-bold text-gray-900 dark:text-slate-100">{indiceFinal}</span> de{' '}
-                  <span className="font-bold text-indigo-600 dark:text-indigo-400">{totalRegistros}</span> transacciones
-                </div>
-
-                {/* Botón Cargar Más en Móviles (Progressive Append) */}
-                {paginaActual < totalPaginas && (
-                  <button
-                    type="button"
-                    disabled={cargandoMas || cargandoTransacciones}
-                    onClick={() => cargarTransacciones(paginaActual + 1, true)}
-                    className="flex sm:hidden w-full items-center justify-center gap-2 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800/60 py-2.5 text-xs font-bold text-indigo-700 dark:text-indigo-300 active:scale-95 transition disabled:opacity-50"
-                  >
-                    {cargandoMas ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <RefreshCw className="h-4 w-4" />
-                    )}
-                    <span>Cargar más transacciones ({transacciones.length} de {totalRegistros})</span>
-                  </button>
-                )}
-
-                {/* Navegación Anterior / Siguiente */}
-                <div className="flex items-center gap-2 self-center sm:self-auto">
-                  <button
-                    type="button"
-                    disabled={paginaActual <= 1 || cargandoTransacciones}
-                    onClick={() => {
-                      const nueva = Math.max(1, paginaActual - 1);
-                      cargarTransacciones(nueva, false);
-                    }}
-                    className="flex items-center gap-1 rounded-2xl border border-gray-200 dark:border-slate-800 bg-gray-50/70 dark:bg-[#111726] px-3.5 py-2 text-xs font-bold text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:pointer-events-none transition active:scale-95"
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                    <span>Anterior</span>
-                  </button>
-
-                  <div className="px-3 py-1.5 rounded-xl bg-gray-100/70 dark:bg-slate-800 text-xs font-bold text-gray-700 dark:text-slate-300">
-                    Página <span className="text-indigo-600 dark:text-indigo-400 font-extrabold">{paginaActual}</span> de{' '}
-                    <span>{totalPaginas}</span>
-                  </div>
-
-                  <button
-                    type="button"
-                    disabled={paginaActual >= totalPaginas || cargandoTransacciones}
-                    onClick={() => {
-                      const nueva = Math.min(totalPaginas, paginaActual + 1);
-                      cargarTransacciones(nueva, false);
-                    }}
-                    className="flex items-center gap-1 rounded-2xl border border-gray-200 dark:border-slate-800 bg-gray-50/70 dark:bg-[#111726] px-3.5 py-2 text-xs font-bold text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:pointer-events-none transition active:scale-95"
-                  >
-                    <span>Siguiente</span>
-                    <ChevronRight className="h-4 w-4" />
-                  </button>
-                </div>
               </div>
             )}
           </>
@@ -1474,15 +1767,15 @@ export default function TransaccionesPage() {
               </div>
             </div>
 
-            {/* Lista y Tabla de Liquidaciones */}
+            {/* Lista y Acordeón Jerárquico: Año -> Mes -> Días (1 al 31) -> Liquidaciones Paginadas */}
             {cargandoLiquidaciones ? (
               <div className="rounded-3xl border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#0D111A] p-12 text-center shadow-2xs">
-                <Loader2 className="mx-auto h-8 w-8 animate-spin text-indigo-600 dark:text-indigo-400" />
+                <Loader2 className="mx-auto h-8 w-8 animate-spin text-emerald-600 dark:text-emerald-400" />
                 <p className="mt-3 text-xs font-semibold text-gray-500 dark:text-slate-400">
                   Cargando liquidaciones y pagos de deuda desde Supabase...
                 </p>
               </div>
-            ) : liquidacionesFiltradas.length === 0 ? (
+            ) : liquidacionesAgrupadasJerarquia.length === 0 ? (
               <div className="rounded-3xl border border-dashed border-gray-200 dark:border-slate-800 bg-white dark:bg-[#0D111A] p-12 text-center">
                 <Receipt className="mx-auto h-10 w-10 text-gray-300 dark:text-slate-600" />
                 <h3 className="mt-2 text-sm font-bold text-gray-800 dark:text-slate-200">
@@ -1496,163 +1789,387 @@ export default function TransaccionesPage() {
               </div>
             ) : (
               <div className="space-y-3">
-                {/* Mobile Cards (< md) */}
-                <div className="grid grid-cols-1 gap-2.5 md:hidden">
-                  {liquidacionesFiltradas.map((liq) => {
-                    const audit = parseConsumoAudit({ metodo_pago: liq.metodo_pago, pagado: liq.pagado });
-                    const fechaObj = formatearFechaHora(liq.fecha);
-                    const totalBsEquiv = calcularConversionBs(liq.monto_total_usd, liq.tasa_bcv_historica || tasaBcv);
+                {liquidacionesAgrupadasJerarquia.map((gAno) => {
+                  const anoAbierto = anoExpandidoLiq === gAno.anoKey;
 
-                    return (
-                      <div
-                        key={liq.id}
-                        className="rounded-3xl border border-emerald-200/70 dark:border-slate-800 bg-white dark:bg-[#0D111A] p-4 shadow-2xs space-y-2.5"
+                  return (
+                    <div
+                      key={gAno.anoKey}
+                      className="overflow-hidden rounded-3xl border border-emerald-200/80 dark:border-slate-800 bg-white dark:bg-[#0D111A] shadow-2xs transition"
+                    >
+                      {/* NIVEL 1: Div / Botón del AÑO en Liquidaciones */}
+                      <button
+                        type="button"
+                        onClick={() => toggleAnoLiq(gAno.anoKey)}
+                        className="w-full flex flex-col sm:flex-row sm:items-center justify-between p-4 sm:px-5 hover:bg-gray-50/70 dark:hover:bg-[#111726]/60 transition text-left gap-3"
                       >
-                        <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-900/60 font-black text-sm">
+                            {gAno.anoKey}
+                          </div>
                           <div>
-                            <span className="text-xs font-bold text-gray-900 dark:text-slate-100 flex items-center gap-1.5">
-                              <User className="h-3.5 w-3.5 text-indigo-600 shrink-0" />
-                              <span>{liq.clientes?.nombre_estudiante || 'Público General / Caja'}</span>
-                            </span>
-                            {liq.clientes?.grado_seccion && (
-                              <span className="text-[11px] text-gray-500 font-medium block ml-5">
-                                Grado / Sección: {liq.clientes.grado_seccion}
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h2 className="text-base font-black text-gray-900 dark:text-slate-100">
+                                {gAno.etiquetaAno}
+                              </h2>
+                              <span className="rounded-full bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200/80 dark:border-emerald-800 px-2.5 py-0.5 text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
+                                {gAno.totalTransacciones} {gAno.totalTransacciones === 1 ? 'liquidación' : 'liquidaciones'}
                               </span>
-                            )}
-                          </div>
-
-                          <div className="text-right">
-                            <div className="font-mono text-base font-black text-emerald-700 dark:text-emerald-400">
-                              {formatUSD(liq.monto_total_usd)}
                             </div>
-                            <div className="font-mono text-[10px] text-gray-400">
-                              {formatBs(totalBsEquiv)}
-                            </div>
+                            <span className="text-[11px] text-gray-400 mt-0.5 block">
+                              {anoAbierto ? 'Clic para contraer año' : 'Clic para desplegar los meses de este año'}
+                            </span>
                           </div>
                         </div>
 
-                        <div className="rounded-2xl bg-gray-50 dark:bg-[#111726] p-2.5 text-xs flex flex-wrap items-center justify-between gap-2">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="font-bold text-gray-700 dark:text-slate-200">
-                              {audit.nombreLegible}
-                            </span>
-                            {audit.referencia && (
-                              <span className="rounded-md bg-sky-100 dark:bg-sky-950/80 border border-sky-300 text-sky-800 dark:text-sky-300 px-2 py-0.5 text-[10px] font-mono font-bold">
-                                Ref: #{audit.referencia}
-                              </span>
-                            )}
-                            {liq.metodo_pago.includes('[Pago Familiar]') && (
-                              <span className="rounded-md bg-purple-100 dark:bg-purple-950/80 border border-purple-300 text-purple-800 dark:text-purple-300 px-2 py-0.5 text-[10px] font-bold">
-                                Pago Familiar
-                              </span>
-                            )}
+                        <div className="flex items-center justify-between sm:justify-end gap-4 border-t sm:border-t-0 pt-2 sm:pt-0 border-gray-100 dark:border-slate-800">
+                          <div className="text-left sm:text-right">
+                            <div className="text-base sm:text-lg font-black text-emerald-700 dark:text-emerald-400">
+                              {formatUSD(gAno.totalAnoUsd)}
+                            </div>
+                            <div className="text-[11px] font-mono text-gray-500 dark:text-slate-400 font-bold">
+                              {formatBs(gAno.totalAnoBs)}
+                            </div>
                           </div>
 
-                          <span className="text-[10px] text-gray-400 flex items-center gap-1">
-                            <Clock className="h-3 w-3" />
-                            {fechaObj.fecha} &bull; {fechaObj.hora}
-                          </span>
-                        </div>
-
-                        <div className="flex justify-end pt-1">
-                          <button
-                            type="button"
-                            onClick={() => setModalDetalle({ abierto: true, transaccion: liq })}
-                            className="w-full rounded-2xl border border-gray-200 dark:border-slate-800 py-1.5 text-xs font-bold text-gray-700 dark:text-slate-300 hover:bg-gray-50 transition active:scale-95 text-center"
+                          <div
+                            className={`p-2 rounded-xl border border-gray-200/80 dark:border-slate-800 bg-gray-50 dark:bg-[#111726] text-gray-600 dark:text-slate-300 transition-transform ${
+                              anoAbierto ? 'rotate-180' : ''
+                            }`}
                           >
-                            Ver Comprobante
-                          </button>
+                            <ChevronDown className="h-4 w-4" />
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                      </button>
 
-                {/* Desktop Table (>= md) */}
-                <div className="hidden md:block overflow-hidden rounded-3xl border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#0D111A] shadow-2xs">
-                  <table className="w-full text-left text-xs">
-                    <thead className="border-b border-gray-200/80 dark:border-slate-800 bg-gray-50/70 dark:bg-[#111726] text-gray-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">
-                      <tr>
-                        <th className="py-3.5 pl-4 pr-3">Fecha y Hora</th>
-                        <th className="px-3 py-3.5">Estudiante</th>
-                        <th className="px-3 py-3.5">Grado / Sección</th>
-                        <th className="px-3 py-3.5">Método / Referencia</th>
-                        <th className="px-3 py-3.5">Monto Liquidado</th>
-                        <th className="py-3.5 pl-3 pr-4 text-right">Comprobante</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100 dark:divide-slate-800/80">
-                      {liquidacionesFiltradas.map((liq) => {
-                        const audit = parseConsumoAudit({ metodo_pago: liq.metodo_pago, pagado: liq.pagado });
-                        const fechaObj = formatearFechaHora(liq.fecha);
-                        const totalBsEquiv = calcularConversionBs(liq.monto_total_usd, liq.tasa_bcv_historica || tasaBcv);
+                      {/* NIVEL 2: Contenedor de MESES en Liquidaciones */}
+                      {anoAbierto && (
+                        <div className="border-t border-gray-100 dark:border-slate-800/80 p-3 sm:p-4 bg-gray-50/30 dark:bg-[#0a0e17]/30 space-y-3">
+                          {gAno.meses.map((gMes) => {
+                            const mesAbierto = mesExpandidoLiq === gMes.mesKey;
 
-                        return (
-                          <tr key={liq.id} className="hover:bg-gray-50/70 dark:hover:bg-[#111726]/60 transition">
-                            <td className="py-3 pl-4 pr-3 whitespace-nowrap">
-                              <div className="font-bold text-gray-900 dark:text-slate-100">{fechaObj.fecha}</div>
-                              <div className="text-[10px] text-gray-400">{fechaObj.hora}</div>
-                            </td>
-
-                            <td className="px-3 py-3">
-                              <div className="font-bold text-gray-900 dark:text-slate-100">
-                                {liq.clientes?.nombre_estudiante || 'Público General / Caja'}
-                              </div>
-                              {liq.clientes?.nombre_representante && (
-                                <div className="text-[10px] text-gray-400">
-                                  Rep: {liq.clientes.nombre_representante}
-                                </div>
-                              )}
-                            </td>
-
-                            <td className="px-3 py-3">
-                              <span className="rounded-full bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800/60 px-2.5 py-0.5 text-[10px] font-bold text-indigo-700 dark:text-indigo-300">
-                                {liq.clientes?.grado_seccion || 'Sin sección'}
-                              </span>
-                            </td>
-
-                            <td className="px-3 py-3">
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                <span className="font-bold text-gray-800 dark:text-slate-200">
-                                  {audit.nombreLegible}
-                                </span>
-                                {audit.referencia && (
-                                  <span className="rounded-md bg-sky-100 dark:bg-sky-950/80 border border-sky-300 text-sky-800 dark:text-sky-300 px-2 py-0.5 text-[10px] font-mono font-bold">
-                                    Ref: #{audit.referencia}
-                                  </span>
-                                )}
-                                {liq.metodo_pago.includes('[Pago Familiar]') && (
-                                  <span className="rounded-md bg-purple-100 dark:bg-purple-950/80 border border-purple-300 text-purple-800 dark:text-purple-300 px-2 py-0.5 text-[10px] font-bold">
-                                    Pago Familiar
-                                  </span>
-                                )}
-                              </div>
-                            </td>
-
-                            <td className="px-3 py-3 whitespace-nowrap">
-                              <div className="font-mono font-black text-sm text-emerald-700 dark:text-emerald-400">
-                                {formatUSD(liq.monto_total_usd)}
-                              </div>
-                              <div className="font-mono text-[10px] text-gray-400">
-                                {formatBs(totalBsEquiv)}
-                              </div>
-                            </td>
-
-                            <td className="py-3 pl-3 pr-4 text-right whitespace-nowrap">
-                              <button
-                                type="button"
-                                onClick={() => setModalDetalle({ abierto: true, transaccion: liq })}
-                                className="rounded-xl border border-gray-200 dark:border-slate-800 px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-[#141C2E] transition active:scale-95"
+                            return (
+                              <div
+                                key={gMes.mesKey}
+                                className="overflow-hidden rounded-2xl border border-gray-200/80 dark:border-slate-800/90 bg-white dark:bg-[#0D111A] shadow-2xs transition"
                               >
-                                Ver Detalle
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                                {/* Botón del MES */}
+                                <button
+                                  type="button"
+                                  onClick={() => toggleMesLiq(gMes.mesKey)}
+                                  className="w-full flex flex-col sm:flex-row sm:items-center justify-between p-3.5 sm:px-4 hover:bg-gray-50/70 dark:hover:bg-[#111726]/60 transition text-left gap-2.5"
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-teal-50 dark:bg-teal-950/60 text-teal-600 dark:text-teal-400 border border-teal-100 dark:border-teal-900/40">
+                                      <Receipt className="h-4 w-4" />
+                                    </div>
+                                    <div>
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <h3 className="text-sm font-bold text-gray-900 dark:text-slate-100">
+                                          {gMes.etiquetaMes}
+                                        </h3>
+                                        <span className="rounded-full bg-teal-50 dark:bg-teal-950/60 border border-teal-200/80 dark:border-teal-800 px-2 py-0.2 text-[10px] font-bold text-teal-700 dark:text-teal-300">
+                                          {gMes.totalTransacciones} {gMes.totalTransacciones === 1 ? 'pago' : 'pagos'}
+                                        </span>
+                                      </div>
+                                      <span className="text-[10px] text-gray-400 mt-0.5 block">
+                                        {mesAbierto ? 'Clic para contraer mes' : 'Clic para desplegar los días (1 al 31)'}
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex items-center justify-between sm:justify-end gap-3 border-t sm:border-t-0 pt-1.5 sm:pt-0 border-gray-100 dark:border-slate-800">
+                                    <div className="text-left sm:text-right">
+                                      <div className="text-sm font-black text-emerald-700 dark:text-emerald-400">
+                                        {formatUSD(gMes.totalMesUsd)}
+                                      </div>
+                                      <div className="text-[10px] font-mono text-gray-500 dark:text-slate-400 font-bold">
+                                        {formatBs(gMes.totalMesBs)}
+                                      </div>
+                                    </div>
+
+                                    <div
+                                      className={`p-1.5 rounded-lg border border-gray-200/80 dark:border-slate-800 bg-gray-50 dark:bg-[#111726] text-gray-600 dark:text-slate-300 transition-transform ${
+                                        mesAbierto ? 'rotate-180' : ''
+                                      }`}
+                                    >
+                                      <ChevronDown className="h-3.5 w-3.5" />
+                                    </div>
+                                  </div>
+                                </button>
+
+                                {/* NIVEL 3: Contenedor de DÍAS (1 al 31) en Liquidaciones */}
+                                {mesAbierto && (
+                                  <div className="border-t border-gray-100 dark:border-slate-800/80 p-2.5 sm:p-3 bg-gray-50/50 dark:bg-[#0a0e17]/50 space-y-2.5">
+                                    {gMes.dias.map((gDia) => {
+                                      const diaAbierto = diaExpandidoLiq === gDia.diaKey;
+                                      const totalPaginasDiaLiq = Math.max(1, Math.ceil(gDia.transacciones.length / TAMANO_PAGINA_JERARQUIA));
+                                      const liquidacionesPaginadas = gDia.transacciones.slice(
+                                        (paginaDiaLiq - 1) * TAMANO_PAGINA_JERARQUIA,
+                                        paginaDiaLiq * TAMANO_PAGINA_JERARQUIA
+                                      );
+
+                                      return (
+                                        <div
+                                          key={gDia.diaKey}
+                                          className="overflow-hidden rounded-xl border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#0D111A] shadow-2xs transition"
+                                        >
+                                          {/* Tarjeta del DÍA - Exclusive Accordion */}
+                                          <button
+                                            type="button"
+                                            onClick={() => toggleDiaLiq(gDia.diaKey)}
+                                            className="w-full flex flex-col sm:flex-row sm:items-center justify-between p-3 sm:px-4 hover:bg-gray-50/70 dark:hover:bg-[#111726]/60 transition text-left gap-2.5"
+                                          >
+                                            <div className="flex items-center gap-2.5">
+                                              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-900/40">
+                                                <Calendar className="h-4 w-4" />
+                                              </div>
+                                              <div>
+                                                <div className="flex items-center gap-2 flex-wrap">
+                                                  <h4 className="text-xs sm:text-sm font-bold text-gray-900 dark:text-slate-100">
+                                                    {gDia.etiquetaDia}
+                                                  </h4>
+                                                  <span className="rounded-full bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200/80 dark:border-emerald-800 px-2 py-0.2 text-[10px] font-bold text-emerald-700 dark:text-emerald-300">
+                                                    {gDia.totalTransacciones} {gDia.totalTransacciones === 1 ? 'pago' : 'pagos'}
+                                                  </span>
+                                                </div>
+                                                <span className="text-[10px] text-gray-400 mt-0.5 block">
+                                                  {diaAbierto ? 'Clic para contraer' : 'Clic para desplegar liquidaciones de este día'}
+                                                </span>
+                                              </div>
+                                            </div>
+
+                                            <div className="flex items-center justify-between sm:justify-end gap-3 border-t sm:border-t-0 pt-1.5 sm:pt-0 border-gray-100 dark:border-slate-800">
+                                              <div className="text-left sm:text-right">
+                                                <div className="text-xs sm:text-sm font-black text-emerald-700 dark:text-emerald-400">
+                                                  {formatUSD(gDia.totalDiaUsd)}
+                                                </div>
+                                                <div className="text-[10px] font-mono text-gray-500 dark:text-slate-400 font-bold">
+                                                  {formatBs(gDia.totalDiaBs)}
+                                                </div>
+                                              </div>
+
+                                              <div
+                                                className={`p-1.5 rounded-lg border border-gray-200/80 dark:border-slate-800 bg-gray-50 dark:bg-[#111726] text-gray-600 dark:text-slate-300 transition-transform ${
+                                                  diaAbierto ? 'rotate-180' : ''
+                                                }`}
+                                              >
+                                                <ChevronDown className="h-3.5 w-3.5" />
+                                              </div>
+                                            </div>
+                                          </button>
+
+                                          {/* NIVEL 4: Contenido del DÍA abierto en Liquidaciones con paginación interna */}
+                                          {diaAbierto && (
+                                            <div className="border-t border-gray-100 dark:border-slate-800/80 p-2.5 sm:p-3 bg-gray-50/40 dark:bg-[#0a0e17]/40 space-y-3">
+                                              {/* Mobile Cards (< md) */}
+                                              <div className="grid grid-cols-1 gap-2.5 md:hidden">
+                                                {liquidacionesPaginadas.map((liq) => {
+                                                  const audit = parseConsumoAudit({ metodo_pago: liq.metodo_pago, pagado: liq.pagado });
+                                                  const fechaObj = formatearFechaHora(liq.fecha);
+                                                  const totalBsEquiv = calcularConversionBs(liq.monto_total_usd, liq.tasa_bcv_historica || tasaBcv);
+
+                                                  return (
+                                                    <div
+                                                      key={liq.id}
+                                                      className="rounded-2xl border border-emerald-200/70 dark:border-slate-800 bg-white dark:bg-[#0D111A] p-3.5 shadow-2xs space-y-2.5"
+                                                    >
+                                                      <div className="flex items-start justify-between gap-2">
+                                                        <div>
+                                                          <span className="text-xs font-bold text-gray-900 dark:text-slate-100 flex items-center gap-1.5">
+                                                            <User className="h-3.5 w-3.5 text-indigo-600 shrink-0" />
+                                                            <span>{liq.clientes?.nombre_estudiante || 'Público General / Caja'}</span>
+                                                          </span>
+                                                          {liq.clientes?.grado_seccion && (
+                                                            <span className="text-[11px] text-gray-500 font-medium block ml-5">
+                                                              Grado / Sección: {liq.clientes.grado_seccion}
+                                                            </span>
+                                                          )}
+                                                        </div>
+
+                                                        <div className="text-right">
+                                                          <div className="font-mono text-base font-black text-emerald-700 dark:text-emerald-400">
+                                                            {formatUSD(liq.monto_total_usd)}
+                                                          </div>
+                                                          <div className="font-mono text-[10px] text-gray-400">
+                                                            {formatBs(totalBsEquiv)}
+                                                          </div>
+                                                        </div>
+                                                      </div>
+
+                                                      <div className="rounded-xl bg-gray-50 dark:bg-[#111726] p-2 text-xs flex flex-wrap items-center justify-between gap-2">
+                                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                                          <span className="font-bold text-gray-700 dark:text-slate-200">
+                                                            {audit.nombreLegible}
+                                                          </span>
+                                                          {audit.referencia && (
+                                                            <span className="rounded-md bg-sky-100 dark:bg-sky-950/80 border border-sky-300 text-sky-800 dark:text-sky-300 px-1.5 py-0.2 text-[10px] font-mono font-bold">
+                                                              Ref: #{audit.referencia}
+                                                            </span>
+                                                          )}
+                                                          {liq.metodo_pago.includes('[Pago Familiar]') && (
+                                                            <span className="rounded-md bg-purple-100 dark:bg-purple-950/80 border border-purple-300 text-purple-800 dark:text-purple-300 px-1.5 py-0.2 text-[10px] font-bold">
+                                                              Familiar
+                                                            </span>
+                                                          )}
+                                                        </div>
+
+                                                        <span className="text-[10px] text-gray-400 flex items-center gap-1">
+                                                          <Clock className="h-3 w-3" />
+                                                          {fechaObj.hora}
+                                                        </span>
+                                                      </div>
+
+                                                      <div className="flex justify-end pt-0.5">
+                                                        <button
+                                                          type="button"
+                                                          onClick={() => setModalDetalle({ abierto: true, transaccion: liq })}
+                                                          className="w-full rounded-xl border border-gray-200 dark:border-slate-800 py-1.5 text-xs font-bold text-gray-700 dark:text-slate-300 hover:bg-gray-50 transition active:scale-95 text-center"
+                                                        >
+                                                          Ver Comprobante
+                                                        </button>
+                                                      </div>
+                                                    </div>
+                                                  );
+                                                })}
+                                              </div>
+
+                                              {/* Desktop Table (>= md) */}
+                                              <div className="hidden md:block overflow-hidden rounded-2xl border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#0D111A]">
+                                                <table className="w-full text-left text-xs">
+                                                  <thead className="border-b border-gray-200/80 dark:border-slate-800 bg-gray-50/70 dark:bg-[#111726] text-gray-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">
+                                                    <tr>
+                                                      <th className="py-3 pl-4 pr-3">Hora</th>
+                                                      <th className="px-3 py-3">Estudiante</th>
+                                                      <th className="px-3 py-3">Grado / Sección</th>
+                                                      <th className="px-3 py-3">Método / Referencia</th>
+                                                      <th className="px-3 py-3">Monto Liquidado</th>
+                                                      <th className="py-3 pl-3 pr-4 text-right">Comprobante</th>
+                                                    </tr>
+                                                  </thead>
+                                                  <tbody className="divide-y divide-gray-100 dark:divide-slate-800/80">
+                                                    {liquidacionesPaginadas.map((liq) => {
+                                                      const audit = parseConsumoAudit({ metodo_pago: liq.metodo_pago, pagado: liq.pagado });
+                                                      const fechaObj = formatearFechaHora(liq.fecha);
+                                                      const totalBsEquiv = calcularConversionBs(liq.monto_total_usd, liq.tasa_bcv_historica || tasaBcv);
+
+                                                      return (
+                                                        <tr key={liq.id} className="hover:bg-gray-50/70 dark:hover:bg-[#111726]/60 transition">
+                                                          <td className="py-2.5 pl-4 pr-3 whitespace-nowrap font-mono text-gray-600 dark:text-slate-400 font-bold">
+                                                            {fechaObj.hora}
+                                                          </td>
+
+                                                          <td className="px-3 py-2.5">
+                                                            <div className="font-bold text-gray-900 dark:text-slate-100">
+                                                              {liq.clientes?.nombre_estudiante || 'Público General / Caja'}
+                                                            </div>
+                                                            {liq.clientes?.nombre_representante && (
+                                                              <div className="text-[10px] text-gray-400">
+                                                                Rep: {liq.clientes.nombre_representante}
+                                                              </div>
+                                                            )}
+                                                          </td>
+
+                                                          <td className="px-3 py-2.5">
+                                                            <span className="rounded-full bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800/60 px-2 py-0.2 text-[10px] font-bold text-indigo-700 dark:text-indigo-300">
+                                                              {liq.clientes?.grado_seccion || 'Sin sección'}
+                                                            </span>
+                                                          </td>
+
+                                                          <td className="px-3 py-2.5">
+                                                            <div className="flex items-center gap-1.5 flex-wrap">
+                                                              <span className="font-bold text-gray-800 dark:text-slate-200">
+                                                                {audit.nombreLegible}
+                                                              </span>
+                                                              {audit.referencia && (
+                                                                <span className="rounded-md bg-sky-100 dark:bg-sky-950/80 border border-sky-300 text-sky-800 dark:text-sky-300 px-1.5 py-0.2 text-[10px] font-mono font-bold">
+                                                                  Ref: #{audit.referencia}
+                                                                </span>
+                                                              )}
+                                                              {liq.metodo_pago.includes('[Pago Familiar]') && (
+                                                                <span className="rounded-md bg-purple-100 dark:bg-purple-950/80 border border-purple-300 text-purple-800 dark:text-purple-300 px-1.5 py-0.2 text-[10px] font-bold">
+                                                                  Familiar
+                                                                </span>
+                                                              )}
+                                                            </div>
+                                                          </td>
+
+                                                          <td className="px-3 py-2.5 whitespace-nowrap">
+                                                            <div className="font-mono font-black text-sm text-emerald-700 dark:text-emerald-400">
+                                                              {formatUSD(liq.monto_total_usd)}
+                                                            </div>
+                                                            <div className="font-mono text-[10px] text-gray-400">
+                                                              {formatBs(totalBsEquiv)}
+                                                            </div>
+                                                          </td>
+
+                                                          <td className="py-2.5 pl-3 pr-4 text-right whitespace-nowrap">
+                                                            <button
+                                                              type="button"
+                                                              onClick={() => setModalDetalle({ abierto: true, transaccion: liq })}
+                                                              className="rounded-xl border border-gray-200 dark:border-slate-800 px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-[#141C2E] transition active:scale-95"
+                                                            >
+                                                              Ver Detalle
+                                                            </button>
+                                                          </td>
+                                                        </tr>
+                                                      );
+                                                    })}
+                                                  </tbody>
+                                                </table>
+                                              </div>
+
+                                              {/* PAGINACIÓN ADENTRO DE ESTE DÍA EN LIQUIDACIONES (Máximo 20 por página) */}
+                                              {gDia.transacciones.length > TAMANO_PAGINA_JERARQUIA && (
+                                                <div className="flex flex-col sm:flex-row items-center justify-between gap-3 rounded-2xl border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#0D111A] p-3 shadow-2xs mt-3">
+                                                  <div className="text-xs text-gray-500 dark:text-slate-400 text-center sm:text-left">
+                                                    Mostrando <span className="font-bold text-gray-900 dark:text-slate-100">{(paginaDiaLiq - 1) * TAMANO_PAGINA_JERARQUIA + 1}</span> -{' '}
+                                                    <span className="font-bold text-gray-900 dark:text-slate-100">{Math.min(paginaDiaLiq * TAMANO_PAGINA_JERARQUIA, gDia.transacciones.length)}</span> de{' '}
+                                                    <span className="font-bold text-emerald-600 dark:text-emerald-400">{gDia.transacciones.length}</span> pagos de este día
+                                                  </div>
+
+                                                  <div className="flex items-center gap-2 self-center sm:self-auto">
+                                                    <button
+                                                      type="button"
+                                                      disabled={paginaDiaLiq <= 1}
+                                                      onClick={() => setPaginaDiaLiq((p) => Math.max(1, p - 1))}
+                                                      className="flex items-center gap-1 rounded-xl border border-gray-200 dark:border-slate-800 bg-gray-50 dark:bg-[#111726] px-3 py-1.5 text-xs font-bold text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:pointer-events-none transition active:scale-95"
+                                                    >
+                                                      <ChevronLeft className="h-4 w-4" />
+                                                      <span>Anterior</span>
+                                                    </button>
+
+                                                    <div className="px-2.5 py-1 rounded-lg bg-gray-100 dark:bg-slate-800 text-xs font-bold text-gray-700 dark:text-slate-300">
+                                                      Página <span className="text-emerald-600 dark:text-emerald-400 font-extrabold">{paginaDiaLiq}</span> de {totalPaginasDiaLiq}
+                                                    </div>
+
+                                                    <button
+                                                      type="button"
+                                                      disabled={paginaDiaLiq >= totalPaginasDiaLiq}
+                                                      onClick={() => setPaginaDiaLiq((p) => Math.min(totalPaginasDiaLiq, p + 1))}
+                                                      className="flex items-center gap-1 rounded-xl border border-gray-200 dark:border-slate-800 bg-gray-50 dark:bg-[#111726] px-3 py-1.5 text-xs font-bold text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:pointer-events-none transition active:scale-95"
+                                                    >
+                                                      <span>Siguiente</span>
+                                                      <ChevronRight className="h-4 w-4" />
+                                                    </button>
+                                                  </div>
+                                                </div>
+                                              )}
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
