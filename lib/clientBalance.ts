@@ -390,7 +390,24 @@ export function parseConsumoAudit(consumo: {
   } else if (limpio === 'pendiente') {
     nombreLegible = 'Fiado / Por Cobrar';
   } else if (esMixto) {
-    nombreLegible = 'Pago Mixto';
+    const matchUsd = limpio.match(/efectivo_usd=([0-9.]+)/i);
+    const matchBs = limpio.match(/efectivo_bs=([0-9.]+)/i);
+    const matchPm = limpio.match(/pago_movil=([0-9.]+)/i);
+    const matchPunto = limpio.match(/punto_debito=([0-9.]+)/i);
+    const matchSaldo = limpio.match(/saldo_favor=([0-9.]+)/i);
+
+    const partes: string[] = [];
+    if (matchUsd) partes.push(`$${parseFloat(matchUsd[1]).toFixed(2)} Efec`);
+    if (matchSaldo) partes.push(`Saldo $${parseFloat(matchSaldo[1]).toFixed(2)}`);
+    if (matchBs) partes.push(`Bs. ${parseFloat(matchBs[1]).toFixed(2)}`);
+    if (matchPm) partes.push(`Bs. ${parseFloat(matchPm[1]).toFixed(2)} (P. Móvil)`);
+    if (matchPunto) partes.push(`Bs. ${parseFloat(matchPunto[1]).toFixed(2)} (Punto)`);
+
+    if (partes.length > 0) {
+      nombreLegible = `Mixto (${partes.join(' + ')})`;
+    } else {
+      nombreLegible = 'Pago Mixto ($ + Bs)';
+    }
   } else if (limpio.startsWith('abono') || limpio.startsWith('vuelto')) {
     nombreLegible = 'Abono / Vuelto a Cuenta';
   } else if (limpio) {

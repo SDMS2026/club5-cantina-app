@@ -44,7 +44,7 @@ import { refrescarNotificacionesGlobales } from '@/components/NotificationsConte
 export interface PedidoVozResultado {
   accion?: 'orden_pos' | 'abono_saldo_favor' | 'guardar_vuelto';
   monto_abono_usd?: number;
-  metodo_pago_sugerido?: 'efectivo_usd' | 'efectivo_bs' | 'pago_movil' | 'punto_debito' | 'pendiente' | 'saldo_favor';
+  metodo_pago_sugerido?: MetodoPagoId;
   cliente_id: string | null;
   nuevo_cliente?: {
     nombre_estudiante: string;

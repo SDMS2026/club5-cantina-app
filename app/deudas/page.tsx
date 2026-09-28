@@ -38,7 +38,9 @@ import {
   PiggyBank,
   Sparkles,
   Banknote,
+  Users,
 } from 'lucide-react';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { obtenerTasaBCV, TASA_BCV_FALLBACK_DEFAULT } from '@/lib/dolarApi';
 import { supabase } from '@/lib/supabaseClient';
 import {
@@ -209,6 +211,8 @@ export default function DeudasPage() {
 
   const [metodoPago, setMetodoPago] = useState<MetodoCancelacionId>('pago_movil');
   const [numeroReferenciaLiquidacion, setNumeroReferenciaLiquidacion] = useState<string>('');
+  const [esPagoFamiliar, setEsPagoFamiliar] = useState<boolean>(false);
+  const [ultimaReferenciaFamiliar, setUltimaReferenciaFamiliar] = useState<string>('');
   const [procesandoPago, setProcesandoPago] = useState<boolean>(false);
   const [errorPago, setErrorPago] = useState<string | null>(null);
 
@@ -299,15 +303,25 @@ export default function DeudasPage() {
 
       if (error) {
         console.error('Error al consultar deudas en Supabase:', error);
+        setDeudas([]);
       } else {
-        setDeudas((data as unknown as DeudaRegistro[]) || []);
+        const registrosNormalizados: DeudaRegistro[] = (data || []).map((d: any) => {
+          const cli = Array.isArray(d.clientes) ? d.clientes[0] || null : d.clientes || null;
+          return {
+            ...d,
+            clientes: cli,
+            monto_total_usd: Number(d.monto_total_usd) || 0,
+            fecha: d.fecha || new Date().toISOString(),
+            consumo_detalles: Array.isArray(d.consumo_detalles) ? d.consumo_detalles : [],
+          };
+        });
+        setDeudas(registrosNormalizados);
       }
-      setSaldosClientes(saldos);
-      if (clientesData) {
-        setTodosLosClientes(clientesData);
-      }
+      setSaldosClientes(saldos || {});
+      setTodosLosClientes(Array.isArray(clientesData) ? clientesData : []);
     } catch (e) {
       console.error('Excepción cargando consumos pendientes y saldos:', e);
+      setDeudas([]);
     } finally {
       setCargandoDeudas(false);
     }
@@ -352,9 +366,10 @@ export default function DeudasPage() {
   // Lista única de Grados / Secciones para el selector desplegable
   const gradosDisponibles = useMemo(() => {
     const set = new Set<string>();
-    for (const d of deudas) {
-      if (d.clientes?.grado_seccion) {
-        set.add(d.clientes.grado_seccion);
+    for (const d of (deudas || [])) {
+      const cli = Array.isArray(d.clientes) ? d.clientes[0] : d.clientes;
+      if (cli?.grado_seccion) {
+        set.add(cli.grado_seccion);
       }
     }
     return Array.from(set).sort();
@@ -364,24 +379,29 @@ export default function DeudasPage() {
   const cuentasAgrupadas = useMemo(() => {
     const mapa = new Map<string, CuentaEstudianteAgrupada>();
 
-    for (const deuda of deudas) {
+    for (const deuda of (deudas || [])) {
+      if (!deuda || !deuda.id) continue;
       const key = deuda.cliente_id || `sin-cliente-${deuda.id}`;
       // Si el cliente tiene id, verificar si su cuenta corriente unificada tiene saldo negativo
       if (deuda.cliente_id) {
-        const s = saldosClientes[deuda.cliente_id]?.saldoNetoUsd ?? deuda.clientes?.saldo ?? 0;
+        const s = saldosClientes?.[deuda.cliente_id]?.saldoNetoUsd ?? deuda.clientes?.saldo ?? 0;
         // Si el cliente ya está solvente o a favor (saldo >= 0), no tiene deuda activa
         if (s >= 0) continue;
       }
 
+      const clienteNormalizado = Array.isArray(deuda.clientes)
+        ? deuda.clientes[0] || null
+        : deuda.clientes || null;
+
       if (!mapa.has(key)) {
         mapa.set(key, {
           clienteKey: key,
-          cliente: deuda.clientes || null,
+          cliente: clienteNormalizado,
           totalDeudaUsd: 0,
           totalDeudaBs: 0,
           consumos: [],
-          fechaMasReciente: deuda.fecha,
-          fechaMasAntigua: deuda.fecha,
+          fechaMasReciente: deuda.fecha || new Date().toISOString(),
+          fechaMasAntigua: deuda.fecha || new Date().toISOString(),
         });
       }
 
@@ -389,26 +409,34 @@ export default function DeudasPage() {
       cuenta.totalDeudaUsd += Number(deuda.monto_total_usd || 0);
       cuenta.consumos.push(deuda);
 
-      if (new Date(deuda.fecha) > new Date(cuenta.fechaMasReciente)) {
-        cuenta.fechaMasReciente = deuda.fecha;
-      }
-      if (new Date(deuda.fecha) < new Date(cuenta.fechaMasAntigua)) {
-        cuenta.fechaMasAntigua = deuda.fecha;
+      const fDeudaTime = new Date(deuda.fecha).getTime();
+      const fRecienteTime = new Date(cuenta.fechaMasReciente).getTime();
+      const fAntiguaTime = new Date(cuenta.fechaMasAntigua).getTime();
+
+      if (!isNaN(fDeudaTime)) {
+        if (isNaN(fRecienteTime) || fDeudaTime > fRecienteTime) {
+          cuenta.fechaMasReciente = deuda.fecha;
+        }
+        if (isNaN(fAntiguaTime) || fDeudaTime < fAntiguaTime) {
+          cuenta.fechaMasAntigua = deuda.fecha;
+        }
       }
     }
 
     // Asegurar que si un cliente tiene clientes.saldo < 0, su totalDeudaUsd refleje el saldo adeudado real
     for (const cuenta of mapa.values()) {
       if (cuenta.cliente?.id) {
-        const s = saldosClientes[cuenta.cliente.id]?.saldoNetoUsd ?? cuenta.cliente.saldo;
+        const s = saldosClientes?.[cuenta.cliente.id]?.saldoNetoUsd ?? cuenta.cliente.saldo;
         if (s !== undefined && s !== null && s < 0) {
           cuenta.totalDeudaUsd = Math.abs(s);
         }
       }
       cuenta.totalDeudaBs = calcularConversionBs(cuenta.totalDeudaUsd, tasaBcv);
-      cuenta.consumos.sort(
-        (a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime()
-      );
+      cuenta.consumos.sort((a, b) => {
+        const tA = new Date(a.fecha).getTime();
+        const tB = new Date(b.fecha).getTime();
+        return (isNaN(tB) ? 0 : tB) - (isNaN(tA) ? 0 : tA);
+      });
     }
 
     return Array.from(mapa.values());
@@ -539,80 +567,121 @@ export default function DeudasPage() {
     setErrorPago(null);
   };
 
-  // Confirmar liquidación en Supabase
+  // Confirmar liquidación en Supabase con blindaje total y recuperación de errores
   const handleConfirmarLiquidacion = async () => {
-    if (modalLiquidacion.idsConsumos.length === 0) return;
+    const idsValidos = (modalLiquidacion.idsConsumos || []).filter(
+      (id): id is string => typeof id === 'string' && id.trim().length > 0
+    );
+
+    if (idsValidos.length === 0) {
+      setErrorPago('No se encontraron registros de consumos válidos para liquidar.');
+      return;
+    }
+
     setProcesandoPago(true);
     setErrorPago(null);
+
+    const montoTotalLiquidado = Number(modalLiquidacion.montoUsd) || 0;
+    const nombreClienteLiquidado = modalLiquidacion.nombreEstudiante || 'Estudiante';
+    const clienteIdLiquidado = modalLiquidacion.clienteId || null;
 
     try {
       // Si el método seleccionado es saldo a favor, verificar que el cliente posea crédito suficiente
       if (metodoPago === 'saldo_favor') {
-        const saldoDisponible = modalLiquidacion.clienteId
-          ? saldosClientes[modalLiquidacion.clienteId]?.saldoAFavorTotalUsd || 0
+        const saldoDisponible = clienteIdLiquidado
+          ? saldosClientes[clienteIdLiquidado]?.saldoAFavorTotalUsd || 0
           : 0;
 
-        if (saldoDisponible < modalLiquidacion.montoUsd) {
+        if (saldoDisponible < montoTotalLiquidado) {
           throw new Error(
-            `Saldo a favor insuficiente (+${formatUSD(saldoDisponible)} disponible vs ${formatUSD(modalLiquidacion.montoUsd)} a liquidar). Usa la opción 'Abonar' para realizar un pago mixto o abonar la diferencia.`
+            `Saldo a favor insuficiente (+${formatUSD(saldoDisponible)} disponible vs ${formatUSD(montoTotalLiquidado)} a liquidar). Usa la opción 'Abonar' para realizar un pago mixto o abonar la diferencia.`
           );
         }
       }
 
       let metodoFinal = metodoPago as string;
-      if (metodoPago === 'pago_movil' && numeroReferenciaLiquidacion.trim()) {
-        metodoFinal = `pago_movil#ref:${numeroReferenciaLiquidacion.trim()}`;
+      const refLimpia = numeroReferenciaLiquidacion.trim();
+      if (metodoPago === 'pago_movil' && refLimpia) {
+        metodoFinal = esPagoFamiliar
+          ? `pago_movil#ref:${refLimpia} [Pago Familiar]`
+          : `pago_movil#ref:${refLimpia}`;
+        setUltimaReferenciaFamiliar(refLimpia);
       }
 
-      const { error } = await supabase
+      const { error: errorUpdateConsumos } = await supabase
         .from('consumos')
         .update({
           pagado: true,
           metodo_pago: metodoFinal,
         })
-        .in('id', modalLiquidacion.idsConsumos);
+        .in('id', idsValidos);
 
-      if (error) {
-        throw new Error(error.message || 'Error al actualizar el estado de los consumos');
+      if (errorUpdateConsumos) {
+        throw new Error(
+          errorUpdateConsumos.message || 'Error al actualizar el estado de los consumos en Supabase'
+        );
       }
 
       // Si el pago de la deuda fue con dinero externo (efectivo, pago móvil, etc.), sumamos a clientes.saldo
-      if (modalLiquidacion.clienteId && metodoPago !== 'saldo_favor') {
+      if (clienteIdLiquidado && metodoPago !== 'saldo_favor') {
         try {
-          const { data: cli } = await supabase
+          const { data: cli, error: cliErr } = await supabase
             .from('clientes')
             .select('saldo')
-            .eq('id', modalLiquidacion.clienteId)
-            .single();
-          const saldoActual = Number(cli?.saldo || 0);
-          const nuevoSaldo = Math.round((saldoActual + modalLiquidacion.montoUsd) * 100) / 100;
-          await supabase
-            .from('clientes')
-            .update({ saldo: nuevoSaldo })
-            .eq('id', modalLiquidacion.clienteId);
+            .eq('id', clienteIdLiquidado)
+            .maybeSingle();
+
+          if (!cliErr && cli) {
+            const saldoActual = Number(cli.saldo || 0);
+            const nuevoSaldo = Math.round((saldoActual + montoTotalLiquidado) * 100) / 100;
+            await supabase
+              .from('clientes')
+              .update({ saldo: nuevoSaldo })
+              .eq('id', clienteIdLiquidado);
+          }
         } catch (e) {
           console.error('Error actualizando clientes.saldo tras liquidar deuda:', e);
         }
       }
 
-      setModalLiquidacion((prev) => ({ ...prev, abierto: false }));
+      // Limpieza exhaustiva e inmediata del estado local para prevenir desincronización
+      setModalLiquidacion({
+        abierto: false,
+        titulo: '',
+        subtitulo: '',
+        montoUsd: 0,
+        idsConsumos: [],
+        nombreEstudiante: '',
+        clienteId: null,
+      });
+      setNumeroReferenciaLiquidacion('');
+      setEsPagoFamiliar(false);
+      setErrorPago(null);
+
       setNotificacion({
         tipo: 'exito',
-        texto: `¡Pago de ${formatUSD(modalLiquidacion.montoUsd)} procesado con éxito!`,
+        texto: `¡Deuda de ${nombreClienteLiquidado} por ${formatUSD(montoTotalLiquidado)} liquidada con éxito!`,
       });
-      setTimeout(() => setNotificacion(null), 4000);
-      await ejecutarMiniRecarga({
-        router,
-        recargarDatosLocales: async () => {
-          await cargarDeudas();
-        },
-      });
+      setTimeout(() => setNotificacion(null), 4500);
+
+      try {
+        await ejecutarMiniRecarga({
+          router,
+          recargarDatosLocales: async () => {
+            await cargarDeudas();
+          },
+          mensaje: 'Liquidación completada y base de datos sincronizada',
+        });
+      } catch (syncErr) {
+        console.error('Aviso: error sincronizando tras liquidación:', syncErr);
+        await cargarDeudas();
+      }
     } catch (err: unknown) {
-      console.error('Error al procesar pago:', err);
+      console.error('Error al procesar pago de liquidación:', err);
       setErrorPago(
         err instanceof Error
           ? err.message
-          : 'Error inesperado al conectar con Supabase'
+          : 'Error inesperado al procesar la liquidación en Supabase.'
       );
     } finally {
       setProcesandoPago(false);
@@ -845,7 +914,12 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#FAFAFA] dark:bg-[#090D16] text-slate-900 dark:text-slate-100 transition-colors" suppressHydrationWarning>
+    <ErrorBoundary
+      fallbackTitle="Gestión de Cuentas por Cobrar"
+      fallbackMessage="Ocurrió un error al procesar la vista de deudas. Tus datos siguen seguros en Supabase."
+      onReset={() => cargarDeudas()}
+    >
+      <div className="min-h-screen flex flex-col bg-[#FAFAFA] dark:bg-[#090D16] text-slate-900 dark:text-slate-100 transition-colors" suppressHydrationWarning>
       {/* Header Sticky con diseño unificado y navegación móvil */}
       <header className="sticky top-0 z-40 w-full border-b border-gray-200/80 dark:border-slate-800 bg-white/90 dark:bg-[#0D111A]/90 backdrop-blur-md">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-3 py-2 sm:px-6 lg:px-8">
@@ -1663,6 +1737,41 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
                     <p className="text-[10px] text-sky-700 dark:text-sky-400 leading-tight">
                       Quedará guardado en la transacción de la base de datos para auditoría y consulta en el Historial.
                     </p>
+
+                    {/* Soporte para Pago Familiar (Múltiples Hermanos) */}
+                    <div className="mt-2 flex items-center justify-between rounded-xl bg-sky-100/70 dark:bg-sky-900/30 p-2.5">
+                      <div className="flex items-center gap-2">
+                        <Users className="h-4 w-4 text-sky-700 dark:text-sky-300 shrink-0" />
+                        <div>
+                          <span className="text-xs font-bold text-sky-950 dark:text-sky-200">
+                            Pago Familiar (Hermanos)
+                          </span>
+                          <p className="text-[10px] text-sky-700 dark:text-sky-400">
+                            Habilita compartir la misma transferencia/referencia entre hermanos.
+                          </p>
+                        </div>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={esPagoFamiliar}
+                        onChange={(e) => setEsPagoFamiliar(e.target.checked)}
+                        className="h-4 w-4 rounded text-sky-600 focus:ring-sky-500 cursor-pointer"
+                      />
+                    </div>
+
+                    {ultimaReferenciaFamiliar && !numeroReferenciaLiquidacion && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNumeroReferenciaLiquidacion(ultimaReferenciaFamiliar);
+                          setEsPagoFamiliar(true);
+                        }}
+                        className="mt-1 flex items-center gap-1.5 text-[11px] font-bold text-sky-700 dark:text-sky-300 hover:underline"
+                      >
+                        <Copy className="h-3 w-3" />
+                        <span>Pegar referencia anterior: #{ultimaReferenciaFamiliar}</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               )}
@@ -2084,5 +2193,6 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
         </Dialog.Portal>
       </Dialog.Root>
     </div>
+  </ErrorBoundary>
   );
 }

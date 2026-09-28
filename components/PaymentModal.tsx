@@ -18,6 +18,7 @@ import {
   PiggyBank,
   ArrowRight,
   Sparkles,
+  Users,
 } from 'lucide-react';
 import { Cliente, ItemCarrito, MetodoPagoId, MetodoPagoOpcion } from '@/types/pos';
 import { supabase } from '@/lib/supabaseClient';
@@ -83,6 +84,14 @@ const METODOS_PAGO: MetodoPagoOpcion[] = [
     marcarPagado: true,
   },
   {
+    id: 'pago_mixto',
+    nombre: 'Pago Mixto ($ + Bs)',
+    descripcion: 'Billetes USD + Efectivo Bs / Pago Móvil',
+    moneda: 'USD',
+    icono: 'sparkles',
+    marcarPagado: true,
+  },
+  {
     id: 'saldo_favor',
     nombre: 'Usar Saldo a Favor',
     descripcion: 'Cobrar usando crédito a favor del cliente',
@@ -117,14 +126,22 @@ export function PaymentModal({
   const [exito, setExito] = useState(false);
   const [consumoGuardadoId, setConsumoGuardadoId] = useState<string | null>(null);
 
+  // Estados para Asistente de Pagos Mixtos ($ + Bs)
+  const [montoUsdMixtoInput, setMontoUsdMixtoInput] = useState<string>('');
+  const [subMetodoMixto, setSubMetodoMixto] = useState<'efectivo_bs' | 'pago_movil' | 'punto_debito'>('efectivo_bs');
+  const [montoBsMixtoEntregadoInput, setMontoBsMixtoEntregadoInput] = useState<string>('');
+  const [numeroReferenciaMixto, setNumeroReferenciaMixto] = useState<string>('');
+  const [esPagoFamiliar, setEsPagoFamiliar] = useState<boolean>(false);
+  const [ultimaReferenciaFamiliar, setUltimaReferenciaFamiliar] = useState<string>('');
+
   // Estado del saldo del cliente
   const [saldoInfo, setSaldoInfo] = useState<ResumenSaldoCliente | null>(null);
   const [cargandoSaldo, setCargandoSaldo] = useState(false);
 
-  // Pago mixto: si el saldo a favor no alcanza el total de la orden
+  // Pago mixto con saldo a favor: si el saldo a favor no alcanza el total de la orden
   const [subMetodoDiferencia, setSubMetodoDiferencia] = useState<'efectivo_usd' | 'efectivo_bs' | 'pago_movil' | 'punto_debito'>('efectivo_usd');
 
-  // Calculadora de vuelto / cambio recibido
+  // Calculadora de vuelto / cambio recibido (métodos estándar)
   const [montoEntregadoInput, setMontoEntregadoInput] = useState<string>('');
   const [guardarVueltoComoSaldo, setGuardarVueltoComoSaldo] = useState<boolean>(false);
   const [vueltoAcreditadoExito, setVueltoAcreditadoExito] = useState<number | null>(null);
@@ -140,6 +157,16 @@ export function PaymentModal({
     0
   );
   const totalBs = calcularConversionBs(totalUsd, tasaBcv);
+
+  // Cargar última referencia familiar de memoria local
+  useEffect(() => {
+    if (abierto && typeof window !== 'undefined') {
+      try {
+        const guardada = localStorage.getItem('club5_ultima_ref_familiar');
+        if (guardada) setUltimaReferenciaFamiliar(guardada);
+      } catch {}
+    }
+  }, [abierto]);
 
   // Cargar saldo del cliente al abrir o cambiar de cliente
   useEffect(() => {
@@ -162,6 +189,11 @@ export function PaymentModal({
       // Obliga a que la cajera haga clic explícito en uno de los métodos de pago
       setMetodoSeleccionado(null);
       setNumeroReferencia('');
+      setNumeroReferenciaMixto('');
+      setMontoUsdMixtoInput('');
+      setMontoBsMixtoEntregadoInput('');
+      setSubMetodoMixto('efectivo_bs');
+      setEsPagoFamiliar(false);
       setProcesando(false);
       setErrorMensaje(null);
       setExito(false);
@@ -179,7 +211,7 @@ export function PaymentModal({
     }
   }, [metodoSeleccionado]);
 
-  // Vuelto y desglose dinámico según divisa ingresada
+  // Vuelto y desglose dinámico según divisa ingresada en calculadora general
   const montoEntregadoNum = parseFloat(montoEntregadoInput.replace(',', '.')) || 0;
   let vueltoUsd = 0;
   let vueltoBs = 0;
@@ -197,6 +229,37 @@ export function PaymentModal({
     vueltoUsd = montoEntregadoNum > totalUsd ? Math.round((montoEntregadoNum - totalUsd) * 100) / 100 : 0;
     vueltoBs = vueltoUsd > 0 ? calcularConversionBs(vueltoUsd, tasaBcv) : 0;
   }
+
+  // Cálculos para Asistente de Pagos Mixtos ($ Divisas + Bolívares)
+  const montoUsdMixtoNum = parseFloat(montoUsdMixtoInput.replace(',', '.')) || 0;
+  let restanteMixtoUsd = 0;
+  let restanteMixtoBs = 0;
+  let vueltoMixtoUsd = 0;
+  let vueltoMixtoBs = 0;
+  let vueltoMixtoBsEfectivo = 0;
+  let vueltoMixtoUsdEfectivo = 0;
+
+  if (montoUsdMixtoNum >= totalUsd) {
+    vueltoMixtoUsd = Math.round((montoUsdMixtoNum - totalUsd) * 100) / 100;
+    vueltoMixtoBs = vueltoMixtoUsd > 0 ? calcularConversionBs(vueltoMixtoUsd, tasaBcv) : 0;
+  } else if (montoUsdMixtoNum > 0) {
+    restanteMixtoUsd = Math.round((totalUsd - montoUsdMixtoNum) * 100) / 100;
+    restanteMixtoBs = calcularConversionBs(restanteMixtoUsd, tasaBcv);
+
+    const montoBsEntregadoNum = parseFloat(montoBsMixtoEntregadoInput.replace(',', '.')) || 0;
+    if (subMetodoMixto === 'efectivo_bs' && montoBsEntregadoNum > restanteMixtoBs) {
+      vueltoMixtoBsEfectivo = Math.round((montoBsEntregadoNum - restanteMixtoBs) * 100) / 100;
+      vueltoMixtoUsdEfectivo = tasaBcv > 0 ? Math.round((vueltoMixtoBsEfectivo / tasaBcv) * 100) / 100 : 0;
+    }
+  }
+
+  // Vuelto efectivo consolidado a considerar para abono a cuenta corriente
+  const vueltoEfectivoUsd =
+    metodoSeleccionado === 'pago_mixto'
+      ? montoUsdMixtoNum >= totalUsd
+        ? vueltoMixtoUsd
+        : vueltoMixtoUsdEfectivo
+      : vueltoUsd;
 
   // Manejo de confirmación de venta
   const handleConfirmarVenta = async () => {
@@ -233,7 +296,42 @@ export function PaymentModal({
 
       // Si es Pago Móvil y se ingresó número de referencia, codificarla para auditoría bancaria
       if (metodoSeleccionado === 'pago_movil' && numeroReferencia.trim()) {
-        metodoPagoFinal = `pago_movil#ref:${numeroReferencia.trim()}`;
+        const refLimpia = numeroReferencia.trim();
+        metodoPagoFinal = esPagoFamiliar
+          ? `pago_movil#ref:${refLimpia} [Pago Familiar]`
+          : `pago_movil#ref:${refLimpia}`;
+        try {
+          localStorage.setItem('club5_ultima_ref_familiar', refLimpia);
+          setUltimaReferenciaFamiliar(refLimpia);
+        } catch {}
+      }
+
+      // Si es Pago Mixto ($ en efectivo + Bolívares)
+      if (metodoSeleccionado === 'pago_mixto') {
+        if (montoUsdMixtoNum <= 0) {
+          setErrorMensaje('Por favor, ingresa el monto en USD en efectivo recibido para el Pago Mixto.');
+          setProcesando(false);
+          return;
+        }
+
+        if (montoUsdMixtoNum >= totalUsd) {
+          metodoPagoFinal = 'efectivo_usd';
+        } else {
+          let extraRef = '';
+          if (subMetodoMixto === 'pago_movil') {
+            const refMixto = numeroReferenciaMixto.trim();
+            if (refMixto) {
+              extraRef = esPagoFamiliar
+                ? `#ref:${refMixto} [Pago Familiar]`
+                : `#ref:${refMixto}`;
+              try {
+                localStorage.setItem('club5_ultima_ref_familiar', refMixto);
+                setUltimaReferenciaFamiliar(refMixto);
+              } catch {}
+            }
+          }
+          metodoPagoFinal = `mixto:efectivo_usd=${montoUsdMixtoNum.toFixed(2)},${subMetodoMixto}=${restanteMixtoBs.toFixed(2)}${extraRef}`;
+        }
       }
 
       // Determinar monto a descontar del campo clientes.saldo:
@@ -302,20 +400,28 @@ export function PaymentModal({
       }
 
       // 4. Si se marcó guardar vuelto como saldo a favor del cliente
-      if (guardarVueltoComoSaldo && vueltoUsd > 0 && cliente?.id) {
+      const vueltoAGuardar = vueltoEfectivoUsd;
+      if (guardarVueltoComoSaldo && vueltoAGuardar > 0 && cliente?.id) {
         try {
           await procesarAbonoCliente({
             clienteId: cliente.id,
-            montoUsd: vueltoUsd,
+            montoUsd: vueltoAGuardar,
             metodoPago: 'vuelto_saldo_favor',
             tasaBcv,
             esVuelto: true,
           });
-          setVueltoAcreditadoExito(vueltoUsd);
+          setVueltoAcreditadoExito(vueltoAGuardar);
         } catch (errVuelto) {
           console.error('Error acreditando vuelto como saldo:', errVuelto);
         }
       }
+
+      // 5. Limpieza automática de inputs y referencias para evitar duplicaciones accidentales
+      setNumeroReferencia('');
+      setNumeroReferenciaMixto('');
+      setMontoUsdMixtoInput('');
+      setMontoBsMixtoEntregadoInput('');
+      setEsPagoFamiliar(false);
 
       setConsumoGuardadoId(consumoData.id);
       setExito(true);
@@ -334,17 +440,18 @@ export function PaymentModal({
 
   // Guardar vuelto directo desde la pantalla de éxito si no se había marcado antes
   const handleGuardarVueltoExito = async () => {
-    if (!cliente?.id || vueltoUsd <= 0 || vueltoAcreditadoExito !== null) return;
+    const vueltoReal = vueltoEfectivoUsd;
+    if (!cliente?.id || vueltoReal <= 0 || vueltoAcreditadoExito !== null) return;
     setProcesando(true);
     try {
       await procesarAbonoCliente({
         clienteId: cliente.id,
-        montoUsd: vueltoUsd,
+        montoUsd: vueltoReal,
         metodoPago: 'vuelto_saldo_favor',
         tasaBcv,
         esVuelto: true,
       });
-      setVueltoAcreditadoExito(vueltoUsd);
+      setVueltoAcreditadoExito(vueltoReal);
       ejecutarMiniRecarga();
     } catch (e) {
       console.error('Error guardando vuelto:', e);
@@ -364,6 +471,10 @@ export function PaymentModal({
         setGuardarVueltoComoSaldo(false);
         setVueltoAcreditadoExito(null);
         setNumeroReferencia('');
+        setNumeroReferenciaMixto('');
+        setMontoUsdMixtoInput('');
+        setMontoBsMixtoEntregadoInput('');
+        setEsPagoFamiliar(false);
         setMetodoSeleccionado(null);
       }, 300);
     }
@@ -593,6 +704,8 @@ export function PaymentModal({
                                 ? 'bg-indigo-600 text-white'
                                 : esSaldo
                                 ? 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-400'
+                                : metodo.id === 'pago_mixto'
+                                ? 'bg-purple-100 dark:bg-purple-950/70 text-purple-700 dark:text-purple-400'
                                 : metodo.moneda === 'Bs'
                                 ? 'bg-amber-100 dark:bg-amber-950/70 text-amber-700 dark:text-amber-400'
                                 : 'bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-slate-300'
@@ -602,6 +715,7 @@ export function PaymentModal({
                             {metodo.id === 'efectivo_bs' && <Banknote className="h-4 w-4" />}
                             {metodo.id === 'pago_movil' && <Smartphone className="h-4 w-4" />}
                             {metodo.id === 'punto_debito' && <CreditCard className="h-4 w-4" />}
+                            {metodo.id === 'pago_mixto' && <Sparkles className="h-4 w-4" />}
                             {metodo.id === 'saldo_favor' && <Wallet className="h-4 w-4" />}
                             {metodo.id === 'pendiente' && <Clock className="h-4 w-4" />}
                           </div>
@@ -610,12 +724,14 @@ export function PaymentModal({
                             className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
                               esSaldo
                                 ? 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300'
+                                : metodo.id === 'pago_mixto'
+                                ? 'bg-purple-100 dark:bg-purple-950/80 text-purple-800 dark:text-purple-300'
                                 : metodo.moneda === 'USD'
                                 ? 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300'
                                 : 'bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300'
                             }`}
                           >
-                            {esSaldo ? 'Crédito' : metodo.moneda}
+                            {esSaldo ? 'Crédito' : metodo.id === 'pago_mixto' ? '$ + Bs' : metodo.moneda}
                           </span>
                         </div>
 
@@ -666,9 +782,368 @@ export function PaymentModal({
                       </button>
                     )}
                   </div>
+
+                  {/* Botón para reusar referencia familiar anterior */}
+                  {ultimaReferenciaFamiliar && !numeroReferencia && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNumeroReferencia(ultimaReferenciaFamiliar);
+                        setEsPagoFamiliar(true);
+                      }}
+                      className="flex items-center gap-1 text-[11px] font-semibold text-sky-700 hover:text-sky-800 dark:text-sky-400 transition"
+                    >
+                      <span>Reusar referencia familiar anterior ({ultimaReferenciaFamiliar})</span>
+                    </button>
+                  )}
+
+                  {/* Soporte para Pago Familiar (Múltiples Hermanos) */}
+                  <div className="flex items-center justify-between rounded-xl bg-sky-100/70 dark:bg-sky-900/30 p-2.5">
+                    <div className="flex items-center gap-2">
+                      <Users className="h-4 w-4 text-sky-700 dark:text-sky-300 shrink-0" />
+                      <div>
+                        <span className="text-xs font-bold text-sky-950 dark:text-sky-200">
+                          Pago Familiar (Hermanos)
+                        </span>
+                        <p className="text-[10px] text-sky-700 dark:text-sky-400">
+                          Habilita compartir la misma transferencia/referencia entre hermanos.
+                        </p>
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={esPagoFamiliar}
+                      onChange={(e) => setEsPagoFamiliar(e.target.checked)}
+                      className="h-4 w-4 rounded border-sky-300 text-sky-600 focus:ring-sky-500 cursor-pointer"
+                    />
+                  </div>
+
                   <p className="text-[10px] text-sky-700 dark:text-sky-400 leading-tight">
                     Quedará registrado en el historial de transacciones para facilitar la auditoría y conciliación bancaria.
                   </p>
+                </div>
+              )}
+
+              {/* Asistente de Pagos Mixtos ($ Divisas + Bolívares en efectivo / Pago Móvil) */}
+              {metodoSeleccionado === 'pago_mixto' && (
+                <div className="mt-3 rounded-2xl border border-purple-200 dark:border-purple-900/60 bg-purple-50/50 dark:bg-purple-950/30 p-3.5 sm:p-4 text-xs space-y-3.5 animate-in fade-in transition-colors">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 font-bold text-purple-950 dark:text-purple-200">
+                      <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-purple-200/80 dark:bg-purple-900/80 text-purple-700 dark:text-purple-300">
+                        <Sparkles className="h-3.5 w-3.5" />
+                      </div>
+                      <span>Asistente de Pagos Mixtos ($ + Bs)</span>
+                    </div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-purple-700 dark:text-purple-300 bg-purple-100/90 dark:bg-purple-900/60 px-2.5 py-0.5 rounded-full border border-purple-200 dark:border-purple-800">
+                      Divisas + Bolívares
+                    </span>
+                  </div>
+
+                  {/* Paso 1: Dólares entregados en efectivo */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="font-bold text-gray-800 dark:text-slate-200 flex items-center gap-1">
+                        <DollarSign className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+                        <span>1. Billetes USD en Efectivo entregados ($):</span>
+                      </label>
+                      <span className="text-[11px] text-gray-500 dark:text-slate-400">
+                        Total orden: <strong className="font-mono text-gray-900 dark:text-white">{formatUSD(totalUsd)}</strong>
+                      </span>
+                    </div>
+
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-emerald-600 dark:text-emerald-400 font-mono">
+                        $
+                      </span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={montoUsdMixtoInput}
+                        onKeyDown={(e) => handleDecimalKeyDown(e, montoUsdMixtoInput)}
+                        onChange={(e) => setMontoUsdMixtoInput(sanitizeDecimalInput(e.target.value))}
+                        placeholder="Monto en $ recibido (ej: 1.00, 5.00)"
+                        className="w-full rounded-xl border border-purple-200 dark:border-purple-800 bg-white dark:bg-[#111726] py-2 pl-7 pr-8 text-xs font-mono font-bold text-gray-900 dark:text-slate-100 placeholder:text-gray-400 focus:border-purple-500 focus:outline-none"
+                      />
+                      {montoUsdMixtoInput && (
+                        <button
+                          type="button"
+                          onClick={() => setMontoUsdMixtoInput('')}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-lg p-1 text-gray-400 hover:text-gray-600 transition"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Botones rápidos de denominaciones comunes de billetes */}
+                    <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                      <span className="text-[10px] font-semibold text-gray-500 dark:text-slate-400">Billetes rápidos:</span>
+                      {[1, 2, 5, 10, 20].map((bill) => (
+                        <button
+                          key={bill}
+                          type="button"
+                          onClick={() => setMontoUsdMixtoInput(bill.toString())}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold border transition ${
+                            montoUsdMixtoNum === bill
+                              ? 'bg-purple-600 text-white border-purple-600 shadow-2xs'
+                              : 'bg-white dark:bg-slate-900 border-gray-200 dark:border-slate-800 text-gray-700 dark:text-slate-300 hover:border-purple-300 hover:bg-purple-50/50 dark:hover:bg-slate-800'
+                          }`}
+                        >
+                          ${bill}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Caso A: El monto en USD cubre o supera el total de la orden */}
+                  {montoUsdMixtoNum >= totalUsd ? (
+                    <div className="rounded-xl bg-white dark:bg-[#111726] border border-emerald-200 dark:border-emerald-800/60 p-3 space-y-2">
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-700 dark:text-emerald-400">
+                        <CheckCircle2 className="h-4 w-4 shrink-0" />
+                        <span>El billete en dólares cubre la totalidad de la orden</span>
+                      </div>
+                      {vueltoMixtoUsd > 0 ? (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between text-xs pt-1 border-t border-gray-100 dark:border-slate-800">
+                            <span className="font-semibold text-gray-600 dark:text-slate-400">Vuelto o cambio a entregar:</span>
+                            <div className="text-right">
+                              <span className="font-mono font-black text-emerald-700 dark:text-emerald-400 text-sm">
+                                {formatUSD(vueltoMixtoUsd)}
+                              </span>
+                              <span className="text-[10px] text-gray-500 dark:text-slate-400 ml-1.5 font-mono font-bold">
+                                ({formatBs(vueltoMixtoBs)})
+                              </span>
+                            </div>
+                          </div>
+
+                          {cliente && (
+                            <button
+                              type="button"
+                              onClick={() => setGuardarVueltoComoSaldo(!guardarVueltoComoSaldo)}
+                              className={`w-full flex items-center justify-between rounded-xl px-2.5 py-1.5 text-xs font-bold transition border ${
+                                guardarVueltoComoSaldo
+                                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
+                                  : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900 hover:bg-emerald-100/70'
+                              }`}
+                            >
+                              <span className="flex items-center gap-1.5">
+                                <PiggyBank className="h-4 w-4 shrink-0" />
+                                {guardarVueltoComoSaldo
+                                  ? '✓ Guardando vuelto como saldo a favor'
+                                  : `Guardar vuelto (${formatUSD(vueltoMixtoUsd)}) como Saldo a Favor`}
+                              </span>
+                              <span className="text-[10px] uppercase tracking-wider underline">
+                                {guardarVueltoComoSaldo ? 'Cancelar' : 'Aplicar'}
+                              </span>
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-[11px] text-emerald-700 dark:text-emerald-400 font-bold">
+                          ✓ Pago exacto en divisas ($0.00 de vuelto). No se requiere cobro adicional en bolívares.
+                        </p>
+                      )}
+                    </div>
+                  ) : montoUsdMixtoNum > 0 ? (
+                    /* Caso B: El monto en USD cubre solo una parte -> Cobrar restante en Bs */
+                    <div className="space-y-3">
+                      {/* Banner Dinámico de Restante a Pagar en Bs */}
+                      <div className="rounded-xl bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent border border-amber-300/80 dark:border-amber-800/60 p-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-300">
+                              Restante a pagar en Bolívares
+                            </span>
+                            <div className="text-lg font-black font-mono text-amber-600 dark:text-amber-400 mt-0.5">
+                              {formatBs(restanteMixtoBs)}
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-[10px] text-gray-500 dark:text-slate-400">Equivalente USD</span>
+                            <div className="text-xs font-bold font-mono text-gray-700 dark:text-slate-300">
+                              {formatUSD(restanteMixtoUsd)}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="mt-2 text-[10px] text-gray-500 dark:text-slate-400 flex items-center justify-between border-t border-amber-200/50 dark:border-amber-900/40 pt-1.5">
+                          <span>Cubierto con $: {formatUSD(montoUsdMixtoNum)}</span>
+                          <span>Tasa BCV: {formatBs(tasaBcv)}</span>
+                        </div>
+                      </div>
+
+                      {/* Paso 2: Selección del sub-método para el restante en Bs */}
+                      <div className="space-y-1.5">
+                        <label className="font-bold text-gray-800 dark:text-slate-200 block">
+                          2. ¿Cómo pagará el restante en Bolívares ({formatBs(restanteMixtoBs)})?
+                        </label>
+                        <div className="grid grid-cols-3 gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setSubMetodoMixto('efectivo_bs')}
+                            className={`py-2 px-2.5 rounded-xl text-center font-bold text-xs border transition flex flex-col items-center gap-1 ${
+                              subMetodoMixto === 'efectivo_bs'
+                                ? 'bg-amber-500 text-white border-amber-500 shadow-2xs'
+                                : 'bg-white dark:bg-slate-900 border-gray-200 dark:border-slate-800 text-gray-700 dark:text-slate-300 hover:border-amber-300'
+                            }`}
+                          >
+                            <Banknote className="h-4 w-4" />
+                            <span>Efectivo Bs.</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setSubMetodoMixto('pago_movil')}
+                            className={`py-2 px-2.5 rounded-xl text-center font-bold text-xs border transition flex flex-col items-center gap-1 ${
+                              subMetodoMixto === 'pago_movil'
+                                ? 'bg-sky-600 text-white border-sky-600 shadow-2xs'
+                                : 'bg-white dark:bg-slate-900 border-gray-200 dark:border-slate-800 text-gray-700 dark:text-slate-300 hover:border-sky-300'
+                            }`}
+                          >
+                            <Smartphone className="h-4 w-4" />
+                            <span>Pago Móvil</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setSubMetodoMixto('punto_debito')}
+                            className={`py-2 px-2.5 rounded-xl text-center font-bold text-xs border transition flex flex-col items-center gap-1 ${
+                              subMetodoMixto === 'punto_debito'
+                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
+                                : 'bg-white dark:bg-slate-900 border-gray-200 dark:border-slate-800 text-gray-700 dark:text-slate-300 hover:border-indigo-300'
+                            }`}
+                          >
+                            <CreditCard className="h-4 w-4" />
+                            <span>Punto Débito</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Sub-caso B1: Efectivo Bs entregado */}
+                      {subMetodoMixto === 'efectivo_bs' && (
+                        <div className="rounded-xl bg-white dark:bg-[#111726] border border-amber-200/90 dark:border-amber-900/60 p-2.5 space-y-2">
+                          <label className="text-[11px] font-bold text-gray-700 dark:text-slate-300 flex items-center justify-between">
+                            <span>Billetes en Bs. recibidos (Opcional si entrega más):</span>
+                            <span className="font-mono text-amber-600 dark:text-amber-400">Exacto: {formatBs(restanteMixtoBs)}</span>
+                          </label>
+                          <div className="relative">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-amber-600 dark:text-amber-400 font-mono">
+                              Bs.
+                            </span>
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              value={montoBsMixtoEntregadoInput}
+                              onKeyDown={(e) => handleDecimalKeyDown(e, montoBsMixtoEntregadoInput)}
+                              onChange={(e) => setMontoBsMixtoEntregadoInput(sanitizeDecimalInput(e.target.value))}
+                              placeholder={`Monto entregado en Bs. (ej: ${Math.ceil(restanteMixtoBs)})`}
+                              className="w-full rounded-xl border border-gray-200 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-900 py-1.5 pl-9 pr-8 text-xs font-mono font-bold text-gray-900 dark:text-slate-100 placeholder:text-gray-400 focus:border-amber-500 focus:outline-none"
+                            />
+                            {montoBsMixtoEntregadoInput && (
+                              <button
+                                type="button"
+                                onClick={() => setMontoBsMixtoEntregadoInput('')}
+                                className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-lg p-1 text-gray-400 hover:text-gray-600 transition"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            )}
+                          </div>
+
+                          {vueltoMixtoBsEfectivo > 0 && (
+                            <div className="flex items-center justify-between rounded-lg bg-emerald-50 dark:bg-emerald-950/40 p-2 text-xs border border-emerald-200 dark:border-emerald-900">
+                              <span className="font-semibold text-emerald-800 dark:text-emerald-300">Vuelto a entregar:</span>
+                              <span className="font-mono font-black text-emerald-700 dark:text-emerald-400">
+                                {formatBs(vueltoMixtoBsEfectivo)} ({formatUSD(vueltoMixtoUsdEfectivo)})
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Sub-caso B2: Pago Móvil con referencia bancaria y soporte Pago Familiar */}
+                      {subMetodoMixto === 'pago_movil' && (
+                        <div className="rounded-xl bg-white dark:bg-[#111726] border border-sky-200/90 dark:border-sky-900/60 p-2.5 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <label className="text-[11px] font-bold text-sky-900 dark:text-sky-300 flex items-center gap-1">
+                              <Smartphone className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400" />
+                              <span>Referencia Pago Móvil (Opcional):</span>
+                            </label>
+                            <span className="font-mono font-bold text-xs text-sky-700 dark:text-sky-300">
+                              Monto: {formatBs(restanteMixtoBs)}
+                            </span>
+                          </div>
+
+                          <div className="relative">
+                            <input
+                              type="text"
+                              value={numeroReferenciaMixto}
+                              onChange={(e) => setNumeroReferenciaMixto(e.target.value)}
+                              placeholder="Ej: 123456 o comprobante bancario"
+                              className="w-full rounded-xl border border-sky-300 dark:border-sky-800 bg-gray-50/50 dark:bg-slate-900 py-1.5 pl-3 pr-8 text-xs font-mono font-bold text-gray-900 dark:text-white placeholder:text-gray-400 focus:border-sky-500 focus:outline-none"
+                            />
+                            {numeroReferenciaMixto && (
+                              <button
+                                type="button"
+                                onClick={() => setNumeroReferenciaMixto('')}
+                                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-0.5"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Botón para reusar referencia familiar anterior */}
+                          {ultimaReferenciaFamiliar && !numeroReferenciaMixto && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setNumeroReferenciaMixto(ultimaReferenciaFamiliar);
+                                setEsPagoFamiliar(true);
+                              }}
+                              className="flex items-center gap-1 text-[11px] font-semibold text-sky-700 hover:text-sky-800 dark:text-sky-400 transition"
+                            >
+                              <span>Reusar referencia familiar anterior ({ultimaReferenciaFamiliar})</span>
+                            </button>
+                          )}
+
+                          {/* Checkbox Pago Familiar (Hermanos) */}
+                          <div className="flex items-center justify-between rounded-lg bg-sky-50/80 dark:bg-sky-900/30 p-2">
+                            <div className="flex items-center gap-2">
+                              <Users className="h-4 w-4 text-sky-700 dark:text-sky-300 shrink-0" />
+                              <div>
+                                <span className="text-xs font-bold text-sky-950 dark:text-sky-200">
+                                  Pago Familiar (Hermanos)
+                                </span>
+                                <p className="text-[10px] text-sky-700 dark:text-sky-400">
+                                  Permite reutilizar la misma referencia bancaria entre hermanos.
+                                </p>
+                              </div>
+                            </div>
+                            <input
+                              type="checkbox"
+                              checked={esPagoFamiliar}
+                              onChange={(e) => setEsPagoFamiliar(e.target.checked)}
+                              className="h-4 w-4 rounded border-sky-300 text-sky-600 focus:ring-sky-500 cursor-pointer"
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Sub-caso B3: Punto de Venta */}
+                      {subMetodoMixto === 'punto_debito' && (
+                        <div className="rounded-xl bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-200/90 dark:border-indigo-900/60 p-2.5 text-xs text-indigo-900 dark:text-indigo-200 flex items-center justify-between">
+                          <span className="font-medium">Cobrar en tarjeta por el Punto de Venta:</span>
+                          <span className="font-mono font-bold text-indigo-700 dark:text-indigo-300">
+                            {formatBs(restanteMixtoBs)}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-purple-700 dark:text-purple-300 italic bg-purple-100/50 dark:bg-purple-900/30 p-2.5 rounded-xl border border-purple-200/60 dark:border-purple-800/40">
+                      💡 Ingresa arriba la cantidad de dólares en efectivo recibidos para calcular de forma inmediata el saldo exacto a cobrar en bolívares.
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -921,12 +1396,14 @@ export function PaymentModal({
                   disabled={
                     procesando ||
                     !metodoSeleccionado ||
-                    (metodoSeleccionado === 'saldo_favor' && (!cliente || saldoDisponible <= 0))
+                    (metodoSeleccionado === 'saldo_favor' && (!cliente || saldoDisponible <= 0)) ||
+                    (metodoSeleccionado === 'pago_mixto' && montoUsdMixtoNum <= 0)
                   }
                   className={`flex min-h-[44px] items-center justify-center gap-2 rounded-2xl px-5 py-2.5 text-xs font-bold transition active:scale-95 ${
                     procesando ||
                     !metodoSeleccionado ||
-                    (metodoSeleccionado === 'saldo_favor' && (!cliente || saldoDisponible <= 0))
+                    (metodoSeleccionado === 'saldo_favor' && (!cliente || saldoDisponible <= 0)) ||
+                    (metodoSeleccionado === 'pago_mixto' && montoUsdMixtoNum <= 0)
                       ? 'bg-gray-200 dark:bg-slate-800 text-gray-400 dark:text-slate-500 cursor-not-allowed opacity-60'
                       : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs'
                   }`}
@@ -938,6 +1415,8 @@ export function PaymentModal({
                     </>
                   ) : !metodoSeleccionado ? (
                     <span>Selecciona un método de pago</span>
+                  ) : metodoSeleccionado === 'pago_mixto' && montoUsdMixtoNum <= 0 ? (
+                    <span>Ingresa los $ en efectivo</span>
                   ) : (
                     <span>Confirmar Transacción</span>
                   )}

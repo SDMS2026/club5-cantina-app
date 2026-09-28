@@ -37,7 +37,11 @@ import {
   BadgeAlert,
   Hash,
   Menu,
+  CreditCard,
+  PiggyBank,
+  Users,
 } from 'lucide-react';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { supabase } from '@/lib/supabaseClient';
 import { obtenerTasaBCV, TASA_BCV_FALLBACK_DEFAULT } from '@/lib/dolarApi';
 import { formatUSD, formatBs, calcularConversionBs } from '@/lib/utils';
@@ -111,6 +115,47 @@ const formatearFechaHora = (fechaIso?: string): { fecha: string; hora: string; e
   return { fecha: fechaStr, hora: horaStr, esHoy };
 };
 
+export interface GrupoDiaConsumos {
+  diaKey: string;
+  etiquetaFecha: string;
+  totalDiaUsd: number;
+  totalDiaBs: number;
+  totalTransacciones: number;
+  transacciones: TransaccionRegistro[];
+}
+
+const obtenerInfoDiaAgrupado = (fechaIso?: string): { diaKey: string; etiquetaFecha: string } => {
+  if (!fechaIso) return { diaKey: 'sin-fecha', etiquetaFecha: 'Sin fecha asignada' };
+  const d = new Date(fechaIso);
+  if (isNaN(d.getTime())) return { diaKey: 'sin-fecha', etiquetaFecha: 'Sin fecha asignada' };
+
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const diaNum = String(d.getDate()).padStart(2, '0');
+  const diaKey = `${y}-${m}-${diaNum}`;
+
+  const hoy = new Date();
+  const ayer = new Date();
+  ayer.setDate(hoy.getDate() - 1);
+
+  const meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+  const mesStr = meses[d.getMonth()];
+  const dia = d.getDate();
+
+  const esMismoDia = (d1: Date, d2: Date) =>
+    d1.getDate() === d2.getDate() &&
+    d1.getMonth() === d2.getMonth() &&
+    d1.getFullYear() === d2.getFullYear();
+
+  if (esMismoDia(d, hoy)) {
+    return { diaKey, etiquetaFecha: `Hoy - ${dia} ${mesStr}` };
+  }
+  if (esMismoDia(d, ayer)) {
+    return { diaKey, etiquetaFecha: `Ayer - ${dia} ${mesStr}` };
+  }
+  return { diaKey, etiquetaFecha: `${dia} ${mesStr} ${y}` };
+};
+
 export default function TransaccionesPage() {
   const router = useRouter();
   const [montado, setMontado] = useState(false);
@@ -129,6 +174,19 @@ export default function TransaccionesPage() {
   const [totalRegistros, setTotalRegistros] = useState<number>(0);
 
   // 3. Filtros y Búsqueda con Debounce
+  const [pestanaActiva, setPestanaActiva] = useState<'consumos' | 'liquidaciones'>('consumos');
+  const [diasDesplegados, setDiasDesplegados] = useState<Record<string, boolean>>({});
+  const [liquidaciones, setLiquidaciones] = useState<TransaccionRegistro[]>([]);
+  const [cargandoLiquidaciones, setCargandoLiquidaciones] = useState<boolean>(false);
+  const [busquedaLiquidaciones, setBusquedaLiquidaciones] = useState<string>('');
+
+  const toggleDia = (diaKey: string) => {
+    setDiasDesplegados((prev) => ({
+      ...prev,
+      [diaKey]: !prev[diaKey],
+    }));
+  };
+
   const [busqueda, setBusqueda] = useState<string>('');
   const [busquedaDebounced, setBusquedaDebounced] = useState<string>('');
   const [filtroMetodo, setFiltroMetodo] = useState<
@@ -419,10 +477,69 @@ export default function TransaccionesPage() {
     cargarTasa();
   }, [cargarTasa]);
 
+  // Cargar historial de liquidaciones y abonos para auditoría contable
+  const cargarLiquidaciones = useCallback(async () => {
+    setCargandoLiquidaciones(true);
+    try {
+      const { data, error } = await supabase
+        .from('consumos')
+        .select(`
+          id,
+          cliente_id,
+          monto_total_usd,
+          tasa_bcv_historica,
+          metodo_pago,
+          pagado,
+          fecha,
+          clientes (
+            id,
+            nombre_estudiante,
+            grado_seccion,
+            nombre_representante,
+            telefono_whatsapp,
+            saldo
+          ),
+          consumo_detalles (
+            id,
+            cantidad,
+            precio_unitario_usd,
+            producto_id,
+            productos (
+              id,
+              nombre,
+              precio_usd,
+              imagen_url
+            )
+          )
+        `)
+        .eq('pagado', true)
+        .not('metodo_pago', 'ilike', 'anulado%')
+        .order('fecha', { ascending: false })
+        .limit(500);
+
+      if (error) {
+        console.error('Error cargando liquidaciones en Supabase:', error);
+      } else {
+        const normalizados: TransaccionRegistro[] = (data || []).map((d: any) => ({
+          ...d,
+          clientes: Array.isArray(d.clientes) ? d.clientes[0] || null : d.clientes || null,
+          monto_total_usd: Number(d.monto_total_usd) || 0,
+          consumo_detalles: Array.isArray(d.consumo_detalles) ? d.consumo_detalles : [],
+        }));
+        setLiquidaciones(normalizados);
+      }
+    } catch (e) {
+      console.error('Excepción cargando historial de liquidaciones:', e);
+    } finally {
+      setCargandoLiquidaciones(false);
+    }
+  }, []);
+
   useEffect(() => {
     cargarTransacciones(1, false);
     cargarMetricasResumen();
-  }, [cargarTransacciones, cargarMetricasResumen]);
+    cargarLiquidaciones();
+  }, [cargarTransacciones, cargarMetricasResumen, cargarLiquidaciones]);
 
   // Suscripción en tiempo real a la tabla 'consumos'
   useEffect(() => {
@@ -431,12 +548,14 @@ export default function TransaccionesPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'consumos' }, () => {
         cargarTransacciones(paginaActual, false);
         cargarMetricasResumen();
+        cargarLiquidaciones();
       })
       .subscribe();
 
     const handleMiniRecarga = () => {
       cargarTransacciones(paginaActual, false);
       cargarMetricasResumen();
+      cargarLiquidaciones();
     };
 
     window.addEventListener(EVENTO_MINI_RECARGA, handleMiniRecarga);
@@ -445,7 +564,7 @@ export default function TransaccionesPage() {
       window.removeEventListener(EVENTO_MINI_RECARGA, handleMiniRecarga);
       supabase.removeChannel(channel);
     };
-  }, [paginaActual, cargarTransacciones, cargarMetricasResumen]);
+  }, [paginaActual, cargarTransacciones, cargarMetricasResumen, cargarLiquidaciones]);
 
   // Manejo de la acción de anular transacción
   const handleConfirmarAnulacion = async () => {
@@ -470,7 +589,7 @@ export default function TransaccionesPage() {
       await ejecutarMiniRecarga({
         router,
         recargarDatosLocales: async () => {
-          await Promise.all([cargarTransacciones(paginaActual, false), cargarMetricasResumen()]);
+          await Promise.all([cargarTransacciones(paginaActual, false), cargarMetricasResumen(), cargarLiquidaciones()]);
         },
       });
     } catch (err: unknown) {
@@ -483,6 +602,68 @@ export default function TransaccionesPage() {
   // Como la búsqueda y filtros se ejecutan directamente en Supabase,
   // transaccionesFiltradas es la lista resultante del servidor para esta página.
   const transaccionesFiltradas = transacciones;
+
+  // Agrupamiento por fecha para acordeón collapsible compacto
+  const consumosAgrupadosPorDia = useMemo<GrupoDiaConsumos[]>(() => {
+    const mapa = new Map<string, GrupoDiaConsumos>();
+
+    for (const t of transaccionesFiltradas) {
+      const { diaKey, etiquetaFecha } = obtenerInfoDiaAgrupado(t.fecha);
+      if (!mapa.has(diaKey)) {
+        mapa.set(diaKey, {
+          diaKey,
+          etiquetaFecha,
+          totalDiaUsd: 0,
+          totalDiaBs: 0,
+          totalTransacciones: 0,
+          transacciones: [],
+        });
+      }
+
+      const grupo = mapa.get(diaKey)!;
+      grupo.totalTransacciones += 1;
+      grupo.transacciones.push(t);
+      const audit = parseConsumoAudit({ metodo_pago: t.metodo_pago, pagado: t.pagado });
+      if (!audit.esAnulado) {
+        grupo.totalDiaUsd += Number(t.monto_total_usd || 0);
+      }
+    }
+
+    const resultado = Array.from(mapa.values());
+    for (const g of resultado) {
+      g.totalDiaUsd = Math.round(g.totalDiaUsd * 100) / 100;
+      g.totalDiaBs = calcularConversionBs(g.totalDiaUsd, tasaBcv);
+    }
+    resultado.sort((a, b) => b.diaKey.localeCompare(a.diaKey));
+    return resultado;
+  }, [transaccionesFiltradas, tasaBcv]);
+
+  // Historial de liquidaciones filtrado por búsqueda
+  const liquidacionesFiltradas = useMemo(() => {
+    let lista = [...liquidaciones];
+    if (busquedaLiquidaciones.trim()) {
+      const q = busquedaLiquidaciones.toLowerCase().trim();
+      lista = lista.filter((t) => {
+        const est = t.clientes?.nombre_estudiante?.toLowerCase() || '';
+        const rep = t.clientes?.nombre_representante?.toLowerCase() || '';
+        const grado = t.clientes?.grado_seccion?.toLowerCase() || '';
+        const met = t.metodo_pago?.toLowerCase() || '';
+        const audit = parseConsumoAudit({ metodo_pago: t.metodo_pago, pagado: t.pagado });
+        const ref = audit.referencia?.toLowerCase() || '';
+        return est.includes(q) || rep.includes(q) || grado.includes(q) || met.includes(q) || ref.includes(q);
+      });
+    }
+    return lista;
+  }, [liquidaciones, busquedaLiquidaciones]);
+
+  const metricasLiquidaciones = useMemo(() => {
+    const totalUsd = liquidacionesFiltradas.reduce((sum, item) => sum + Number(item.monto_total_usd || 0), 0);
+    return {
+      totalUsd,
+      totalBs: calcularConversionBs(totalUsd, tasaBcv),
+      totalOperaciones: liquidacionesFiltradas.length,
+    };
+  }, [liquidacionesFiltradas, tasaBcv]);
 
   // Resumen de Métricas Financieras (KPIs de Auditoría) con tasa BCV reactiva
   const metricas = useMemo(() => {
@@ -514,7 +695,12 @@ export default function TransaccionesPage() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#FAFAFA] dark:bg-[#090D16] text-gray-900 dark:text-slate-100">
+    <ErrorBoundary
+      fallbackTitle="Historial de Transacciones"
+      fallbackMessage="Ocurrió un error cargando el historial. Puedes reintentar sin riesgo de pérdida de datos."
+      onReset={() => cargarTransacciones(1, false)}
+    >
+      <div className="min-h-screen flex flex-col bg-[#FAFAFA] dark:bg-[#090D16] text-gray-900 dark:text-slate-100">
       {/* Header Sticky con diseño unificado y navegación móvil */}
       <header className="sticky top-0 z-40 w-full border-b border-gray-200/80 dark:border-slate-800 bg-white/90 dark:bg-[#0D111A]/90 backdrop-blur-md">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-3 py-2 sm:px-6 lg:px-8">
@@ -581,499 +767,581 @@ export default function TransaccionesPage() {
       </AnimatePresence>
 
       <main className="mx-auto w-full max-w-7xl flex-1 px-3 py-4 sm:px-6 lg:px-8 space-y-4">
-        {/* Tarjetas de Resumen Financiero (KPIs) */}
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
-          {/* 1. Total Ventas */}
-          <div className="rounded-3xl border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#0D111A] p-3.5 shadow-2xs">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 flex items-center gap-1">
-              <ShoppingBag className="h-3 w-3 text-indigo-600" />
-              <span>Ventas Netas</span>
-            </span>
-            <div className="mt-1 flex items-baseline gap-1.5 flex-wrap">
-              <span className="font-mono text-lg sm:text-xl font-black text-gray-900 dark:text-slate-100">
-                {formatUSD(metricas.totalVentasUsd)}
-              </span>
-              <span className="text-[11px] font-mono text-gray-400">
-                ({formatBs(metricas.totalVentasBs)})
-              </span>
-            </div>
-            <span className="text-[10px] text-gray-400 mt-0.5 block">
-              {metricas.cantidadTotal - metricas.cantidadAnuladas} transacciones activas
-            </span>
-          </div>
+        {/* Selector de Pestañas: Consumos/Ventas vs Historial de Liquidaciones */}
+        <div className="flex items-center gap-2 border-b border-gray-200/80 dark:border-slate-800 pb-3">
+          <button
+            type="button"
+            onClick={() => setPestanaActiva('consumos')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-bold transition active:scale-95 ${
+              pestanaActiva === 'consumos'
+                ? 'bg-indigo-600 text-white shadow-xs'
+                : 'bg-white dark:bg-[#0D111A] text-gray-600 dark:text-slate-300 border border-gray-200/90 dark:border-slate-800 hover:bg-gray-50 dark:hover:bg-[#111726]'
+            }`}
+          >
+            <ShoppingBag className="h-4 w-4" />
+            <span>Historial de Consumos (Agrupado por Días)</span>
+          </button>
 
-          {/* 2. Cobrado en Caja */}
-          <div className="rounded-3xl border border-emerald-200/80 dark:border-emerald-950/60 bg-gradient-to-br from-emerald-50/50 to-white dark:from-emerald-950/20 dark:to-[#0D111A] p-3.5 shadow-2xs">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400 flex items-center gap-1">
-              <CheckCircle2 className="h-3 w-3 text-emerald-600" />
-              <span>Cobrado en Caja</span>
-            </span>
-            <div className="mt-1 flex items-baseline gap-1.5 flex-wrap">
-              <span className="font-mono text-lg sm:text-xl font-black text-emerald-700 dark:text-emerald-400">
-                {formatUSD(metricas.pagadasCajaUsd)}
+          <button
+            type="button"
+            onClick={() => setPestanaActiva('liquidaciones')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-bold transition active:scale-95 ${
+              pestanaActiva === 'liquidaciones'
+                ? 'bg-indigo-600 text-white shadow-xs'
+                : 'bg-white dark:bg-[#0D111A] text-gray-600 dark:text-slate-300 border border-gray-200/90 dark:border-slate-800 hover:bg-gray-50 dark:hover:bg-[#111726]'
+            }`}
+          >
+            <CreditCard className="h-4 w-4" />
+            <span>Historial de Liquidaciones y Pagos</span>
+            {liquidacionesFiltradas.length > 0 && (
+              <span className="ml-1 rounded-full bg-indigo-100 dark:bg-indigo-950/80 px-2 py-0.5 text-[10px] text-indigo-700 dark:text-indigo-300">
+                {liquidacionesFiltradas.length}
               </span>
-              <span className="text-[11px] font-mono text-emerald-600/70">
-                ({formatBs(metricas.pagadasCajaBs)})
-              </span>
-            </div>
-            <span className="text-[10px] text-emerald-700/80 dark:text-emerald-400/70 mt-0.5 block">
-              Efectivo, Pago Móvil y Tarjeta
-            </span>
-          </div>
-
-          {/* 3. Fiado / Cuentas por Cobrar */}
-          <div className="rounded-3xl border border-amber-200/80 dark:border-amber-950/60 bg-gradient-to-br from-amber-50/50 to-white dark:from-amber-950/20 dark:to-[#0D111A] p-3.5 shadow-2xs">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-800 dark:text-amber-400 flex items-center gap-1">
-              <Clock className="h-3 w-3 text-amber-600" />
-              <span>Por Cobrar (Fiado)</span>
-            </span>
-            <div className="mt-1 flex items-baseline gap-1.5 flex-wrap">
-              <span className="font-mono text-lg sm:text-xl font-black text-amber-700 dark:text-amber-400">
-                {formatUSD(metricas.pendientesFiadoUsd)}
-              </span>
-              <span className="text-[11px] font-mono text-amber-600/70">
-                ({formatBs(metricas.pendientesFiadoBs)})
-              </span>
-            </div>
-            <span className="text-[10px] text-amber-700/80 dark:text-amber-400/70 mt-0.5 block">
-              Cargado a cuentas de alumnos
-            </span>
-          </div>
-
-          {/* 4. Anuladas / Devoluciones */}
-          <div className="rounded-3xl border border-rose-200/80 dark:border-rose-950/60 bg-gradient-to-br from-rose-50/50 to-white dark:from-rose-950/20 dark:to-[#0D111A] p-3.5 shadow-2xs">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-rose-700 dark:text-rose-400 flex items-center gap-1">
-              <RotateCcw className="h-3 w-3 text-rose-600" />
-              <span>Anuladas</span>
-            </span>
-            <div className="mt-1 flex items-baseline gap-1.5 flex-wrap">
-              <span className="font-mono text-lg sm:text-xl font-black text-rose-700 dark:text-rose-400">
-                {formatUSD(metricas.anuladasTotalUsd)}
-              </span>
-            </div>
-            <span className="text-[10px] text-rose-600/80 dark:text-rose-400/70 mt-0.5 block">
-              {metricas.cantidadAnuladas} ventas canceladas / reversadas
-            </span>
-          </div>
+            )}
+          </button>
         </div>
 
-        {/* Barra de Búsqueda y Filtros Rápidos */}
-        <div className="rounded-3xl border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#0D111A] p-3 sm:p-4 shadow-2xs space-y-3">
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
-            {/* Buscador de texto */}
-            <div className="relative flex-1">
-              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <input
-                type="text"
-                value={busqueda}
-                onChange={(e) => setBusqueda(e.target.value)}
-                placeholder="Buscar por cliente, grado, producto o referencia bancaria..."
-                className="w-full rounded-2xl border border-gray-200 dark:border-slate-800 bg-gray-50/60 dark:bg-[#111726] py-2.5 pl-10 pr-9 text-xs text-gray-900 dark:text-slate-100 placeholder:text-gray-400 focus:border-indigo-500 focus:bg-white dark:focus:bg-[#111726] focus:outline-none transition"
-              />
-              {busqueda && (
-                <button
-                  type="button"
-                  onClick={() => setBusqueda('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-1 text-gray-400 hover:text-gray-600"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              )}
+        {pestanaActiva === 'consumos' ? (
+          <>
+            {/* Tarjetas de Resumen Financiero (KPIs) */}
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
+              {/* 1. Total Ventas */}
+              <div className="rounded-3xl border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#0D111A] p-3.5 shadow-2xs">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 flex items-center gap-1">
+                  <ShoppingBag className="h-3 w-3 text-indigo-600" />
+                  <span>Ventas Netas</span>
+                </span>
+                <div className="mt-1 flex items-baseline gap-1.5 flex-wrap">
+                  <span className="font-mono text-lg sm:text-xl font-black text-gray-900 dark:text-slate-100">
+                    {formatUSD(metricas.totalVentasUsd)}
+                  </span>
+                  <span className="text-[11px] font-mono text-gray-400">
+                    ({formatBs(metricas.totalVentasBs)})
+                  </span>
+                </div>
+                <span className="text-[10px] text-gray-400 mt-0.5 block">
+                  {metricas.cantidadTotal - metricas.cantidadAnuladas} transacciones activas
+                </span>
+              </div>
+
+              {/* 2. Cobrado en Caja */}
+              <div className="rounded-3xl border border-emerald-200/80 dark:border-emerald-950/60 bg-gradient-to-br from-emerald-50/50 to-white dark:from-emerald-950/20 dark:to-[#0D111A] p-3.5 shadow-2xs">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400 flex items-center gap-1">
+                  <CheckCircle2 className="h-3 w-3 text-emerald-600" />
+                  <span>Cobrado en Caja</span>
+                </span>
+                <div className="mt-1 flex items-baseline gap-1.5 flex-wrap">
+                  <span className="font-mono text-lg sm:text-xl font-black text-emerald-700 dark:text-emerald-400">
+                    {formatUSD(metricas.pagadasCajaUsd)}
+                  </span>
+                  <span className="text-[11px] font-mono text-emerald-600/70">
+                    ({formatBs(metricas.pagadasCajaBs)})
+                  </span>
+                </div>
+                <span className="text-[10px] text-emerald-700/80 dark:text-emerald-400/70 mt-0.5 block">
+                  Efectivo, Pago Móvil y Tarjeta
+                </span>
+              </div>
+
+              {/* 3. Fiado / Cuentas por Cobrar */}
+              <div className="rounded-3xl border border-amber-200/80 dark:border-amber-950/60 bg-gradient-to-br from-amber-50/50 to-white dark:from-amber-950/20 dark:to-[#0D111A] p-3.5 shadow-2xs">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-amber-800 dark:text-amber-400 flex items-center gap-1">
+                  <Clock className="h-3 w-3 text-amber-600" />
+                  <span>Por Cobrar (Fiado)</span>
+                </span>
+                <div className="mt-1 flex items-baseline gap-1.5 flex-wrap">
+                  <span className="font-mono text-lg sm:text-xl font-black text-amber-700 dark:text-amber-400">
+                    {formatUSD(metricas.pendientesFiadoUsd)}
+                  </span>
+                  <span className="text-[11px] font-mono text-amber-600/70">
+                    ({formatBs(metricas.pendientesFiadoBs)})
+                  </span>
+                </div>
+                <span className="text-[10px] text-amber-700/80 dark:text-amber-400/70 mt-0.5 block">
+                  Cargado a cuentas de alumnos
+                </span>
+              </div>
+
+              {/* 4. Anuladas / Devoluciones */}
+              <div className="rounded-3xl border border-rose-200/80 dark:border-rose-950/60 bg-gradient-to-br from-rose-50/50 to-white dark:from-rose-950/20 dark:to-[#0D111A] p-3.5 shadow-2xs">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-rose-700 dark:text-rose-400 flex items-center gap-1">
+                  <RotateCcw className="h-3 w-3 text-rose-600" />
+                  <span>Anuladas</span>
+                </span>
+                <div className="mt-1 flex items-baseline gap-1.5 flex-wrap">
+                  <span className="font-mono text-lg sm:text-xl font-black text-rose-700 dark:text-rose-400">
+                    {formatUSD(metricas.anuladasTotalUsd)}
+                  </span>
+                </div>
+                <span className="text-[10px] text-rose-600/80 dark:text-rose-400/70 mt-0.5 block">
+                  {metricas.cantidadAnuladas} ventas canceladas / reversadas
+                </span>
+              </div>
             </div>
 
-            {/* Filtro de Rango de Fechas */}
-            <div className="flex items-center rounded-2xl bg-gray-100 dark:bg-slate-800 p-1 text-xs font-bold shrink-0 self-start sm:self-auto">
-              {(
-                [
-                  { id: 'todas', label: 'Todas' },
-                  { id: 'hoy', label: 'Hoy' },
-                  { id: 'semana', label: '7 días' },
-                  { id: 'mes', label: 'Mes' },
-                ] as const
-              ).map((f) => (
-                <button
-                  key={f.id}
-                  type="button"
-                  onClick={() => setFiltroFecha(f.id)}
-                  className={`px-3 py-1.5 rounded-xl transition ${
-                    filtroFecha === f.id
-                      ? 'bg-white dark:bg-[#111726] text-gray-900 dark:text-slate-100 shadow-2xs'
-                      : 'text-gray-500 dark:text-slate-400 hover:text-gray-900'
-                  }`}
-                >
-                  {f.label}
-                </button>
-              ))}
-            </div>
-          </div>
+            {/* Barra de Búsqueda y Filtros Rápidos */}
+            <div className="rounded-3xl border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#0D111A] p-3 sm:p-4 shadow-2xs space-y-3">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <input
+                    type="text"
+                    value={busqueda}
+                    onChange={(e) => setBusqueda(e.target.value)}
+                    placeholder="Buscar por cliente, grado, producto o referencia bancaria..."
+                    className="w-full rounded-2xl border border-gray-200 dark:border-slate-800 bg-gray-50/60 dark:bg-[#111726] py-2.5 pl-10 pr-9 text-xs text-gray-900 dark:text-slate-100 placeholder:text-gray-400 focus:border-indigo-500 focus:bg-white dark:focus:bg-[#111726] focus:outline-none transition"
+                  />
+                  {busqueda && (
+                    <button
+                      type="button"
+                      onClick={() => setBusqueda('')}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-1 text-gray-400 hover:text-gray-600"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
 
-          {/* Filtros Rápidos por Método de Pago */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 touch-scroll-ios scrollbar-none">
-            {(
-              [
-                { id: 'todas', label: 'Todas las Ventas', icono: ShoppingBag },
-                { id: 'pago_movil', label: 'Pago Móvil', icono: Smartphone },
-                { id: 'efectivo', label: 'Efectivo ($ / Bs)', icono: DollarSign },
-                { id: 'pendientes', label: 'Pendientes / Fiado', icono: Clock },
-                { id: 'saldo_favor', label: 'Saldo a Favor', icono: Wallet },
-                { id: 'anuladas', label: 'Anuladas', icono: RotateCcw },
-              ] as const
-            ).map((filtro) => {
-              const Icono = filtro.icono;
-              const activo = filtroMetodo === filtro.id;
-              return (
-                <button
-                  key={filtro.id}
-                  type="button"
-                  onClick={() => setFiltroMetodo(filtro.id)}
-                  className={`flex items-center gap-1.5 rounded-2xl px-3 py-1.5 text-xs font-bold shrink-0 transition border ${
-                    activo
-                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
-                      : 'bg-white dark:bg-[#111726] text-gray-600 dark:text-slate-300 border-gray-200/90 dark:border-slate-800 hover:bg-gray-50 dark:hover:bg-[#141C2E]'
-                  }`}
-                >
-                  <Icono className="h-3.5 w-3.5 shrink-0" />
-                  <span>{filtro.label}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Tabla / Lista de Transacciones */}
-        {cargandoTransacciones ? (
-          <div className="rounded-3xl border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#0D111A] p-12 text-center shadow-2xs">
-            <Loader2 className="mx-auto h-8 w-8 animate-spin text-indigo-600 dark:text-indigo-400" />
-            <p className="mt-3 text-xs font-semibold text-gray-500 dark:text-slate-400">
-              Cargando historial de transacciones desde Supabase...
-            </p>
-          </div>
-        ) : transaccionesFiltradas.length === 0 ? (
-          <div className="rounded-3xl border border-dashed border-gray-200 dark:border-slate-800 bg-white dark:bg-[#0D111A] p-12 text-center">
-            <FileText className="mx-auto h-10 w-10 text-gray-300 dark:text-slate-600" />
-            <h3 className="mt-2 text-sm font-bold text-gray-800 dark:text-slate-200">
-              No se encontraron transacciones
-            </h3>
-            <p className="mt-1 text-xs text-gray-400">
-              Prueba cambiando los filtros de fecha, método de pago o el término de búsqueda.
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {/* Vista en Tarjetas para Móviles (< md) */}
-            <div className="grid grid-cols-1 gap-2.5 md:hidden">
-              <AnimatePresence>
-                {transaccionesFiltradas.map((t) => {
-                  const audit = parseConsumoAudit({ metodo_pago: t.metodo_pago, pagado: t.pagado });
-                  const fechaObj = formatearFechaHora(t.fecha);
-                  const totalItems = t.consumo_detalles?.reduce((acc, i) => acc + i.cantidad, 0) || 0;
-                  const tasaHistorica = t.tasa_bcv_historica || tasaBcv;
-                  const totalBsEquiv = calcularConversionBs(t.monto_total_usd, tasaHistorica);
-
-                  return (
-                    <motion.div
-                      key={t.id}
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, scale: 0.95 }}
-                      className={`rounded-3xl border p-4 shadow-2xs transition bg-white dark:bg-[#0D111A] ${
-                        audit.esAnulado
-                          ? 'border-rose-200/70 dark:border-rose-950/40 bg-rose-50/20 opacity-80'
-                          : audit.esPendiente
-                          ? 'border-amber-200/80 dark:border-amber-950/40'
-                          : 'border-gray-200/90 dark:border-slate-800'
+                {/* Filtro de Rango de Fechas */}
+                <div className="flex items-center rounded-2xl bg-gray-100 dark:bg-slate-800 p-1 text-xs font-bold shrink-0 self-start sm:self-auto">
+                  {(
+                    [
+                      { id: 'todas', label: 'Todas' },
+                      { id: 'hoy', label: 'Hoy' },
+                      { id: 'semana', label: '7 días' },
+                      { id: 'mes', label: 'Mes' },
+                    ] as const
+                  ).map((f) => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => setFiltroFecha(f.id)}
+                      className={`px-3 py-1.5 rounded-xl transition ${
+                        filtroFecha === f.id
+                          ? 'bg-white dark:bg-[#111726] text-gray-900 dark:text-slate-100 shadow-2xs'
+                          : 'text-gray-500 dark:text-slate-400 hover:text-gray-900'
                       }`}
                     >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex flex-col">
-                          <span className="text-xs font-bold text-gray-900 dark:text-slate-100 flex items-center gap-1.5">
-                            <User className="h-3.5 w-3.5 text-indigo-600" />
-                            {t.clientes ? (
-                              <>
-                                <span>{t.clientes.nombre_estudiante}</span>
-                                {t.clientes.grado_seccion && (
-                                  <span className="text-[10px] text-gray-500 font-normal">
-                                    ({t.clientes.grado_seccion})
-                                  </span>
-                                )}
-                              </>
-                            ) : (
-                              <span className="text-gray-600 dark:text-slate-400">Público General / Caja</span>
-                            )}
-                          </span>
-                          <span className="text-[10px] text-gray-400 flex items-center gap-1 mt-0.5">
-                            <Clock className="h-3 w-3" />
-                            <span>
-                              {fechaObj.fecha} &bull; {fechaObj.hora}
-                            </span>
-                          </span>
-                        </div>
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-                        {/* Badge de Estado */}
-                        <span
-                          className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
-                            audit.esAnulado
-                              ? 'bg-rose-100 text-rose-800 border border-rose-200'
-                              : audit.esPendiente
-                              ? 'bg-amber-100 text-amber-800 border border-amber-200'
-                              : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                          }`}
-                        >
-                          {audit.estadoBadge.texto}
-                        </span>
-                      </div>
-
-                      {/* Resumen de Productos */}
-                      <div className="mt-3 rounded-2xl bg-gray-50 dark:bg-[#111726] p-2.5 text-xs text-gray-600 dark:text-slate-300">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-1">
-                          Productos ({totalItems}):
-                        </span>
-                        <div className="line-clamp-2 text-[11px] leading-relaxed">
-                          {t.consumo_detalles && t.consumo_detalles.length > 0 ? (
-                            t.consumo_detalles.map((cd, idx) => (
-                              <span key={cd.id || idx}>
-                                {cd.cantidad}x {cd.productos?.nombre || 'Producto'}
-                                {idx < (t.consumo_detalles?.length || 0) - 1 ? ', ' : ''}
-                              </span>
-                            ))
-                          ) : (
-                            <span className="italic text-gray-400">Sin desglose registrado</span>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Método de Pago y Monto */}
-                      <div className="mt-3 flex items-center justify-between border-t border-gray-100 dark:border-slate-800/80 pt-2.5">
-                        <div className="flex flex-col">
-                          <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
-                            Método de Pago:
-                          </span>
-                          <div className="flex items-center gap-1 mt-0.5">
-                            <span className="text-xs font-bold text-gray-800 dark:text-slate-200">
-                              {audit.nombreLegible}
-                            </span>
-                            {audit.referencia && (
-                              <span className="rounded-md bg-sky-50 dark:bg-sky-950/60 border border-sky-200 text-sky-800 dark:text-sky-300 px-1.5 py-0.2 text-[10px] font-mono font-bold">
-                                #{audit.referencia}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="text-right">
-                          <span
-                            className={`font-mono text-base font-black ${
-                              audit.esAnulado
-                                ? 'line-through text-gray-400'
-                                : 'text-gray-900 dark:text-slate-100'
-                            }`}
-                          >
-                            {formatUSD(t.monto_total_usd)}
-                          </span>
-                          <span className="block font-mono text-[10px] text-gray-400">
-                            {formatBs(totalBsEquiv)}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Botones de Acción */}
-                      <div className="mt-3 flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setModalDetalle({ abierto: true, transaccion: t })}
-                          className="flex-1 rounded-2xl border border-gray-200 dark:border-slate-800 bg-white dark:bg-[#111726] py-2 text-xs font-bold text-gray-700 dark:text-slate-200 hover:bg-gray-50 transition active:scale-95 text-center"
-                        >
-                          Ver Ticket
-                        </button>
-
-                        {!audit.esAnulado && (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setModalAnular({
-                                abierto: true,
-                                transaccion: t,
-                                procesando: false,
-                                error: null,
-                              })
-                            }
-                            className="rounded-2xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-xs font-bold text-rose-700 dark:text-rose-300 hover:bg-rose-100 transition active:scale-95 flex items-center gap-1"
-                          >
-                            <RotateCcw className="h-3 w-3" />
-                            <span>Anular</span>
-                          </button>
-                        )}
-                      </div>
-                    </motion.div>
+              {/* Filtros Rápidos por Método de Pago */}
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 touch-scroll-ios scrollbar-none">
+                {(
+                  [
+                    { id: 'todas', label: 'Todas las Ventas', icono: ShoppingBag },
+                    { id: 'pago_movil', label: 'Pago Móvil', icono: Smartphone },
+                    { id: 'efectivo', label: 'Efectivo ($ / Bs)', icono: DollarSign },
+                    { id: 'pendientes', label: 'Pendientes / Fiado', icono: Clock },
+                    { id: 'saldo_favor', label: 'Saldo a Favor', icono: Wallet },
+                    { id: 'anuladas', label: 'Anuladas', icono: RotateCcw },
+                  ] as const
+                ).map((filtro) => {
+                  const Icono = filtro.icono;
+                  const activo = filtroMetodo === filtro.id;
+                  return (
+                    <button
+                      key={filtro.id}
+                      type="button"
+                      onClick={() => setFiltroMetodo(filtro.id)}
+                      className={`flex items-center gap-1.5 rounded-2xl px-3 py-1.5 text-xs font-bold shrink-0 transition border ${
+                        activo
+                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
+                          : 'bg-white dark:bg-[#111726] text-gray-600 dark:text-slate-300 border-gray-200/90 dark:border-slate-800 hover:bg-gray-50 dark:hover:bg-[#141C2E]'
+                      }`}
+                    >
+                      <Icono className="h-3.5 w-3.5 shrink-0" />
+                      <span>{filtro.label}</span>
+                    </button>
                   );
                 })}
-              </AnimatePresence>
+              </div>
             </div>
 
-            {/* Vista en Tabla para Escritorio (>= md) */}
-            <div className="hidden md:block overflow-hidden rounded-3xl border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#0D111A] shadow-2xs">
-              <table className="w-full text-left text-xs">
-                <thead className="border-b border-gray-200/80 dark:border-slate-800 bg-gray-50/70 dark:bg-[#111726] text-gray-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">
-                  <tr>
-                    <th className="py-3.5 pl-4 pr-3">Fecha / Hora</th>
-                    <th className="px-3 py-3.5">Cliente</th>
-                    <th className="px-3 py-3.5">Artículos</th>
-                    <th className="px-3 py-3.5">Método de Pago</th>
-                    <th className="px-3 py-3.5">Total ($ / Bs)</th>
-                    <th className="px-3 py-3.5">Estado</th>
-                    <th className="py-3.5 pl-3 pr-4 text-right">Acciones</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100 dark:divide-slate-800/80">
-                  {transaccionesFiltradas.map((t) => {
-                    const audit = parseConsumoAudit({
-                      metodo_pago: t.metodo_pago,
-                      pagado: t.pagado,
-                    });
-                    const fechaObj = formatearFechaHora(t.fecha);
-                    const totalItems =
-                      t.consumo_detalles?.reduce((acc, i) => acc + i.cantidad, 0) || 0;
-                    const tasaHistorica = t.tasa_bcv_historica || tasaBcv;
-                    const totalBsEquiv = calcularConversionBs(t.monto_total_usd, tasaHistorica);
+            {/* Listado Agrupado por Día (Acordeón Collapsible) */}
+            {cargandoTransacciones ? (
+              <div className="rounded-3xl border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#0D111A] p-12 text-center shadow-2xs">
+                <Loader2 className="mx-auto h-8 w-8 animate-spin text-indigo-600 dark:text-indigo-400" />
+                <p className="mt-3 text-xs font-semibold text-gray-500 dark:text-slate-400">
+                  Cargando historial de consumos agrupados...
+                </p>
+              </div>
+            ) : consumosAgrupadosPorDia.length === 0 ? (
+              <div className="rounded-3xl border border-dashed border-gray-200 dark:border-slate-800 bg-white dark:bg-[#0D111A] p-12 text-center">
+                <FileText className="mx-auto h-10 w-10 text-gray-300 dark:text-slate-600" />
+                <h3 className="mt-2 text-sm font-bold text-gray-800 dark:text-slate-200">
+                  No se encontraron consumos registrados
+                </h3>
+                <p className="mt-1 text-xs text-gray-400">
+                  Prueba cambiando los filtros de fecha, método de pago o el término de búsqueda.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3.5">
+                {consumosAgrupadosPorDia.map((grupo) => {
+                  const abierto = !!diasDesplegados[grupo.diaKey];
 
-                    return (
-                      <tr
-                        key={t.id}
-                        className={`hover:bg-gray-50/70 dark:hover:bg-[#111726]/60 transition ${
-                          audit.esAnulado ? 'bg-rose-50/15 opacity-75' : ''
-                        }`}
+                  return (
+                    <div
+                      key={grupo.diaKey}
+                      className="overflow-hidden rounded-3xl border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#0D111A] shadow-2xs transition"
+                    >
+                      {/* Cabecera / Tarjeta Acordeón del Día */}
+                      <button
+                        type="button"
+                        onClick={() => toggleDia(grupo.diaKey)}
+                        className="w-full flex flex-col sm:flex-row sm:items-center justify-between p-4 sm:px-5 hover:bg-gray-50/70 dark:hover:bg-[#111726]/60 transition text-left gap-3"
                       >
-                        {/* Fecha y Hora */}
-                        <td className="py-3 pl-4 pr-3 whitespace-nowrap">
-                          <div className="font-bold text-gray-900 dark:text-slate-100">
-                            {fechaObj.fecha}
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/40">
+                            <Calendar className="h-5 w-5" />
                           </div>
-                          <div className="text-[10px] text-gray-400">{fechaObj.hora}</div>
-                        </td>
-
-                        {/* Cliente */}
-                        <td className="px-3 py-3">
-                          {t.clientes ? (
-                            <div>
-                              <div className="font-bold text-gray-900 dark:text-slate-100">
-                                {t.clientes.nombre_estudiante}
-                              </div>
-                              {t.clientes.grado_seccion && (
-                                <div className="text-[10px] text-gray-500">
-                                  {t.clientes.grado_seccion}
-                                </div>
-                              )}
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h3 className="text-sm font-bold text-gray-900 dark:text-slate-100">
+                                {grupo.etiquetaFecha}
+                              </h3>
+                              <span className="rounded-full bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200/80 dark:border-indigo-800 px-2.5 py-0.5 text-[11px] font-bold text-indigo-700 dark:text-indigo-300">
+                                {grupo.totalTransacciones} {grupo.totalTransacciones === 1 ? 'ticket' : 'tickets'}
+                              </span>
                             </div>
-                          ) : (
-                            <span className="text-gray-400 italic">Público General / Caja</span>
-                          )}
-                        </td>
-
-                        {/* Artículos */}
-                        <td className="px-3 py-3 max-w-[200px]">
-                          <button
-                            type="button"
-                            onClick={() => setModalDetalle({ abierto: true, transaccion: t })}
-                            className="text-left group"
-                          >
-                            <span className="font-bold text-gray-800 dark:text-slate-200 group-hover:text-indigo-600 transition block">
-                              {totalItems} {totalItems === 1 ? 'artículo' : 'artículos'}
+                            <span className="text-[11px] text-gray-400 mt-0.5 block">
+                              {abierto ? 'Clic para contraer' : 'Clic para desplegar tickets de este día'}
                             </span>
-                            <span className="text-[11px] text-gray-400 truncate block max-w-[180px]">
-                              {t.consumo_detalles && t.consumo_detalles.length > 0
-                                ? t.consumo_detalles.map((c) => c.productos?.nombre).join(', ')
-                                : 'Ver detalle'}
-                            </span>
-                          </button>
-                        </td>
-
-                        {/* Método de Pago */}
-                        <td className="px-3 py-3">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="font-bold text-gray-800 dark:text-slate-200">
-                              {audit.nombreLegible}
-                            </span>
-                            {audit.referencia && (
-                              <span className="rounded-md bg-sky-50 dark:bg-sky-950/60 border border-sky-200 text-sky-800 dark:text-sky-300 px-1.5 py-0.5 text-[10px] font-mono font-bold">
-                                #{audit.referencia}
-                              </span>
-                            )}
                           </div>
-                        </td>
+                        </div>
 
-                        {/* Total */}
-                        <td className="px-3 py-3 whitespace-nowrap">
+                        <div className="flex items-center justify-between sm:justify-end gap-4 border-t sm:border-t-0 pt-2 sm:pt-0 border-gray-100 dark:border-slate-800">
+                          <div className="text-left sm:text-right">
+                            <div className="text-base font-black text-gray-900 dark:text-slate-100">
+                              {formatUSD(grupo.totalDiaUsd)}
+                            </div>
+                            <div className="text-[11px] font-mono text-amber-700 dark:text-amber-400 font-bold">
+                              {formatBs(grupo.totalDiaBs)}
+                            </div>
+                          </div>
+
                           <div
-                            className={`font-mono font-black text-sm ${
-                              audit.esAnulado
-                                ? 'line-through text-gray-400'
-                                : 'text-gray-900 dark:text-slate-100'
+                            className={`p-1.5 rounded-xl border border-gray-200/80 dark:border-slate-800 bg-gray-50 dark:bg-[#111726] text-gray-600 dark:text-slate-300 transition-transform ${
+                              abierto ? 'rotate-180' : ''
                             }`}
                           >
-                            {formatUSD(t.monto_total_usd)}
+                            <ChevronDown className="h-4 w-4" />
                           </div>
-                          <div className="font-mono text-[10px] text-gray-400">
-                            {formatBs(totalBsEquiv)}
+                        </div>
+                      </button>
+
+                      {/* Desglose de transacciones de ese día */}
+                      {abierto && (
+                        <div className="border-t border-gray-100 dark:border-slate-800/80 p-3 sm:p-4 bg-gray-50/40 dark:bg-[#0a0e17]/40 space-y-3">
+                          {/* Vista Móvil (< md) */}
+                          <div className="grid grid-cols-1 gap-2.5 md:hidden">
+                            <AnimatePresence>
+                              {grupo.transacciones.map((t) => {
+                                const audit = parseConsumoAudit({ metodo_pago: t.metodo_pago, pagado: t.pagado });
+                                const fechaObj = formatearFechaHora(t.fecha);
+                                const totalItems = t.consumo_detalles?.reduce((acc, i) => acc + i.cantidad, 0) || 0;
+                                const tasaHistorica = t.tasa_bcv_historica || tasaBcv;
+                                const totalBsEquiv = calcularConversionBs(t.monto_total_usd, tasaHistorica);
+
+                                return (
+                                  <motion.div
+                                    key={t.id}
+                                    initial={{ opacity: 0, y: 8 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, scale: 0.95 }}
+                                    className={`rounded-2xl border p-3.5 shadow-2xs transition bg-white dark:bg-[#0D111A] ${
+                                      audit.esAnulado
+                                        ? 'border-rose-200/70 dark:border-rose-950/40 bg-rose-50/20 opacity-80'
+                                        : audit.esPendiente
+                                        ? 'border-amber-200/80 dark:border-amber-950/40'
+                                        : 'border-gray-200/90 dark:border-slate-800'
+                                    }`}
+                                  >
+                                    <div className="flex items-start justify-between gap-2">
+                                      <div className="flex flex-col">
+                                        <span className="text-xs font-bold text-gray-900 dark:text-slate-100 flex items-center gap-1.5">
+                                          <User className="h-3.5 w-3.5 text-indigo-600" />
+                                          {t.clientes ? (
+                                            <>
+                                              <span>{t.clientes.nombre_estudiante}</span>
+                                              {t.clientes.grado_seccion && (
+                                                <span className="text-[10px] text-gray-500 font-normal">
+                                                  ({t.clientes.grado_seccion})
+                                                </span>
+                                              )}
+                                            </>
+                                          ) : (
+                                            <span className="text-gray-600 dark:text-slate-400">Público General / Caja</span>
+                                          )}
+                                        </span>
+                                        <span className="text-[10px] text-gray-400 flex items-center gap-1 mt-0.5">
+                                          <Clock className="h-3 w-3" />
+                                          <span>{fechaObj.hora}</span>
+                                        </span>
+                                      </div>
+
+                                      <span
+                                        className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                                          audit.esAnulado
+                                            ? 'bg-rose-100 text-rose-800 border border-rose-200'
+                                            : audit.esPendiente
+                                            ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                                            : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                        }`}
+                                      >
+                                        {audit.estadoBadge.texto}
+                                      </span>
+                                    </div>
+
+                                    {/* Resumen de Productos */}
+                                    <div className="mt-2.5 rounded-xl bg-gray-50 dark:bg-[#111726] p-2 text-xs text-gray-600 dark:text-slate-300">
+                                      <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-0.5">
+                                        Productos ({totalItems}):
+                                      </span>
+                                      <div className="line-clamp-2 text-[11px] leading-relaxed">
+                                        {t.consumo_detalles && t.consumo_detalles.length > 0 ? (
+                                          t.consumo_detalles.map((cd, idx) => (
+                                            <span key={cd.id || idx}>
+                                              {cd.cantidad}x {cd.productos?.nombre || 'Producto'}
+                                              {idx < (t.consumo_detalles?.length || 0) - 1 ? ', ' : ''}
+                                            </span>
+                                          ))
+                                        ) : (
+                                          <span className="italic text-gray-400">Sin desglose registrado</span>
+                                        )}
+                                      </div>
+                                    </div>
+
+                                    {/* Método de Pago y Monto */}
+                                    <div className="mt-2.5 flex items-center justify-between border-t border-gray-100 dark:border-slate-800/80 pt-2">
+                                      <div className="flex flex-col">
+                                        <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
+                                          Método:
+                                        </span>
+                                        <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+                                          <span className="text-xs font-bold text-gray-800 dark:text-slate-200">
+                                            {audit.nombreLegible}
+                                          </span>
+                                          {audit.referencia && (
+                                            <span className="rounded-md bg-sky-50 dark:bg-sky-950/60 border border-sky-200 text-sky-800 dark:text-sky-300 px-1.5 py-0.2 text-[10px] font-mono font-bold">
+                                              #{audit.referencia}
+                                            </span>
+                                          )}
+                                          {t.metodo_pago.includes('[Pago Familiar]') && (
+                                            <span className="rounded-md bg-purple-50 dark:bg-purple-950/60 border border-purple-200 text-purple-800 dark:text-purple-300 px-1.5 py-0.2 text-[10px] font-bold">
+                                              Familiar
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+
+                                      <div className="text-right">
+                                        <span
+                                          className={`font-mono text-base font-black ${
+                                            audit.esAnulado
+                                              ? 'line-through text-gray-400'
+                                              : 'text-gray-900 dark:text-slate-100'
+                                          }`}
+                                        >
+                                          {formatUSD(t.monto_total_usd)}
+                                        </span>
+                                        <span className="block font-mono text-[10px] text-gray-400">
+                                          {formatBs(totalBsEquiv)}
+                                        </span>
+                                      </div>
+                                    </div>
+
+                                    {/* Botones de Acción */}
+                                    <div className="mt-2.5 flex items-center gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => setModalDetalle({ abierto: true, transaccion: t })}
+                                        className="flex-1 rounded-xl border border-gray-200 dark:border-slate-800 bg-white dark:bg-[#111726] py-1.5 text-xs font-bold text-gray-700 dark:text-slate-200 hover:bg-gray-50 transition active:scale-95 text-center"
+                                      >
+                                        Ver Ticket
+                                      </button>
+
+                                      {!audit.esAnulado && (
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setModalAnular({
+                                              abierto: true,
+                                              transaccion: t,
+                                              procesando: false,
+                                              error: null,
+                                            })
+                                          }
+                                          className="rounded-xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/40 px-2.5 py-1.5 text-xs font-bold text-rose-700 dark:text-rose-300 hover:bg-rose-100 transition active:scale-95 flex items-center gap-1"
+                                        >
+                                          <RotateCcw className="h-3 w-3" />
+                                          <span>Anular</span>
+                                        </button>
+                                      )}
+                                    </div>
+                                  </motion.div>
+                                );
+                              })}
+                            </AnimatePresence>
                           </div>
-                        </td>
 
-                        {/* Estado */}
-                        <td className="px-3 py-3 whitespace-nowrap">
-                          <span
-                            className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${
-                              audit.esAnulado
-                                ? 'bg-rose-100 text-rose-800 border border-rose-200'
-                                : audit.esPendiente
-                                ? 'bg-amber-100 text-amber-800 border border-amber-200'
-                                : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                            }`}
-                          >
-                            {audit.estadoBadge.texto}
-                          </span>
-                        </td>
+                          {/* Vista Tabla Escritorio (>= md) */}
+                          <div className="hidden md:block overflow-hidden rounded-2xl border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#0D111A]">
+                            <table className="w-full text-left text-xs">
+                              <thead className="border-b border-gray-200/80 dark:border-slate-800 bg-gray-50/70 dark:bg-[#111726] text-gray-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">
+                                <tr>
+                                  <th className="py-3 pl-4 pr-3">Hora</th>
+                                  <th className="px-3 py-3">Cliente</th>
+                                  <th className="px-3 py-3">Artículos</th>
+                                  <th className="px-3 py-3">Método de Pago</th>
+                                  <th className="px-3 py-3">Total ($ / Bs)</th>
+                                  <th className="px-3 py-3">Estado</th>
+                                  <th className="py-3 pl-3 pr-4 text-right">Acciones</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-100 dark:divide-slate-800/80">
+                                {grupo.transacciones.map((t) => {
+                                  const audit = parseConsumoAudit({
+                                    metodo_pago: t.metodo_pago,
+                                    pagado: t.pagado,
+                                  });
+                                  const fechaObj = formatearFechaHora(t.fecha);
+                                  const totalItems =
+                                    t.consumo_detalles?.reduce((acc, i) => acc + i.cantidad, 0) || 0;
+                                  const tasaHistorica = t.tasa_bcv_historica || tasaBcv;
+                                  const totalBsEquiv = calcularConversionBs(t.monto_total_usd, tasaHistorica);
 
-                        {/* Acciones */}
-                        <td className="py-3 pl-3 pr-4 text-right whitespace-nowrap">
-                          <div className="flex items-center justify-end gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => setModalDetalle({ abierto: true, transaccion: t })}
-                              className="rounded-xl border border-gray-200 dark:border-slate-800 px-2.5 py-1.5 text-xs font-semibold text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-[#141C2E] transition active:scale-95"
-                              title="Ver comprobante / ticket"
-                            >
-                              Detalle
-                            </button>
-
-                            {!audit.esAnulado ? (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setModalAnular({
-                                    abierto: true,
-                                    transaccion: t,
-                                    procesando: false,
-                                    error: null,
-                                  })
-                                }
-                                className="rounded-xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/40 px-2.5 py-1.5 text-xs font-bold text-rose-700 dark:text-rose-300 hover:bg-rose-100 transition active:scale-95 flex items-center gap-1"
-                                title="Anular venta y revertir saldo"
-                              >
-                                <RotateCcw className="h-3.5 w-3.5" />
-                                <span>Anular</span>
-                              </button>
-                            ) : (
-                              <span className="text-[10px] font-semibold text-rose-400 italic">
-                                Anulada
-                              </span>
-                            )}
+                                  return (
+                                    <tr
+                                      key={t.id}
+                                      className={`hover:bg-gray-50/70 dark:hover:bg-[#111726]/60 transition ${
+                                        audit.esAnulado ? 'bg-rose-50/15 opacity-75' : ''
+                                      }`}
+                                    >
+                                      <td className="py-2.5 pl-4 pr-3 whitespace-nowrap font-mono text-gray-600 dark:text-slate-400 font-bold">
+                                        {fechaObj.hora}
+                                      </td>
+                                      <td className="px-3 py-2.5">
+                                        {t.clientes ? (
+                                          <div>
+                                            <div className="font-bold text-gray-900 dark:text-slate-100">
+                                              {t.clientes.nombre_estudiante}
+                                            </div>
+                                            {t.clientes.grado_seccion && (
+                                              <div className="text-[10px] text-gray-500">
+                                                {t.clientes.grado_seccion}
+                                              </div>
+                                            )}
+                                          </div>
+                                        ) : (
+                                          <span className="text-gray-400 italic">Público General / Caja</span>
+                                        )}
+                                      </td>
+                                      <td className="px-3 py-2.5 max-w-[200px]">
+                                        <button
+                                          type="button"
+                                          onClick={() => setModalDetalle({ abierto: true, transaccion: t })}
+                                          className="text-left group"
+                                        >
+                                          <span className="font-bold text-gray-800 dark:text-slate-200 group-hover:text-indigo-600 transition block">
+                                            {totalItems} {totalItems === 1 ? 'artículo' : 'artículos'}
+                                          </span>
+                                          <span className="text-[11px] text-gray-400 truncate block max-w-[180px]">
+                                            {t.consumo_detalles && t.consumo_detalles.length > 0
+                                              ? t.consumo_detalles.map((c) => c.productos?.nombre).join(', ')
+                                              : 'Ver detalle'}
+                                          </span>
+                                        </button>
+                                      </td>
+                                      <td className="px-3 py-2.5">
+                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                          <span className="font-bold text-gray-800 dark:text-slate-200">
+                                            {audit.nombreLegible}
+                                          </span>
+                                          {audit.referencia && (
+                                            <span className="rounded-md bg-sky-50 dark:bg-sky-950/60 border border-sky-200 text-sky-800 dark:text-sky-300 px-1.5 py-0.5 text-[10px] font-mono font-bold">
+                                              #{audit.referencia}
+                                            </span>
+                                          )}
+                                          {t.metodo_pago.includes('[Pago Familiar]') && (
+                                            <span className="rounded-md bg-purple-50 dark:bg-purple-950/60 border border-purple-200 text-purple-800 dark:text-purple-300 px-1.5 py-0.5 text-[10px] font-bold">
+                                              Familiar
+                                            </span>
+                                          )}
+                                        </div>
+                                      </td>
+                                      <td className="px-3 py-2.5 whitespace-nowrap">
+                                        <div
+                                          className={`font-mono font-black text-sm ${
+                                            audit.esAnulado
+                                              ? 'line-through text-gray-400'
+                                              : 'text-gray-900 dark:text-slate-100'
+                                          }`}
+                                        >
+                                          {formatUSD(t.monto_total_usd)}
+                                        </div>
+                                        <div className="font-mono text-[10px] text-gray-400">
+                                          {formatBs(totalBsEquiv)}
+                                        </div>
+                                      </td>
+                                      <td className="px-3 py-2.5 whitespace-nowrap">
+                                        <span
+                                          className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                                            audit.esAnulado
+                                              ? 'bg-rose-100 text-rose-800 border border-rose-200'
+                                              : audit.esPendiente
+                                              ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                                              : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                          }`}
+                                        >
+                                          {audit.estadoBadge.texto}
+                                        </span>
+                                      </td>
+                                      <td className="py-2.5 pl-3 pr-4 text-right whitespace-nowrap">
+                                        <div className="flex items-center justify-end gap-1.5">
+                                          <button
+                                            type="button"
+                                            onClick={() => setModalDetalle({ abierto: true, transaccion: t })}
+                                            className="rounded-xl border border-gray-200 dark:border-slate-800 px-2.5 py-1 text-xs font-semibold text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-[#141C2E] transition active:scale-95"
+                                          >
+                                            Ticket
+                                          </button>
+                                          {!audit.esAnulado && (
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                setModalAnular({
+                                                  abierto: true,
+                                                  transaccion: t,
+                                                  procesando: false,
+                                                  error: null,
+                                                })
+                                              }
+                                              className="rounded-xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/40 px-2 py-1 text-xs font-bold text-rose-700 dark:text-rose-300 hover:bg-rose-100 transition active:scale-95 flex items-center gap-1"
+                                            >
+                                              <RotateCcw className="h-3 w-3" />
+                                              <span>Anular</span>
+                                            </button>
+                                          )}
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
                           </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
 
             {/* Controles de Paginación en el Servidor (.range) */}
             {totalRegistros > 0 && (
@@ -1134,6 +1402,256 @@ export default function TransaccionesPage() {
                     <span>Siguiente</span>
                     <ChevronRight className="h-4 w-4" />
                   </button>
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          /* Pestaña: Historial de Liquidaciones y Pagos */
+          <div className="space-y-4">
+            {/* KPIs de Liquidaciones */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3">
+              <div className="rounded-3xl border border-emerald-200/90 dark:border-emerald-950/60 bg-gradient-to-br from-emerald-50/60 to-white dark:from-emerald-950/20 dark:to-[#0D111A] p-4 shadow-2xs">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
+                  <CreditCard className="h-4 w-4 text-emerald-600" />
+                  <span>Total Liquidado (USD)</span>
+                </span>
+                <div className="mt-1 font-mono text-xl sm:text-2xl font-black text-emerald-800 dark:text-emerald-300">
+                  {formatUSD(metricasLiquidaciones.totalUsd)}
+                </div>
+                <span className="text-[10px] text-emerald-600/80 mt-0.5 block">
+                  Abonos y deudas saldadas
+                </span>
+              </div>
+
+              <div className="rounded-3xl border border-sky-200/90 dark:border-sky-950/60 bg-gradient-to-br from-sky-50/60 to-white dark:from-sky-950/20 dark:to-[#0D111A] p-4 shadow-2xs">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-sky-700 dark:text-sky-400 flex items-center gap-1.5">
+                  <Banknote className="h-4 w-4 text-sky-600" />
+                  <span>Equivalente en Bolívares</span>
+                </span>
+                <div className="mt-1 font-mono text-xl sm:text-2xl font-black text-sky-800 dark:text-sky-300">
+                  {formatBs(metricasLiquidaciones.totalBs)}
+                </div>
+                <span className="text-[10px] text-sky-600/80 mt-0.5 block">
+                  A tasa oficial BCV ({formatBs(tasaBcv)})
+                </span>
+              </div>
+
+              <div className="rounded-3xl border border-indigo-200/90 dark:border-indigo-950/60 bg-gradient-to-br from-indigo-50/60 to-white dark:from-indigo-950/20 dark:to-[#0D111A] p-4 shadow-2xs">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-700 dark:text-indigo-400 flex items-center gap-1.5">
+                  <Receipt className="h-4 w-4 text-indigo-600" />
+                  <span>Pagos Registrados</span>
+                </span>
+                <div className="mt-1 font-mono text-xl sm:text-2xl font-black text-indigo-900 dark:text-indigo-300">
+                  {metricasLiquidaciones.totalOperaciones}
+                </div>
+                <span className="text-[10px] text-indigo-600/80 mt-0.5 block">
+                  Operaciones auditadas
+                </span>
+              </div>
+            </div>
+
+            {/* Buscador Dinámico de Liquidaciones */}
+            <div className="rounded-3xl border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#0D111A] p-3 sm:p-4 shadow-2xs">
+              <div className="relative">
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <input
+                  type="text"
+                  value={busquedaLiquidaciones}
+                  onChange={(e) => setBusquedaLiquidaciones(e.target.value)}
+                  placeholder="Buscar liquidación por número de referencia (#123456), estudiante o grado..."
+                  className="w-full rounded-2xl border border-gray-200 dark:border-slate-800 bg-gray-50/60 dark:bg-[#111726] py-2.5 pl-10 pr-9 text-xs text-gray-900 dark:text-slate-100 placeholder:text-gray-400 focus:border-indigo-500 focus:bg-white dark:focus:bg-[#111726] focus:outline-none transition"
+                />
+                {busquedaLiquidaciones && (
+                  <button
+                    type="button"
+                    onClick={() => setBusquedaLiquidaciones('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-1 text-gray-400 hover:text-gray-600"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Lista y Tabla de Liquidaciones */}
+            {cargandoLiquidaciones ? (
+              <div className="rounded-3xl border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#0D111A] p-12 text-center shadow-2xs">
+                <Loader2 className="mx-auto h-8 w-8 animate-spin text-indigo-600 dark:text-indigo-400" />
+                <p className="mt-3 text-xs font-semibold text-gray-500 dark:text-slate-400">
+                  Cargando liquidaciones y pagos de deuda desde Supabase...
+                </p>
+              </div>
+            ) : liquidacionesFiltradas.length === 0 ? (
+              <div className="rounded-3xl border border-dashed border-gray-200 dark:border-slate-800 bg-white dark:bg-[#0D111A] p-12 text-center">
+                <Receipt className="mx-auto h-10 w-10 text-gray-300 dark:text-slate-600" />
+                <h3 className="mt-2 text-sm font-bold text-gray-800 dark:text-slate-200">
+                  No se encontraron pagos ni liquidaciones
+                </h3>
+                <p className="mt-1 text-xs text-gray-400">
+                  {busquedaLiquidaciones
+                    ? 'No hay registros que coincidan con la búsqueda de referencia o estudiante.'
+                    : 'Aún no se han registrado abonos o liquidaciones de cuentas.'}
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {/* Mobile Cards (< md) */}
+                <div className="grid grid-cols-1 gap-2.5 md:hidden">
+                  {liquidacionesFiltradas.map((liq) => {
+                    const audit = parseConsumoAudit({ metodo_pago: liq.metodo_pago, pagado: liq.pagado });
+                    const fechaObj = formatearFechaHora(liq.fecha);
+                    const totalBsEquiv = calcularConversionBs(liq.monto_total_usd, liq.tasa_bcv_historica || tasaBcv);
+
+                    return (
+                      <div
+                        key={liq.id}
+                        className="rounded-3xl border border-emerald-200/70 dark:border-slate-800 bg-white dark:bg-[#0D111A] p-4 shadow-2xs space-y-2.5"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <span className="text-xs font-bold text-gray-900 dark:text-slate-100 flex items-center gap-1.5">
+                              <User className="h-3.5 w-3.5 text-indigo-600 shrink-0" />
+                              <span>{liq.clientes?.nombre_estudiante || 'Público General / Caja'}</span>
+                            </span>
+                            {liq.clientes?.grado_seccion && (
+                              <span className="text-[11px] text-gray-500 font-medium block ml-5">
+                                Grado / Sección: {liq.clientes.grado_seccion}
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="text-right">
+                            <div className="font-mono text-base font-black text-emerald-700 dark:text-emerald-400">
+                              {formatUSD(liq.monto_total_usd)}
+                            </div>
+                            <div className="font-mono text-[10px] text-gray-400">
+                              {formatBs(totalBsEquiv)}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="rounded-2xl bg-gray-50 dark:bg-[#111726] p-2.5 text-xs flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-bold text-gray-700 dark:text-slate-200">
+                              {audit.nombreLegible}
+                            </span>
+                            {audit.referencia && (
+                              <span className="rounded-md bg-sky-100 dark:bg-sky-950/80 border border-sky-300 text-sky-800 dark:text-sky-300 px-2 py-0.5 text-[10px] font-mono font-bold">
+                                Ref: #{audit.referencia}
+                              </span>
+                            )}
+                            {liq.metodo_pago.includes('[Pago Familiar]') && (
+                              <span className="rounded-md bg-purple-100 dark:bg-purple-950/80 border border-purple-300 text-purple-800 dark:text-purple-300 px-2 py-0.5 text-[10px] font-bold">
+                                Pago Familiar
+                              </span>
+                            )}
+                          </div>
+
+                          <span className="text-[10px] text-gray-400 flex items-center gap-1">
+                            <Clock className="h-3 w-3" />
+                            {fechaObj.fecha} &bull; {fechaObj.hora}
+                          </span>
+                        </div>
+
+                        <div className="flex justify-end pt-1">
+                          <button
+                            type="button"
+                            onClick={() => setModalDetalle({ abierto: true, transaccion: liq })}
+                            className="w-full rounded-2xl border border-gray-200 dark:border-slate-800 py-1.5 text-xs font-bold text-gray-700 dark:text-slate-300 hover:bg-gray-50 transition active:scale-95 text-center"
+                          >
+                            Ver Comprobante
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Desktop Table (>= md) */}
+                <div className="hidden md:block overflow-hidden rounded-3xl border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#0D111A] shadow-2xs">
+                  <table className="w-full text-left text-xs">
+                    <thead className="border-b border-gray-200/80 dark:border-slate-800 bg-gray-50/70 dark:bg-[#111726] text-gray-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">
+                      <tr>
+                        <th className="py-3.5 pl-4 pr-3">Fecha y Hora</th>
+                        <th className="px-3 py-3.5">Estudiante</th>
+                        <th className="px-3 py-3.5">Grado / Sección</th>
+                        <th className="px-3 py-3.5">Método / Referencia</th>
+                        <th className="px-3 py-3.5">Monto Liquidado</th>
+                        <th className="py-3.5 pl-3 pr-4 text-right">Comprobante</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 dark:divide-slate-800/80">
+                      {liquidacionesFiltradas.map((liq) => {
+                        const audit = parseConsumoAudit({ metodo_pago: liq.metodo_pago, pagado: liq.pagado });
+                        const fechaObj = formatearFechaHora(liq.fecha);
+                        const totalBsEquiv = calcularConversionBs(liq.monto_total_usd, liq.tasa_bcv_historica || tasaBcv);
+
+                        return (
+                          <tr key={liq.id} className="hover:bg-gray-50/70 dark:hover:bg-[#111726]/60 transition">
+                            <td className="py-3 pl-4 pr-3 whitespace-nowrap">
+                              <div className="font-bold text-gray-900 dark:text-slate-100">{fechaObj.fecha}</div>
+                              <div className="text-[10px] text-gray-400">{fechaObj.hora}</div>
+                            </td>
+
+                            <td className="px-3 py-3">
+                              <div className="font-bold text-gray-900 dark:text-slate-100">
+                                {liq.clientes?.nombre_estudiante || 'Público General / Caja'}
+                              </div>
+                              {liq.clientes?.nombre_representante && (
+                                <div className="text-[10px] text-gray-400">
+                                  Rep: {liq.clientes.nombre_representante}
+                                </div>
+                              )}
+                            </td>
+
+                            <td className="px-3 py-3">
+                              <span className="rounded-full bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800/60 px-2.5 py-0.5 text-[10px] font-bold text-indigo-700 dark:text-indigo-300">
+                                {liq.clientes?.grado_seccion || 'Sin sección'}
+                              </span>
+                            </td>
+
+                            <td className="px-3 py-3">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="font-bold text-gray-800 dark:text-slate-200">
+                                  {audit.nombreLegible}
+                                </span>
+                                {audit.referencia && (
+                                  <span className="rounded-md bg-sky-100 dark:bg-sky-950/80 border border-sky-300 text-sky-800 dark:text-sky-300 px-2 py-0.5 text-[10px] font-mono font-bold">
+                                    Ref: #{audit.referencia}
+                                  </span>
+                                )}
+                                {liq.metodo_pago.includes('[Pago Familiar]') && (
+                                  <span className="rounded-md bg-purple-100 dark:bg-purple-950/80 border border-purple-300 text-purple-800 dark:text-purple-300 px-2 py-0.5 text-[10px] font-bold">
+                                    Pago Familiar
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+
+                            <td className="px-3 py-3 whitespace-nowrap">
+                              <div className="font-mono font-black text-sm text-emerald-700 dark:text-emerald-400">
+                                {formatUSD(liq.monto_total_usd)}
+                              </div>
+                              <div className="font-mono text-[10px] text-gray-400">
+                                {formatBs(totalBsEquiv)}
+                              </div>
+                            </td>
+
+                            <td className="py-3 pl-3 pr-4 text-right whitespace-nowrap">
+                              <button
+                                type="button"
+                                onClick={() => setModalDetalle({ abierto: true, transaccion: liq })}
+                                className="rounded-xl border border-gray-200 dark:border-slate-800 px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-[#141C2E] transition active:scale-95"
+                              >
+                                Ver Detalle
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             )}
@@ -1453,5 +1971,6 @@ export default function TransaccionesPage() {
         </Dialog.Portal>
       </Dialog.Root>
     </div>
+  </ErrorBoundary>
   );
 }
