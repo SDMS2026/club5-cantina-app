@@ -28,6 +28,7 @@ import { formatBs } from '@/lib/utils';
 import { supabase } from '@/lib/supabaseClient';
 import { useSidebar } from './SidebarContext';
 import { useTheme } from './ThemeContext';
+import { useAuth } from './AuthContext';
 import { useSystemNotifications } from './NotificationsContext';
 import { iniciarTransicionRuta } from './PageTransitionLoader';
 
@@ -121,6 +122,7 @@ export function Sidebar() {
   const router = useRouter();
   const { abierto, setAbierto, toggleSidebar } = useSidebar();
   const { isDark, toggleTheme, isKirby, toggleKirby } = useTheme();
+  const { cerrarSesion } = useAuth();
   const { data: notifData, cargando: notifCargando, refrescar } = useSystemNotifications();
   const [cerrandoSesion, setCerrandoSesion] = useState(false);
 
@@ -134,7 +136,7 @@ export function Sidebar() {
     try {
       setCerrandoSesion(true);
       iniciarTransicionRuta();
-      await supabase.auth.signOut();
+      await cerrarSesion();
       if (typeof window !== 'undefined' && window.innerWidth < 768) {
         setAbierto(false);
       }

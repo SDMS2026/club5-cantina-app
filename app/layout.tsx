@@ -4,6 +4,7 @@ import { SidebarProvider } from "@/components/SidebarContext";
 import { LayoutContainer } from "@/components/LayoutContainer";
 import { PageTransitionLoader } from "@/components/PageTransitionLoader";
 import { ThemeProvider } from "@/components/ThemeContext";
+import { AuthProvider } from "@/components/AuthContext";
 import { isMaintenanceMode } from "@/lib/maintenance";
 import { MaintenanceScreen } from "@/components/MaintenanceScreen";
 import "./globals.css";
@@ -119,12 +120,12 @@ export default function RootLayout({
           {modoMantenimientoActivo ? (
             <MaintenanceScreen />
           ) : (
-            <>
+            <AuthProvider>
               <PageTransitionLoader />
               <SidebarProvider>
                 <LayoutContainer>{children}</LayoutContainer>
               </SidebarProvider>
-            </>
+            </AuthProvider>
           )}
         </ThemeProvider>
       </body>

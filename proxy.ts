@@ -77,10 +77,11 @@ export async function proxy(request: NextRequest) {
     },
   });
 
-  // Validar sesión del usuario con Supabase Auth (getUser valida el JWT contra el servidor de Auth)
+  // Validar sesión localmente a partir de la cookie JWT sin hacer peticiones de red remotas en cada navegación
   const {
-    data: { user },
-  } = await supabase.auth.getUser();
+    data: { session },
+  } = await supabase.auth.getSession();
+  const user = session?.user ?? null;
 
   const isLoginPage = request.nextUrl.pathname === '/login';
 

@@ -89,10 +89,18 @@ interface TransaccionRegistro {
   consumo_detalles?: TransaccionDetalleItem[];
 }
 
-// Helpers para fechas
+// Helpers para fechas con normalización estricta contra desfase horario UTC / local
 const formatearFechaHora = (fechaIso?: string): { fecha: string; hora: string; esHoy: boolean } => {
   if (!fechaIso) return { fecha: 'Fecha desconocida', hora: '', esHoy: false };
-  const d = new Date(fechaIso);
+  let d: Date;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(fechaIso)) {
+    const [y, m, dia] = fechaIso.split('-').map(Number);
+    d = new Date(y, m - 1, dia, 12, 0, 0);
+  } else {
+    d = new Date(fechaIso);
+  }
+  if (isNaN(d.getTime())) return { fecha: 'Fecha inválida', hora: '', esHoy: false };
+
   const hoy = new Date();
   const esHoy =
     d.getDate() === hoy.getDate() &&
@@ -158,7 +166,16 @@ const obtenerInfoFechaAgrupada = (fechaIso?: string) => {
       etiquetaDia: 'Sin fecha asignada',
     };
   }
-  const d = new Date(fechaIso);
+
+  // Prevenir que strings "YYYY-MM-DD" se interpreten en UTC medianoche y se desfasen al día anterior en Venezuela
+  let d: Date;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(fechaIso)) {
+    const [y, m, dia] = fechaIso.split('-').map(Number);
+    d = new Date(y, m - 1, dia, 12, 0, 0);
+  } else {
+    d = new Date(fechaIso);
+  }
+
   if (isNaN(d.getTime())) {
     return {
       anoKey: 'sin-ano',
@@ -185,9 +202,6 @@ const obtenerInfoFechaAgrupada = (fechaIso?: string) => {
   const ayer = new Date();
   ayer.setDate(hoy.getDate() - 1);
 
-  const mesesCortos = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
-  const mesCorto = mesesCortos[mIndex];
-
   const esMismoDia = (d1: Date, d2: Date) =>
     d1.getDate() === d2.getDate() &&
     d1.getMonth() === d2.getMonth() &&
@@ -195,9 +209,9 @@ const obtenerInfoFechaAgrupada = (fechaIso?: string) => {
 
   let etiquetaDia = `${diaNum} de ${MESES_COMPLETOS[mIndex]}`;
   if (esMismoDia(d, hoy)) {
-    etiquetaDia = `Hoy - ${diaNum} ${mesCorto}`;
+    etiquetaDia = `Hoy - ${diaNum} de ${MESES_COMPLETOS[mIndex]}`;
   } else if (esMismoDia(d, ayer)) {
-    etiquetaDia = `Ayer - ${diaNum} ${mesCorto}`;
+    etiquetaDia = `Ayer - ${diaNum} de ${MESES_COMPLETOS[mIndex]}`;
   }
 
   return { anoKey, etiquetaAno, mesKey, etiquetaMes, diaKey, etiquetaDia };
@@ -971,7 +985,7 @@ export default function TransaccionesPage() {
             }`}
           >
             <ShoppingBag className="h-4 w-4" />
-            <span>Historial de Consumos (Agrupado por Días)</span>
+            <span>Historial de Consumos (Ventas Cantina)</span>
           </button>
 
           <button
@@ -984,7 +998,7 @@ export default function TransaccionesPage() {
             }`}
           >
             <CreditCard className="h-4 w-4" />
-            <span>Historial de Liquidaciones y Pagos</span>
+            <span>Historial de Liquidaciones (Abonos de Deuda)</span>
             {liquidacionesFiltradas.length > 0 && (
               <span className="ml-1 rounded-full bg-indigo-100 dark:bg-indigo-950/80 px-2 py-0.5 text-[10px] text-indigo-700 dark:text-indigo-300">
                 {liquidacionesFiltradas.length}
