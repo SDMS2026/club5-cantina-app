@@ -168,12 +168,18 @@ export function PaymentModal({
     }
   }, [abierto]);
 
-  // Cargar saldo del cliente al abrir o cambiar de cliente
+  // Cargar saldo del cliente al abrir o cambiar de cliente con autodetección de saldo a favor
   useEffect(() => {
     if (abierto && cliente?.id) {
       setCargandoSaldo(true);
       obtenerSaldoCliente(cliente.id)
-        .then((s) => setSaldoInfo(s))
+        .then((s) => {
+          setSaldoInfo(s);
+          // Si el estudiante tiene saldo a favor (> 0), autoseleccionar 'saldo_favor' para descontarlo automáticamente
+          if (s && s.saldoAFavorTotalUsd > 0) {
+            setMetodoSeleccionado('saldo_favor');
+          }
+        })
         .catch((e) => console.error('Error cargando saldo cliente:', e))
         .finally(() => setCargandoSaldo(false));
     } else {
@@ -186,8 +192,13 @@ export function PaymentModal({
 
   useEffect(() => {
     if (abierto) {
-      // Obliga a que la cajera haga clic explícito en uno de los métodos de pago
-      setMetodoSeleccionado(null);
+      // Si el cliente seleccionado ya trae saldo positivo en el objeto cliente, preseleccionarlo
+      const saldoInicial = cliente?.saldo ? Number(cliente.saldo) : 0;
+      if (saldoInicial > 0) {
+        setMetodoSeleccionado('saldo_favor');
+      } else {
+        setMetodoSeleccionado(null);
+      }
       setNumeroReferencia('');
       setNumeroReferenciaMixto('');
       setMontoUsdMixtoInput('');
@@ -198,7 +209,7 @@ export function PaymentModal({
       setErrorMensaje(null);
       setExito(false);
     }
-  }, [abierto]);
+  }, [abierto, cliente]);
 
   // Autodetección automática de divisa según el método de pago seleccionado
   useEffect(() => {
@@ -1163,12 +1174,25 @@ export function PaymentModal({
                     </p>
                   ) : esSaldoParcial ? (
                     <div className="space-y-2 mt-2">
-                      <p className="text-amber-800 dark:text-amber-300 text-[11px] font-medium bg-amber-50 dark:bg-amber-950/60 p-2 rounded-xl border border-amber-200 dark:border-amber-900">
-                        El saldo ({formatUSD(saldoDisponible)}) no cubre la orden total. Se aplicará un{' '}
-                        <strong>Pago Mixto</strong>: se descontarán {formatUSD(saldoDisponible)} y
-                        debes cobrar la diferencia de{' '}
-                        <strong>{formatUSD(diferenciaAPagar)}</strong> ({formatBs(calcularConversionBs(diferenciaAPagar, tasaBcv))}).
-                      </p>
+                      <div className="rounded-xl border border-emerald-300 dark:border-emerald-800 bg-emerald-100/70 dark:bg-emerald-950/70 p-2.5 space-y-1.5">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-bold text-emerald-950 dark:text-emerald-100 flex items-center gap-1.5">
+                            <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                            Saldo a favor detectado y descontado:
+                          </span>
+                          <span className="font-mono font-bold text-emerald-800 dark:text-emerald-300">
+                            -{formatUSD(saldoDisponible)}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs border-t border-emerald-200 dark:border-emerald-800/80 pt-1.5">
+                          <span className="font-bold text-amber-900 dark:text-amber-200">
+                            Diferencia restante a cobrar:
+                          </span>
+                          <span className="font-mono font-black text-amber-900 dark:text-amber-200 text-sm">
+                            {formatUSD(diferenciaAPagar)} ({formatBs(calcularConversionBs(diferenciaAPagar, tasaBcv))})
+                          </span>
+                        </div>
+                      </div>
 
                       <div>
                         <label className="font-bold text-gray-700 dark:text-slate-300 block mb-1">

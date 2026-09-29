@@ -182,7 +182,7 @@ export default function DeudasPage() {
   // Acordeón de detalles por estudiante
   const [estudiantesDesplegados, setEstudiantesDesplegados] = useState<Record<string, boolean>>({});
 
-  // Modal de liquidación
+  // Modal de liquidación con calculadora de vuelto y saldo a favor
   const [modalLiquidacion, setModalLiquidacion] = useState<{
     abierto: boolean;
     titulo: string;
@@ -191,6 +191,8 @@ export default function DeudasPage() {
     idsConsumos: string[];
     nombreEstudiante: string;
     clienteId?: string | null;
+    montoRecibidoInput: string;
+    dejarVueltoComoSaldo: boolean;
   }>({
     abierto: false,
     titulo: '',
@@ -199,6 +201,8 @@ export default function DeudasPage() {
     idsConsumos: [],
     nombreEstudiante: '',
     clienteId: null,
+    montoRecibidoInput: '',
+    dejarVueltoComoSaldo: false,
   });
 
   // Deslizamiento vertical y arrastre (drag-to-scroll) para móviles y emuladores con Body Scroll Lock
@@ -549,6 +553,8 @@ export default function DeudasPage() {
       idsConsumos: cuenta.consumos.map((c) => c.id),
       nombreEstudiante: nombre,
       clienteId: cuenta.cliente?.id || null,
+      montoRecibidoInput: '',
+      dejarVueltoComoSaldo: false,
     });
     setMetodoPago('pago_movil');
     setNumeroReferenciaLiquidacion('');
@@ -578,13 +584,15 @@ export default function DeudasPage() {
       idsConsumos: [deuda.id],
       nombreEstudiante,
       clienteId: clienteId || deuda.cliente_id || null,
+      montoRecibidoInput: '',
+      dejarVueltoComoSaldo: false,
     });
     setMetodoPago('pago_movil');
     setNumeroReferenciaLiquidacion('');
     setErrorPago(null);
   };
 
-  // Confirmar liquidación en Supabase con blindaje total y recuperación de errores
+  // Confirmar liquidación en Supabase con blindaje total, cálculo de vuelto y saldo a favor
   const handleConfirmarLiquidacion = async () => {
     const idsValidos = (modalLiquidacion.idsConsumos || []).filter(
       (id): id is string => typeof id === 'string' && id.trim().length > 0
@@ -595,12 +603,27 @@ export default function DeudasPage() {
       return;
     }
 
-    setProcesandoPago(true);
-    setErrorPago(null);
-
     const montoTotalLiquidado = Number(modalLiquidacion.montoUsd) || 0;
     const nombreClienteLiquidado = modalLiquidacion.nombreEstudiante || 'Estudiante';
     const clienteIdLiquidado = modalLiquidacion.clienteId || null;
+
+    // Validación del monto entregado / recibido
+    const montoRecibidoNum = parseFloat(modalLiquidacion.montoRecibidoInput.replace(',', '.')) || 0;
+    if (montoRecibidoNum > 0 && montoRecibidoNum < montoTotalLiquidado) {
+      setErrorPago(
+        `El monto recibido (${formatUSD(montoRecibidoNum)}) es menor que la deuda total (${formatUSD(montoTotalLiquidado)}). Ingresa el monto completo o usa la opción 'Abonar' para pagos parciales.`
+      );
+      return;
+    }
+
+    const vueltoUsd =
+      montoRecibidoNum > montoTotalLiquidado
+        ? Math.round((montoRecibidoNum - montoTotalLiquidado) * 100) / 100
+        : 0;
+    const dejarVueltoComoSaldo = modalLiquidacion.dejarVueltoComoSaldo && vueltoUsd > 0;
+
+    setProcesandoPago(true);
+    setErrorPago(null);
 
     try {
       // Si el método seleccionado es saldo a favor, verificar que el cliente posea crédito suficiente
@@ -639,8 +662,8 @@ export default function DeudasPage() {
         );
       }
 
-      // Si el pago de la deuda fue con dinero externo (efectivo, pago móvil, etc.), sumamos a clientes.saldo
-      if (clienteIdLiquidado && metodoPago !== 'saldo_favor') {
+      // Actualizar clientes.saldo en Supabase
+      if (clienteIdLiquidado) {
         try {
           const { data: cli, error: cliErr } = await supabase
             .from('clientes')
@@ -650,7 +673,18 @@ export default function DeudasPage() {
 
           if (!cliErr && cli) {
             const saldoActual = Number(cli.saldo || 0);
-            const nuevoSaldo = Math.round((saldoActual + montoTotalLiquidado) * 100) / 100;
+            let nuevoSaldo = saldoActual;
+
+            if (metodoPago === 'saldo_favor') {
+              // Se pagó la deuda descontando de su saldo a favor existente
+              nuevoSaldo = Math.round((saldoActual - montoTotalLiquidado) * 100) / 100;
+            } else {
+              // Se pagó con dinero externo (efectivo, pago móvil, etc.)
+              // Salda la deuda (+montoTotalLiquidado) y si el cliente dejó vuelto como saldo a favor, se le suma (+vueltoUsd)
+              const abonoExtra = dejarVueltoComoSaldo ? vueltoUsd : 0;
+              nuevoSaldo = Math.round((saldoActual + montoTotalLiquidado + abonoExtra) * 100) / 100;
+            }
+
             await supabase
               .from('clientes')
               .update({ saldo: nuevoSaldo })
@@ -658,6 +692,25 @@ export default function DeudasPage() {
           }
         } catch (e) {
           console.error('Error actualizando clientes.saldo tras liquidar deuda:', e);
+        }
+      }
+
+      // Si el cliente eligió dejar el vuelto como saldo a favor, registrar el abono en consumos para auditoría
+      if (clienteIdLiquidado && dejarVueltoComoSaldo && vueltoUsd > 0) {
+        try {
+          let refVuelto = 'vuelto_saldo_favor';
+          if (refLimpia) {
+            refVuelto = `vuelto_saldo_favor#ref:${refLimpia}`;
+          }
+          await supabase.from('consumos').insert({
+            cliente_id: clienteIdLiquidado,
+            monto_total_usd: vueltoUsd,
+            tasa_bcv_historica: tasaBcv,
+            metodo_pago: refVuelto,
+            pagado: true,
+          });
+        } catch (vueltoErr) {
+          console.warn('Aviso guardando registro de vuelto en consumos:', vueltoErr);
         }
       }
 
@@ -670,16 +723,27 @@ export default function DeudasPage() {
         idsConsumos: [],
         nombreEstudiante: '',
         clienteId: null,
+        montoRecibidoInput: '',
+        dejarVueltoComoSaldo: false,
       });
       setNumeroReferenciaLiquidacion('');
       setEsPagoFamiliar(false);
       setErrorPago(null);
 
+      // Notificación toast informativa y precisa
+      let textoNotif = `¡Deuda de ${nombreClienteLiquidado} por ${formatUSD(montoTotalLiquidado)} liquidada con éxito!`;
+      if (dejarVueltoComoSaldo && vueltoUsd > 0) {
+        textoNotif = `¡Deuda de ${nombreClienteLiquidado} por ${formatUSD(montoTotalLiquidado)} liquidada y vuelto de ${formatUSD(vueltoUsd)} acreditado como saldo a favor!`;
+      } else if (vueltoUsd > 0) {
+        const vueltoBs = calcularConversionBs(vueltoUsd, tasaBcv);
+        textoNotif = `¡Deuda liquidada con éxito! Entregar vuelto de ${formatUSD(vueltoUsd)} (${formatBs(vueltoBs)}).`;
+      }
+
       setNotificacion({
         tipo: 'exito',
-        texto: `¡Deuda de ${nombreClienteLiquidado} por ${formatUSD(montoTotalLiquidado)} liquidada con éxito!`,
+        texto: textoNotif,
       });
-      setTimeout(() => setNotificacion(null), 4500);
+      setTimeout(() => setNotificacion(null), 5000);
 
       try {
         await ejecutarMiniRecarga({
@@ -1664,24 +1728,193 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
                 : 0;
               if (saldoDisp <= 0) return null;
               return (
-                <div className="mb-3 rounded-2xl border border-emerald-200 bg-emerald-50/80 p-3 text-xs text-emerald-900 flex items-center justify-between">
+                <div className="mb-3 rounded-2xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50/80 dark:bg-emerald-950/60 p-3 text-xs text-emerald-900 dark:text-emerald-200 flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <PiggyBank className="h-4 w-4 text-emerald-600 shrink-0" />
+                    <PiggyBank className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
                     <div>
                       <p className="font-bold">Saldo a favor disponible del cliente:</p>
-                      <p className="text-[11px] text-emerald-700">
+                      <p className="text-[11px] text-emerald-700 dark:text-emerald-400">
                         {saldoDisp >= modalLiquidacion.montoUsd
                           ? 'Cubre el 100% de esta liquidación'
                           : 'Cubre parcialmente esta deuda'}
                       </p>
                     </div>
                   </div>
-                  <span className="font-mono font-bold text-sm text-emerald-800">
+                  <span className="font-mono font-bold text-sm text-emerald-800 dark:text-emerald-200">
                     +{formatUSD(saldoDisp)}
                   </span>
                 </div>
               );
             })()}
+
+            {/* Campo "Monto Recibido ($)" y Calculadora de Vuelto en Liquidaciones */}
+            <div className="mb-4 rounded-2xl border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#111726] p-3.5 space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-gray-800 dark:text-slate-200 flex items-center gap-1.5">
+                  <DollarSign className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                  <span>Monto Recibido / Entregado ($)</span>
+                </label>
+                <span className="text-[10px] text-gray-400 dark:text-slate-500">
+                  Opcional si entrega el monto exacto
+                </span>
+              </div>
+
+              {/* Input con chips rápidos */}
+              <div className="relative">
+                <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-bold text-gray-400 font-mono">
+                  $
+                </span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={modalLiquidacion.montoRecibidoInput}
+                  onKeyDown={(e) => handleDecimalKeyDown(e, modalLiquidacion.montoRecibidoInput)}
+                  onChange={(e) =>
+                    setModalLiquidacion((prev) => ({
+                      ...prev,
+                      montoRecibidoInput: sanitizeDecimalInput(e.target.value),
+                    }))
+                  }
+                  placeholder={`Ej: ${modalLiquidacion.montoUsd.toFixed(2)} o billete entregado`}
+                  className="w-full rounded-xl border border-gray-200 dark:border-slate-800 bg-gray-50/70 dark:bg-slate-900 py-2.5 pl-8 pr-8 text-sm font-mono font-bold text-gray-900 dark:text-white placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none transition"
+                />
+                {modalLiquidacion.montoRecibidoInput && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setModalLiquidacion((prev) => ({ ...prev, montoRecibidoInput: '' }))
+                    }
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-0.5"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* Botones de montos rápidos */}
+              <div className="flex flex-wrap gap-1.5 pt-0.5">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setModalLiquidacion((prev) => ({
+                      ...prev,
+                      montoRecibidoInput: prev.montoUsd.toFixed(2),
+                    }))
+                  }
+                  className="rounded-lg bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 px-2 py-1 text-[11px] font-bold text-gray-700 dark:text-slate-300 transition active:scale-95"
+                >
+                  Exacto (${modalLiquidacion.montoUsd.toFixed(2)})
+                </button>
+                {(() => {
+                  const deud = modalLiquidacion.montoUsd;
+                  const chips: number[] = [];
+                  const ceilVal = Math.ceil(deud);
+                  if (ceilVal > deud) chips.push(ceilVal);
+                  [5, 10, 20, 50, 100].forEach((billete) => {
+                    if (billete > deud && !chips.includes(billete)) {
+                      chips.push(billete);
+                    }
+                  });
+                  return chips.slice(0, 4).map((billete) => (
+                    <button
+                      key={billete}
+                      type="button"
+                      onClick={() =>
+                        setModalLiquidacion((prev) => ({
+                          ...prev,
+                          montoRecibidoInput: billete.toFixed(2),
+                        }))
+                      }
+                      className="rounded-lg bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 border border-emerald-200 dark:border-emerald-800 px-2 py-1 text-[11px] font-bold text-emerald-800 dark:text-emerald-300 transition active:scale-95"
+                    >
+                      ${billete}
+                    </button>
+                  ));
+                })()}
+              </div>
+
+              {/* Cálculo en tiempo real: Vuelto o Advertencia de faltante */}
+              {(() => {
+                const montoRec = parseFloat(modalLiquidacion.montoRecibidoInput.replace(',', '.')) || 0;
+                if (montoRec <= 0) return null;
+
+                const diff = Math.round((montoRec - modalLiquidacion.montoUsd) * 100) / 100;
+
+                if (diff > 0) {
+                  const vueltoBs = calcularConversionBs(diff, tasaBcv);
+                  return (
+                    <div className="mt-3 space-y-2.5 animate-in fade-in">
+                      {/* Tarjeta de Vuelto a entregar */}
+                      <div className="rounded-2xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50/90 dark:bg-emerald-950/70 p-3 text-xs flex items-center justify-between shadow-2xs">
+                        <div className="flex items-center gap-2">
+                          <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-600 text-white font-bold shrink-0">
+                            <Banknote className="h-4 w-4" />
+                          </div>
+                          <div>
+                            <span className="font-bold text-emerald-950 dark:text-emerald-200 block">
+                              Vuelto a entregar al cliente:
+                            </span>
+                            <span className="text-[11px] font-mono text-emerald-700 dark:text-emerald-400">
+                              Equivalente: {formatBs(vueltoBs)}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <span className="font-mono text-base font-black text-emerald-800 dark:text-emerald-200">
+                            {formatUSD(diff)}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Switch / Checkbox para Dejar Vuelto como Saldo a Favor */}
+                      <label className="flex items-start gap-2.5 rounded-2xl border border-indigo-200 dark:border-indigo-900 bg-indigo-50/70 dark:bg-indigo-950/40 p-3 text-xs cursor-pointer hover:bg-indigo-50 dark:hover:bg-indigo-900/40 transition select-none">
+                        <input
+                          type="checkbox"
+                          checked={modalLiquidacion.dejarVueltoComoSaldo}
+                          onChange={(e) =>
+                            setModalLiquidacion((prev) => ({
+                              ...prev,
+                              dejarVueltoComoSaldo: e.target.checked,
+                            }))
+                          }
+                          className="mt-0.5 h-4 w-4 rounded border-indigo-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                        />
+                        <div className="space-y-0.5">
+                          <span className="font-bold text-indigo-950 dark:text-indigo-200 flex items-center gap-1.5">
+                            <PiggyBank className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                            Dejar vuelto como saldo a favor (+{formatUSD(diff)})
+                          </span>
+                          <p className="text-[11px] text-indigo-800/80 dark:text-indigo-300/80 leading-snug">
+                            No entregar vuelto en efectivo. Quedará acreditado inmediatamente en la cuenta del estudiante ({modalLiquidacion.nombreEstudiante}) para sus futuras compras en la cantina.
+                          </p>
+                        </div>
+                      </label>
+                    </div>
+                  );
+                }
+
+                if (diff < 0) {
+                  const falta = Math.abs(diff);
+                  return (
+                    <div className="mt-2 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50/80 dark:bg-amber-950/50 p-2.5 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2 animate-in fade-in">
+                      <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-bold">Monto recibido menor que la deuda total:</p>
+                        <p className="text-[11px] text-amber-800 dark:text-amber-300">
+                          Faltan <strong>{formatUSD(falta)}</strong> ({formatBs(calcularConversionBs(falta, tasaBcv))}) para cubrir la liquidación completa. Para abonar parcialmente sin liquidar toda la cuenta, usa la opción <strong>&apos;Abonar&apos;</strong>.
+                        </p>
+                      </div>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="mt-2 rounded-xl bg-gray-50 dark:bg-slate-800/60 p-2 text-[11px] text-gray-500 dark:text-slate-400 text-center">
+                    ✓ Pago exacto ({formatUSD(montoRec)}) sin vuelto pendiente.
+                  </div>
+                );
+              })()}
+            </div>
 
             {/* Métodos de Pago */}
             <div className="space-y-2">

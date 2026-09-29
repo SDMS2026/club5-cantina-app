@@ -152,11 +152,18 @@ export function Cart({
       {/* Resumen Financiero y Botón de Pago */}
       <div className="border-t border-gray-100 pt-4">
         {cliente && (
-          <div className="mb-3 rounded-xl bg-indigo-50/70 border border-indigo-100/80 px-3 py-2 text-xs">
-            <span className="font-medium text-indigo-900">Asociado a:</span>{' '}
-            <span className="font-bold text-indigo-950">{cliente.nombre_estudiante}</span>
-            {cliente.grado_seccion && (
-              <span className="text-indigo-700 font-medium"> ({cliente.grado_seccion})</span>
+          <div className="mb-3 rounded-xl bg-indigo-50/70 border border-indigo-100/80 px-3 py-2 text-xs flex items-center justify-between gap-2">
+            <div className="truncate">
+              <span className="font-medium text-indigo-900">Asociado a:</span>{' '}
+              <span className="font-bold text-indigo-950">{cliente.nombre_estudiante}</span>
+              {cliente.grado_seccion && (
+                <span className="text-indigo-700 font-medium"> ({cliente.grado_seccion})</span>
+              )}
+            </div>
+            {cliente.saldo !== undefined && Number(cliente.saldo) > 0 && (
+              <span className="font-mono text-[10px] font-black text-emerald-800 bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-full shrink-0">
+                +{formatUSD(Number(cliente.saldo))} a favor
+              </span>
             )}
           </div>
         )}

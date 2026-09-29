@@ -71,13 +71,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // 3. Callback memorizado para cerrar sesión
+  // 3. Callback memorizado para cerrar sesión seguro (evita 502 Bad Gateway con scope: 'local')
   const cerrarSesion = useCallback(async () => {
     try {
-      await supabase.auth.signOut();
-      setSession(null);
+      await supabase.auth.signOut({ scope: 'local' });
     } catch (err) {
-      console.error('Error al cerrar sesión:', err);
+      console.warn('Aviso: error cerrando sesión en Supabase (posible 502), procediendo con purga local:', err);
+    } finally {
+      // Limpieza exhaustiva de cookies y almacenamiento local para garantizar cierre total
+      try {
+        if (typeof window !== 'undefined') {
+          // Limpiar cookies de sesión
+          const cookies = document.cookie.split(';');
+          for (const cookie of cookies) {
+            const eqPos = cookie.indexOf('=');
+            const name = eqPos > -1 ? cookie.substring(0, eqPos).trim() : cookie.trim();
+            if (name.startsWith('sb-') || name.startsWith('sb_') || name.includes('supabase') || name.includes('auth')) {
+              document.cookie = `${name}=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+            }
+          }
+          // Limpiar localStorage
+          for (let i = localStorage.length - 1; i >= 0; i--) {
+            const key = localStorage.key(i);
+            if (key && (key.startsWith('sb-') || key.startsWith('sb_backup_') || key.includes('supabase') || key === 'club5_mantener_sesion')) {
+              localStorage.removeItem(key);
+            }
+          }
+          sessionStorage.clear();
+        }
+      } catch (storageErr) {
+        console.warn('Aviso limpiando almacenamiento local:', storageErr);
+      }
+      setSession(null);
     }
   }, []);
 

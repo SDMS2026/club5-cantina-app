@@ -140,12 +140,16 @@ export function Sidebar() {
       if (typeof window !== 'undefined' && window.innerWidth < 768) {
         setAbierto(false);
       }
-      router.push('/login');
-      router.refresh();
     } catch (err) {
       console.error('Error al cerrar sesión:', err);
     } finally {
       setCerrandoSesion(false);
+      if (typeof window !== 'undefined') {
+        window.location.href = '/login';
+      } else {
+        router.push('/login');
+        router.refresh();
+      }
     }
   };
 
