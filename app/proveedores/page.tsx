@@ -29,13 +29,15 @@ import {
   Tag,
   FileText,
   ChevronRight,
+  ChevronDown,
   Building2,
   User,
   Check,
   Users,
   Copy,
   ExternalLink,
-  ChevronDown,
+  Smartphone,
+  CreditCard,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import { obtenerTasaBCV, TASA_BCV_FALLBACK_DEFAULT } from '@/lib/dolarApi';
@@ -84,6 +86,27 @@ const formatearFechaLegible = (fechaStr: string): string => {
   return `${d} ${meses[(m || 1) - 1]} ${y}`;
 };
 
+// Bancos comunes de Venezuela para Pago Móvil
+const BANCOS_VENEZUELA = [
+  '0102 - Banco de Venezuela',
+  '0108 - Provincial (BBVA)',
+  '0105 - Mercantil',
+  '0134 - Banesco',
+  '0114 - Bancamiga',
+  '0172 - Bancaribe',
+  '0163 - Banco del Tesoro',
+  '0115 - Banco Exterior',
+  '0175 - Banco Bicentenario',
+  '0191 - BNC (Banco Nacional de Crédito)',
+  '0174 - Banplus',
+  '0169 - Mi Banco',
+  '0151 - BFC (Banco Fondo Común)',
+  '0138 - Banco Plaza',
+  '0104 - Venezolano de Crédito',
+  '0128 - Banco Caroní',
+  '0137 - Banco Sofitasa',
+];
+
 // Categorías predefinidas comunes para proveedores de cantina
 const CATEGORIAS_PROVEEDORES = [
   'Galletas y Snacks',
@@ -97,6 +120,87 @@ const CATEGORIAS_PROVEEDORES = [
   'Varios',
 ];
 
+// Helper: Cálculo de tiempo exacto y días restantes de vencimiento por factura
+export interface InfoVencimiento {
+  estado: 'pagado' | 'vencida' | 'hoy' | 'proxima' | 'al_dia';
+  diffDays: number;
+  diasAbsolutos: number;
+  etiqueta: string;
+  badgeClass: string;
+  colorTema: 'emerald' | 'rose' | 'amber' | 'indigo';
+}
+
+export function calcularDetalleVencimiento(fechaVencimientoStr: string, pagado: boolean): InfoVencimiento {
+  if (pagado) {
+    return {
+      estado: 'pagado',
+      diffDays: 0,
+      diasAbsolutos: 0,
+      etiqueta: '🟢 Liquidada',
+      badgeClass: 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/60 dark:text-emerald-300',
+      colorTema: 'emerald',
+    };
+  }
+
+  const hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+
+  const [y, m, d] = fechaVencimientoStr.split('-').map(Number);
+  const venc = new Date(y, (m || 1) - 1, d || 1);
+  venc.setHours(0, 0, 0, 0);
+
+  const diffTime = venc.getTime() - hoy.getTime();
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  const diasAbsolutos = Math.abs(diffDays);
+
+  if (diffDays < 0) {
+    return {
+      estado: 'vencida',
+      diffDays,
+      diasAbsolutos,
+      etiqueta: `🔴 Vencida hace ${diasAbsolutos} ${diasAbsolutos === 1 ? 'día' : 'días'}`,
+      badgeClass: 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900/80 dark:bg-rose-950/70 dark:text-rose-200 animate-pulse',
+      colorTema: 'rose',
+    };
+  } else if (diffDays === 0) {
+    return {
+      estado: 'hoy',
+      diffDays: 0,
+      diasAbsolutos: 0,
+      etiqueta: '🟡 Vence hoy',
+      badgeClass: 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/80 dark:bg-amber-950/70 dark:text-amber-200 font-black',
+      colorTema: 'amber',
+    };
+  } else if (diffDays === 1) {
+    return {
+      estado: 'proxima',
+      diffDays: 1,
+      diasAbsolutos: 1,
+      etiqueta: '🟡 Vence en 1 día',
+      badgeClass: 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/80 dark:bg-amber-950/70 dark:text-amber-200',
+      colorTema: 'amber',
+    };
+  } else if (diffDays <= 3) {
+    return {
+      estado: 'proxima',
+      diffDays,
+      diasAbsolutos,
+      etiqueta: `🟡 Vence en ${diffDays} días`,
+      badgeClass: 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/80 dark:bg-amber-950/70 dark:text-amber-200',
+      colorTema: 'amber',
+    };
+  } else {
+    return {
+      estado: 'al_dia',
+      diffDays,
+      diasAbsolutos,
+      etiqueta: `🟢 Vence en ${diffDays} días`,
+      badgeClass: 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/60 dark:text-emerald-300',
+      colorTema: 'emerald',
+    };
+  }
+}
+
 // Estructura consolidada por proveedor
 interface ProveedorConsolidado {
   id: string;
@@ -104,6 +208,9 @@ interface ProveedorConsolidado {
   telefono: string;
   categoria: string;
   notas: string;
+  banco: string;
+  telefono_pagomovil: string;
+  cedula_rif: string;
   isDbRecord: boolean;
   totalPendienteUsd: number;
   totalPendienteBs: number;
@@ -113,7 +220,10 @@ interface ProveedorConsolidado {
   facturasPagadas: number;
   facturasVencidas: number;
   facturasProximas: number;
-  proximaFechaVencimiento: string | null;
+  maxDiasVencida: number;
+  minDiasRestantes: number | null;
+  etiquetaVencimientoConsolidada: string;
+  badgeClassConsolidada: string;
   estadoGeneral: 'vencido' | 'proximo' | 'al_dia' | 'solvente';
   cuentas: ProveedorCuenta[];
 }
@@ -127,7 +237,7 @@ export default function ProveedoresPage() {
   const [tasaBcv, setTasaBcv] = useState<number>(TASA_BCV_FALLBACK_DEFAULT);
   const [cargandoTasa, setCargandoTasa] = useState<boolean>(true);
 
-  // 2. Datos principales de Supabase
+  // 2. Datos de Supabase
   const [proveedoresDb, setProveedoresDb] = useState<Proveedor[]>([]);
   const [cargandoProveedores, setCargandoProveedores] = useState<boolean>(true);
   const [tablaProveedoresExiste, setTablaProveedoresExiste] = useState<boolean>(true);
@@ -140,6 +250,29 @@ export default function ProveedoresPage() {
   const [busqueda, setBusqueda] = useState<string>('');
   const [filtroEstado, setFiltroEstado] = useState<'todos' | 'pendientes' | 'pagados' | 'vencidos'>('todos');
   const [filtroCategoria, setFiltroCategoria] = useState<string>('todas');
+
+  // Estado del Acordeón Desplegable (IDs de proveedores expandidos)
+  const [proveedoresExpandidos, setProveedoresExpandidos] = useState<Set<string>>(new Set());
+
+  const toggleExpandido = (id: string) => {
+    setProveedoresExpandidos((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const expandirTodos = () => {
+    setProveedoresExpandidos(new Set(proveedoresConsolidados.map((p) => p.id)));
+  };
+
+  const colapsarTodos = () => {
+    setProveedoresExpandidos(new Set());
+  };
 
   // 4. Notificaciones Toast
   const [notificacion, setNotificacion] = useState<{
@@ -191,6 +324,9 @@ export default function ProveedoresPage() {
     telefono: string;
     categoria: string;
     notas: string;
+    banco: string;
+    telefono_pagomovil: string;
+    cedula_rif: string;
     guardando: boolean;
     error: string | null;
   }>({
@@ -199,6 +335,9 @@ export default function ProveedoresPage() {
     telefono: '',
     categoria: '',
     notas: '',
+    banco: '',
+    telefono_pagomovil: '',
+    cedula_rif: '',
     guardando: false,
     error: null,
   });
@@ -213,6 +352,9 @@ export default function ProveedoresPage() {
     telefono: string;
     categoria: string;
     notas: string;
+    banco: string;
+    telefono_pagomovil: string;
+    cedula_rif: string;
     guardando: boolean;
     error: string | null;
   }>({
@@ -222,6 +364,9 @@ export default function ProveedoresPage() {
     telefono: '',
     categoria: '',
     notas: '',
+    banco: '',
+    telefono_pagomovil: '',
+    cedula_rif: '',
     guardando: false,
     error: null,
   });
@@ -238,9 +383,6 @@ export default function ProveedoresPage() {
     eliminando: false,
     error: null,
   });
-
-  // Modal Detalle / Estado de Cuenta Unificado del Proveedor
-  const [proveedorSeleccionadoId, setProveedorSeleccionadoId] = useState<string | null>(null);
 
   // Modal Liquidar / Pagar Factura Individual
   const [modalLiquidar, setModalLiquidar] = useState<{
@@ -328,11 +470,6 @@ export default function ProveedoresPage() {
     onDismiss: () => setModalForm((prev) => ({ ...prev, abierto: false })),
   });
 
-  const dragScrollDetalle = useModalDragScroll({
-    isOpen: !!proveedorSeleccionadoId,
-    onDismiss: () => setProveedorSeleccionadoId(null),
-  });
-
   const dragScrollLiquidar = useModalDragScroll({
     isOpen: modalLiquidar.abierto,
     onDismiss: () => setModalLiquidar((prev) => ({ ...prev, abierto: false })),
@@ -402,7 +539,6 @@ export default function ProveedoresPage() {
         .order('nombre', { ascending: true });
 
       if (error) {
-        // Si la tabla no existe en la base de datos aún, registramos el flag sin romper la UI
         if (error.message?.includes('does not exist') || error.code === '42P01') {
           setTablaProveedoresExiste(false);
           setProveedoresDb([]);
@@ -427,7 +563,6 @@ export default function ProveedoresPage() {
     cargarCuentas();
     cargarProveedores();
 
-    // Sincronización en tiempo real con Supabase
     const canalRealtimeCuentas = supabase
       .channel('proveedores_cuentas_sync')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'proveedores_cuentas' }, () => {
@@ -455,57 +590,8 @@ export default function ProveedoresPage() {
     };
   }, [cargarTasa, cargarCuentas, cargarProveedores]);
 
-  // Helper de cálculo de estado de vencimiento por factura
-  const calcularVencimiento = useCallback((fechaVencimiento: string, pagado: boolean) => {
-    if (pagado) {
-      return { estado: 'pagado', dias: 0, etiqueta: 'Liquidada', color: 'emerald' };
-    }
-
-    const hoy = new Date();
-    hoy.setHours(0, 0, 0, 0);
-
-    const [year, month, day] = fechaVencimiento.split('-').map(Number);
-    const venc = new Date(year, (month || 1) - 1, day || 1);
-    venc.setHours(0, 0, 0, 0);
-
-    const diffTime = venc.getTime() - hoy.getTime();
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-    if (diffDays < 0) {
-      const diasVencidos = Math.abs(diffDays);
-      return {
-        estado: 'vencida',
-        dias: diasVencidos,
-        etiqueta: `Vencida hace ${diasVencidos} ${diasVencidos === 1 ? 'día' : 'días'}`,
-        color: 'rose',
-      };
-    } else if (diffDays === 0) {
-      return {
-        estado: 'hoy',
-        dias: 0,
-        etiqueta: 'Vence hoy',
-        color: 'amber',
-      };
-    } else if (diffDays <= 3) {
-      return {
-        estado: 'proxima',
-        dias: diffDays,
-        etiqueta: `Vence en ${diffDays} ${diffDays === 1 ? 'día' : 'días'}`,
-        color: 'amber',
-      };
-    } else {
-      return {
-        estado: 'al_dia',
-        dias: diffDays,
-        etiqueta: `Vence en ${diffDays} días`,
-        color: 'indigo',
-      };
-    }
-  }, []);
-
-  // Consolidación de Proveedores (DB + Cuentas Históricas)
+  // Consolidación de Proveedores (DB + Cuentas Históricas) con cálculo exacto de días de vencimiento
   const proveedoresConsolidados = useMemo<ProveedorConsolidado[]>(() => {
-    // 1. Mapeo de proveedores registrados en la base de datos
     const mapa = new Map<string, ProveedorConsolidado>();
 
     proveedoresDb.forEach((p) => {
@@ -516,6 +602,9 @@ export default function ProveedoresPage() {
         telefono: p.telefono || '',
         categoria: p.categoria || 'Varios',
         notas: p.notas || '',
+        banco: p.banco || '',
+        telefono_pagomovil: p.telefono_pagomovil || '',
+        cedula_rif: p.cedula_rif || '',
         isDbRecord: true,
         totalPendienteUsd: 0,
         totalPendienteBs: 0,
@@ -525,13 +614,15 @@ export default function ProveedoresPage() {
         facturasPagadas: 0,
         facturasVencidas: 0,
         facturasProximas: 0,
-        proximaFechaVencimiento: null,
+        maxDiasVencida: 0,
+        minDiasRestantes: null,
+        etiquetaVencimientoConsolidada: '🟢 Solvente',
+        badgeClassConsolidada: 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/60 dark:text-emerald-300',
         estadoGeneral: 'solvente',
         cuentas: [],
       });
     });
 
-    // 2. Incorporar cualquier proveedor que exista en el historial de facturas
     cuentas.forEach((c) => {
       const nombreLimpio = (c.nombre_proveedor || 'Sin Nombre').trim();
       const clave = nombreLimpio.toLowerCase();
@@ -543,6 +634,9 @@ export default function ProveedoresPage() {
           telefono: '',
           categoria: 'Varios',
           notas: '',
+          banco: '',
+          telefono_pagomovil: '',
+          cedula_rif: '',
           isDbRecord: false,
           totalPendienteUsd: 0,
           totalPendienteBs: 0,
@@ -552,7 +646,10 @@ export default function ProveedoresPage() {
           facturasPagadas: 0,
           facturasVencidas: 0,
           facturasProximas: 0,
-          proximaFechaVencimiento: null,
+          maxDiasVencida: 0,
+          minDiasRestantes: null,
+          etiquetaVencimientoConsolidada: '🟢 Solvente',
+          badgeClassConsolidada: 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/60 dark:text-emerald-300',
           estadoGeneral: 'solvente',
           cuentas: [],
         });
@@ -570,46 +667,71 @@ export default function ProveedoresPage() {
         p.facturasPendientes++;
         p.totalPendienteUsd += monto;
 
-        const infoVenc = calcularVencimiento(c.fecha_vencimiento_pago, false);
-        if (infoVenc.estado === 'vencida') {
+        const infoV = calcularDetalleVencimiento(c.fecha_vencimiento_pago, false);
+        if (infoV.estado === 'vencida') {
           p.facturasVencidas++;
-        } else if (infoVenc.estado === 'hoy' || infoVenc.estado === 'proxima') {
-          p.facturasProximas++;
-        }
-
-        if (
-          !p.proximaFechaVencimiento ||
-          c.fecha_vencimiento_pago < p.proximaFechaVencimiento
-        ) {
-          p.proximaFechaVencimiento = c.fecha_vencimiento_pago;
+          if (infoV.diasAbsolutos > p.maxDiasVencida) {
+            p.maxDiasVencida = infoV.diasAbsolutos;
+          }
+        } else {
+          if (infoV.estado === 'hoy' || infoV.estado === 'proxima') {
+            p.facturasProximas++;
+          }
+          if (p.minDiasRestantes === null || infoV.diffDays < p.minDiasRestantes) {
+            p.minDiasRestantes = infoV.diffDays;
+          }
         }
       }
     });
 
-    // 3. Calcular estados consolidados y ordenamiento
     const lista = Array.from(mapa.values()).map((p) => {
       p.totalPendienteBs = calcularConversionBs(p.totalPendienteUsd, tasaBcv);
 
-      // Ordenar las cuentas del proveedor de la más urgente/reciente a la más antigua
       p.cuentas.sort((a, b) => {
         if (a.pagado !== b.pagado) return a.pagado ? 1 : -1;
         return a.fecha_vencimiento_pago.localeCompare(b.fecha_vencimiento_pago);
       });
 
-      if (p.facturasVencidas > 0) {
-        p.estadoGeneral = 'vencido';
-      } else if (p.facturasProximas > 0) {
-        p.estadoGeneral = 'proximo';
-      } else if (p.facturasPendientes > 0) {
-        p.estadoGeneral = 'al_dia';
-      } else {
+      // Cálculo del Contador de Días de Vencimiento Consolidado
+      if (p.totalPendienteUsd === 0) {
         p.estadoGeneral = 'solvente';
+        p.etiquetaVencimientoConsolidada = '🟢 Solvente';
+        p.badgeClassConsolidada =
+          'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-200';
+      } else if (p.facturasVencidas > 0) {
+        p.estadoGeneral = 'vencido';
+        const d = p.maxDiasVencida;
+        p.etiquetaVencimientoConsolidada = `🔴 Vencida hace ${d} ${d === 1 ? 'día' : 'días'}`;
+        p.badgeClassConsolidada =
+          'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900 dark:bg-rose-950/60 dark:text-rose-200 animate-pulse';
+      } else if (p.minDiasRestantes !== null) {
+        const d = p.minDiasRestantes;
+        if (d === 0) {
+          p.estadoGeneral = 'proximo';
+          p.etiquetaVencimientoConsolidada = '🟡 Vence hoy';
+          p.badgeClassConsolidada =
+            'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950/60 dark:text-amber-200 font-black';
+        } else if (d === 1) {
+          p.estadoGeneral = 'proximo';
+          p.etiquetaVencimientoConsolidada = '🟡 Vence en 1 día';
+          p.badgeClassConsolidada =
+            'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950/60 dark:text-amber-200';
+        } else if (d <= 3) {
+          p.estadoGeneral = 'proximo';
+          p.etiquetaVencimientoConsolidada = `🟡 Vence en ${d} días`;
+          p.badgeClassConsolidada =
+            'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950/60 dark:text-amber-200';
+        } else {
+          p.estadoGeneral = 'al_dia';
+          p.etiquetaVencimientoConsolidada = `🟢 Vence en ${d} días`;
+          p.badgeClassConsolidada =
+            'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-300';
+        }
       }
 
       return p;
     });
 
-    // Ordenar: primero los que tienen deudas vencidas, luego por monto adeudado descendente, luego alfabéticamente
     lista.sort((a, b) => {
       if (a.facturasVencidas !== b.facturasVencidas) {
         return b.facturasVencidas - a.facturasVencidas;
@@ -621,19 +743,24 @@ export default function ProveedoresPage() {
     });
 
     return lista;
-  }, [proveedoresDb, cuentas, tasaBcv, calcularVencimiento]);
+  }, [proveedoresDb, cuentas, tasaBcv]);
 
-  // Proveedor actualmente seleccionado para ver su Estado de Cuenta Detallado
-  const proveedorDetalle = useMemo(() => {
-    if (!proveedorSeleccionadoId) return null;
-    return (
-      proveedoresConsolidados.find((p) => p.id === proveedorSeleccionadoId) ||
-      proveedoresConsolidados.find((p) => p.nombre.toLowerCase() === proveedorSeleccionadoId.toLowerCase()) ||
-      null
-    );
-  }, [proveedorSeleccionadoId, proveedoresConsolidados]);
+  // Copiar Pago Móvil al portapapeles
+  const handleCopiarPagoMovil = (p: ProveedorConsolidado, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
 
-  // Lista de proveedores filtrados para la vista de Tarjetas de Proveedores
+    const lineas: string[] = [];
+    if (p.banco) lineas.push(`Banco: ${p.banco}`);
+    if (p.telefono_pagomovil) lineas.push(`Teléfono: ${p.telefono_pagomovil}`);
+    if (p.cedula_rif) lineas.push(`Cédula/RIF: ${p.cedula_rif}`);
+    lineas.push(`Beneficiario: ${p.nombre}`);
+
+    const texto = lineas.join('\n');
+    navigator.clipboard.writeText(texto);
+    mostrarNotificacion('exito', `¡Datos de Pago Móvil de "${p.nombre}" copiados al portapapeles!`);
+  };
+
+  // Lista de proveedores filtrados
   const proveedoresFiltrados = useMemo(() => {
     let lista = [...proveedoresConsolidados];
 
@@ -644,6 +771,9 @@ export default function ProveedoresPage() {
           p.nombre.toLowerCase().includes(q) ||
           p.categoria.toLowerCase().includes(q) ||
           p.telefono.includes(q) ||
+          p.telefono_pagomovil.includes(q) ||
+          p.cedula_rif.toLowerCase().includes(q) ||
+          p.banco.toLowerCase().includes(q) ||
           p.notas.toLowerCase().includes(q)
       );
     }
@@ -663,7 +793,7 @@ export default function ProveedoresPage() {
     return lista;
   }, [proveedoresConsolidados, busqueda, filtroCategoria, filtroEstado]);
 
-  // Métricas Globales para Tarjetas Superiores
+  // Métricas Globales
   const metricas = useMemo(() => {
     let totalPendienteUsd = 0;
     let totalPagadoUsd = 0;
@@ -701,7 +831,7 @@ export default function ProveedoresPage() {
     };
   }, [proveedoresConsolidados, cuentas, tasaBcv]);
 
-  // Lista de facturas filtradas para la vista de Facturas Individuales
+  // Facturas individuales filtradas
   const cuentasFiltradas = useMemo(() => {
     let lista = [...cuentas];
 
@@ -722,15 +852,15 @@ export default function ProveedoresPage() {
     } else if (filtroEstado === 'vencidos') {
       lista = lista.filter((c) => {
         if (c.pagado) return false;
-        const v = calcularVencimiento(c.fecha_vencimiento_pago, false);
+        const v = calcularDetalleVencimiento(c.fecha_vencimiento_pago, false);
         return v.estado === 'vencida' || v.estado === 'hoy';
       });
     }
 
     return lista;
-  }, [cuentas, busqueda, filtroEstado, calcularVencimiento]);
+  }, [cuentas, busqueda, filtroEstado]);
 
-  // Proveedores filtrados dentro del Selector / Autocompletado del Modal de Compra
+  // Proveedores en Selector de Compra
   const proveedoresParaSelector = useMemo(() => {
     if (!selectorBusqueda.trim()) return proveedoresConsolidados;
     const q = selectorBusqueda.toLowerCase().trim();
@@ -742,7 +872,7 @@ export default function ProveedoresPage() {
     );
   }, [proveedoresConsolidados, selectorBusqueda]);
 
-  // Handlers para el Formulario de Registro de Factura / Compra
+  // Handlers para el Formulario de Registro de Factura
   const handleAbrirCrear = (proveedorPreseleccionado?: ProveedorConsolidado) => {
     setModalForm({
       abierto: true,
@@ -778,7 +908,6 @@ export default function ProveedoresPage() {
     setSelectorAbierto(false);
   };
 
-  // Guardar Factura / Compra
   const handleGuardarForm = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -807,7 +936,7 @@ export default function ProveedoresPage() {
         setModalForm((prev) => ({
           ...prev,
           error:
-            'La fecha límite de pago no puede ser anterior a la fecha de recepción de la mercancía. Revisa las fechas seleccionadas.',
+            'La fecha límite de pago no puede ser anterior a la fecha de recepción de la mercancía.',
         }));
         return;
       }
@@ -816,7 +945,6 @@ export default function ProveedoresPage() {
     setModalForm((prev) => ({ ...prev, guardando: true, error: null }));
 
     try {
-      // 1. Si el proveedor seleccionado no tiene ID en la base de datos y la tabla existe, intentar asegurar su registro
       let provId = modalForm.proveedor_id;
       if (!provId && tablaProveedoresExiste) {
         const existente = proveedoresDb.find(
@@ -825,7 +953,6 @@ export default function ProveedoresPage() {
         if (existente) {
           provId = existente.id;
         } else {
-          // Crear en la tabla proveedores automáticamente
           const { data: nuevoP, error: errorP } = await supabase
             .from('proveedores')
             .insert({ nombre: prov })
@@ -855,11 +982,9 @@ export default function ProveedoresPage() {
         payloadBase.pagado = false;
 
         let insertError = null;
-        // Intento 1 con proveedor_id
         const res1 = await supabase.from('proveedores_cuentas').insert(payloadBase);
         insertError = res1.error;
 
-        // Fallback si la columna proveedor_id no ha sido migrada aún en Supabase
         if (insertError && insertError.message?.includes('column "proveedor_id" of relation')) {
           delete payloadBase.proveedor_id;
           const res2 = await supabase.from('proveedores_cuentas').insert(payloadBase);
@@ -870,14 +995,12 @@ export default function ProveedoresPage() {
         mostrarNotificacion('exito', `Factura de "${prov}" registrada correctamente.`);
       } else {
         let updateError = null;
-        // Intento 1 con proveedor_id
         const res1 = await supabase
           .from('proveedores_cuentas')
           .update(payloadBase)
           .eq('id', modalForm.id!);
         updateError = res1.error;
 
-        // Fallback si la columna proveedor_id no existe
         if (updateError && updateError.message?.includes('column "proveedor_id" of relation')) {
           delete payloadBase.proveedor_id;
           const res2 = await supabase
@@ -910,7 +1033,7 @@ export default function ProveedoresPage() {
     }
   };
 
-  // Guardar Nuevo Proveedor Rápido desde el Selector de Compras
+  // Guardar Nuevo Proveedor Rápido desde el Selector con Datos de Pago Móvil
   const handleGuardarNuevoProveedorRapido = async (e: React.FormEvent) => {
     e.preventDefault();
     const nombre = modalNuevoProveedorRapido.nombre.trim();
@@ -928,26 +1051,41 @@ export default function ProveedoresPage() {
       let nuevoId = '';
 
       if (tablaProveedoresExiste) {
+        const payloadProv: any = {
+          nombre,
+          telefono: modalNuevoProveedorRapido.telefono.trim() || null,
+          categoria: modalNuevoProveedorRapido.categoria.trim() || 'Varios',
+          notas: modalNuevoProveedorRapido.notas.trim() || null,
+          banco: modalNuevoProveedorRapido.banco.trim() || null,
+          telefono_pagomovil: modalNuevoProveedorRapido.telefono_pagomovil.trim() || null,
+          cedula_rif: modalNuevoProveedorRapido.cedula_rif.trim() || null,
+        };
+
         const { data, error } = await supabase
           .from('proveedores')
-          .insert({
-            nombre,
-            telefono: modalNuevoProveedorRapido.telefono.trim() || null,
-            categoria: modalNuevoProveedorRapido.categoria.trim() || 'Varios',
-            notas: modalNuevoProveedorRapido.notas.trim() || null,
-          })
+          .insert(payloadProv)
           .select('id')
           .single();
 
-        if (error) throw error;
-        if (data) nuevoId = data.id;
+        // Fallback si las columnas de banco no han sido corridas en SQL
+        if (error && error.message?.includes('column "banco" of relation')) {
+          delete payloadProv.banco;
+          delete payloadProv.telefono_pagomovil;
+          delete payloadProv.cedula_rif;
+          const retry = await supabase.from('proveedores').insert(payloadProv).select('id').single();
+          if (retry.error) throw retry.error;
+          if (retry.data) nuevoId = retry.data.id;
+        } else if (error) {
+          throw error;
+        } else if (data) {
+          nuevoId = data.id;
+        }
+
         await cargarProveedores();
       } else {
-        // Modo fallback si el SQL no ha sido ejecutado aún
         nuevoId = `temp-${Date.now()}`;
       }
 
-      // Preseleccionar en el modal de factura activo
       setModalForm((prev) => ({
         ...prev,
         proveedor_id: nuevoId,
@@ -961,6 +1099,9 @@ export default function ProveedoresPage() {
         telefono: '',
         categoria: '',
         notas: '',
+        banco: '',
+        telefono_pagomovil: '',
+        cedula_rif: '',
         guardando: false,
         error: null,
       });
@@ -975,7 +1116,7 @@ export default function ProveedoresPage() {
     }
   };
 
-  // Handlers para CRUD General de Proveedores
+  // CRUD General de Proveedores (Crear / Editar con Pago Móvil)
   const handleAbrirCrearProveedor = () => {
     setModalProveedorCrud({
       abierto: true,
@@ -984,12 +1125,16 @@ export default function ProveedoresPage() {
       telefono: '',
       categoria: '',
       notas: '',
+      banco: '',
+      telefono_pagomovil: '',
+      cedula_rif: '',
       guardando: false,
       error: null,
     });
   };
 
-  const handleAbrirEditarProveedor = (p: ProveedorConsolidado) => {
+  const handleAbrirEditarProveedor = (p: ProveedorConsolidado, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     setModalProveedorCrud({
       abierto: true,
       modo: 'editar',
@@ -999,6 +1144,9 @@ export default function ProveedoresPage() {
       telefono: p.telefono,
       categoria: p.categoria,
       notas: p.notas,
+      banco: p.banco,
+      telefono_pagomovil: p.telefono_pagomovil,
+      cedula_rif: p.cedula_rif,
       guardando: false,
       error: null,
     });
@@ -1015,34 +1163,48 @@ export default function ProveedoresPage() {
     setModalProveedorCrud((prev) => ({ ...prev, guardando: true, error: null }));
 
     try {
+      const payload: any = {
+        nombre,
+        telefono: modalProveedorCrud.telefono.trim() || null,
+        categoria: modalProveedorCrud.categoria.trim() || 'Varios',
+        notas: modalProveedorCrud.notas.trim() || null,
+        banco: modalProveedorCrud.banco.trim() || null,
+        telefono_pagomovil: modalProveedorCrud.telefono_pagomovil.trim() || null,
+        cedula_rif: modalProveedorCrud.cedula_rif.trim() || null,
+      };
+
       if (modalProveedorCrud.modo === 'crear') {
         if (tablaProveedoresExiste) {
-          const { error } = await supabase.from('proveedores').insert({
-            nombre,
-            telefono: modalProveedorCrud.telefono.trim() || null,
-            categoria: modalProveedorCrud.categoria.trim() || 'Varios',
-            notas: modalProveedorCrud.notas.trim() || null,
-          });
-          if (error) throw error;
+          const { error } = await supabase.from('proveedores').insert(payload);
+          if (error && error.message?.includes('column "banco" of relation')) {
+            delete payload.banco;
+            delete payload.telefono_pagomovil;
+            delete payload.cedula_rif;
+            const retry = await supabase.from('proveedores').insert(payload);
+            if (retry.error) throw retry.error;
+          } else if (error) {
+            throw error;
+          }
         }
         mostrarNotificacion('exito', `Proveedor "${nombre}" registrado exitosamente.`);
       } else {
-        // Actualizar datos
         if (modalProveedorCrud.id && tablaProveedoresExiste) {
           const { error } = await supabase
             .from('proveedores')
-            .update({
-              nombre,
-              telefono: modalProveedorCrud.telefono.trim() || null,
-              categoria: modalProveedorCrud.categoria.trim() || 'Varios',
-              notas: modalProveedorCrud.notas.trim() || null,
-            })
+            .update(payload)
             .eq('id', modalProveedorCrud.id);
 
-          if (error) throw error;
+          if (error && error.message?.includes('column "banco" of relation')) {
+            delete payload.banco;
+            delete payload.telefono_pagomovil;
+            delete payload.cedula_rif;
+            const retry = await supabase.from('proveedores').update(payload).eq('id', modalProveedorCrud.id);
+            if (retry.error) throw retry.error;
+          } else if (error) {
+            throw error;
+          }
         }
 
-        // Si cambió el nombre, sincronizar también en proveedores_cuentas para mantener coherencia
         if (modalProveedorCrud.nombreOriginal && modalProveedorCrud.nombreOriginal !== nombre) {
           await supabase
             .from('proveedores_cuentas')
@@ -1067,7 +1229,8 @@ export default function ProveedoresPage() {
   };
 
   // Eliminar Proveedor
-  const handleAbrirEliminarProveedor = (p: ProveedorConsolidado) => {
+  const handleAbrirEliminarProveedor = (p: ProveedorConsolidado, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     setModalEliminarProveedor({
       abierto: true,
       proveedor: p,
@@ -1088,7 +1251,6 @@ export default function ProveedoresPage() {
         if (error) throw error;
       }
 
-      // Si tiene facturas asociadas y el usuario confirma, desvincularlas
       await supabase
         .from('proveedores_cuentas')
         .update({ proveedor_id: null })
@@ -1096,10 +1258,6 @@ export default function ProveedoresPage() {
 
       mostrarNotificacion('exito', `Proveedor "${p.nombre}" eliminado.`);
       setModalEliminarProveedor({ abierto: false, proveedor: null, eliminando: false, error: null });
-
-      if (proveedorSeleccionadoId === p.id || proveedorSeleccionadoId === p.nombre) {
-        setProveedorSeleccionadoId(null);
-      }
 
       await cargarProveedores();
       await cargarCuentas();
@@ -1113,8 +1271,9 @@ export default function ProveedoresPage() {
     }
   };
 
-  // Handlers para Liquidar Factura Individual
-  const handleAbrirLiquidar = (cuenta: ProveedorCuenta) => {
+  // Liquidar Factura Individual
+  const handleAbrirLiquidar = (cuenta: ProveedorCuenta, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     setModalLiquidar({
       abierto: true,
       cuenta,
@@ -1161,7 +1320,8 @@ export default function ProveedoresPage() {
   };
 
   // Liquidar Total de Cuentas de un Proveedor
-  const handleAbrirLiquidarTotal = (p: ProveedorConsolidado) => {
+  const handleAbrirLiquidarTotal = (p: ProveedorConsolidado, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     setModalLiquidarTotal({
       abierto: true,
       proveedor: p,
@@ -1217,7 +1377,8 @@ export default function ProveedoresPage() {
   };
 
   // Revertir estado pagado a pendiente
-  const handleRevertirPago = async (cuenta: ProveedorCuenta) => {
+  const handleRevertirPago = async (cuenta: ProveedorCuenta, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     try {
       const { error } = await supabase
         .from('proveedores_cuentas')
@@ -1243,8 +1404,9 @@ export default function ProveedoresPage() {
     }
   };
 
-  // Handlers para Eliminar Factura Individual
-  const handleAbrirEliminarFactura = (cuenta: ProveedorCuenta) => {
+  // Eliminar Factura Individual
+  const handleAbrirEliminarFactura = (cuenta: ProveedorCuenta, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     setModalEliminarFactura({
       abierto: true,
       cuenta,
@@ -1310,7 +1472,7 @@ export default function ProveedoresPage() {
 
   return (
     <div className="min-h-screen flex flex-col bg-[#FAFAFA] dark:bg-[#090D16] text-slate-900 dark:text-slate-100 transition-colors" suppressHydrationWarning>
-      {/* Header Sticky con diseño unificado y navegación */}
+      {/* Header Sticky con diseño unificado */}
       <header className="sticky top-0 z-40 w-full border-b border-gray-200/80 dark:border-slate-800 bg-white/90 dark:bg-[#0D111A]/90 backdrop-blur-md">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-3 py-2 sm:px-6 lg:px-8">
           <div className="flex items-center gap-1.5 sm:gap-3 min-w-0">
@@ -1339,7 +1501,7 @@ export default function ProveedoresPage() {
                 </span>
               </div>
               <p className="text-[11px] sm:text-xs text-gray-500 dark:text-slate-400 hidden sm:block">
-                Consolidación de deudas, plazos de crédito y liquidación a tasa oficial BCV
+                Consolidación en acordeón, plazos exactos y datos de Pago Móvil
               </p>
             </div>
           </div>
@@ -1347,7 +1509,7 @@ export default function ProveedoresPage() {
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             <NotificationBell />
 
-            {/* Botón Crear Proveedor CRUD */}
+            {/* Botón Crear Proveedor */}
             <button
               type="button"
               onClick={handleAbrirCrearProveedor}
@@ -1355,10 +1517,10 @@ export default function ProveedoresPage() {
               className="flex items-center justify-center gap-1.5 rounded-xl sm:rounded-2xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/70 dark:bg-indigo-950/50 px-2.5 sm:px-3 py-2 text-xs font-bold text-indigo-700 dark:text-indigo-300 shadow-2xs hover:bg-indigo-100 transition active:scale-95 shrink-0"
             >
               <Building2 className="h-4 w-4" />
-              <span className="hidden md:inline">+ Proveedor</span>
+              <span className="hidden md:inline">Proveedor</span>
             </button>
 
-            {/* Botón Registrar Nueva Compra / Factura */}
+            {/* Botón Registrar Nueva Compra / Factura (Texto limpio: sin duplicado ++) */}
             <button
               type="button"
               onClick={() => handleAbrirCrear()}
@@ -1372,13 +1534,13 @@ export default function ProveedoresPage() {
         </div>
       </header>
 
-      {/* Banner Informativo si supabase_proveedores.sql no ha sido ejecutado en Supabase */}
+      {/* Banner Informativo si supabase_proveedores.sql no ha sido ejecutado */}
       {!tablaProveedoresExiste && (
         <div className="bg-amber-50 dark:bg-amber-950/40 border-b border-amber-200 dark:border-amber-900/60 px-4 py-2 text-xs text-amber-800 dark:text-amber-300 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
             <span>
-              💡 <strong>Base de datos en transición:</strong> Se ha generado el archivo <code>supabase_proveedores.sql</code> para crear la tabla dedicada <code>proveedores</code> y sus claves foráneas en Supabase SQL Editor.
+              💡 <strong>Base de datos en transición:</strong> Se ha actualizado el archivo <code>supabase_proveedores.sql</code> con las columnas de Pago Móvil para ejecutar en Supabase SQL Editor.
             </span>
           </div>
           <span className="text-[11px] text-amber-700 dark:text-amber-400 font-medium shrink-0">
@@ -1409,17 +1571,14 @@ export default function ProveedoresPage() {
       <main className="mx-auto flex-1 w-full max-w-7xl px-3 sm:px-6 lg:px-8 py-5 sm:py-6 overflow-x-hidden">
         {/* Tarjetas Métricas Top */}
         <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {/* Métrica 1: Total por Pagar (USD y Bs) */}
-          <div className="rounded-3xl border border-rose-200/80 dark:border-rose-900/50 bg-gradient-to-br from-rose-50/40 to-orange-50/20 dark:from-rose-950/20 dark:to-orange-950/10 p-5 shadow-xs transition hover:border-rose-300">
+          <div className="rounded-3xl border border-rose-200/80 dark:border-rose-900/50 bg-gradient-to-br from-rose-50/40 to-orange-50/20 dark:from-rose-950/20 dark:to-orange-950/10 p-5 shadow-xs">
             <span className="text-xs font-semibold uppercase tracking-wider text-rose-900/80 dark:text-rose-300">
               Total Cuentas por Pagar
             </span>
             <div className="mt-2 flex items-baseline justify-between">
-              <div>
-                <span className="text-3xl font-black tracking-tight text-rose-950 dark:text-rose-200 font-mono">
-                  {formatUSD(metricas.totalPendienteUsd)}
-                </span>
-              </div>
+              <span className="text-3xl font-black tracking-tight text-rose-950 dark:text-rose-200 font-mono">
+                {formatUSD(metricas.totalPendienteUsd)}
+              </span>
               <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-rose-500/15 text-rose-800 dark:text-rose-300">
                 <Receipt className="h-5 w-5" />
               </div>
@@ -1429,8 +1588,7 @@ export default function ProveedoresPage() {
             </p>
           </div>
 
-          {/* Métrica 2: Proveedores y Facturas */}
-          <div className="rounded-3xl border border-gray-200/80 dark:border-slate-800 bg-white dark:bg-[#111726] p-5 shadow-xs transition hover:border-gray-300">
+          <div className="rounded-3xl border border-gray-200/80 dark:border-slate-800 bg-white dark:bg-[#111726] p-5 shadow-xs">
             <span className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-slate-400">
               Proveedores con Deuda
             </span>
@@ -1448,14 +1606,13 @@ export default function ProveedoresPage() {
             </p>
           </div>
 
-          {/* Métrica 3: Alertas de Vencimiento */}
-          <div className="rounded-3xl border border-gray-200/80 dark:border-slate-800 bg-white dark:bg-[#111726] p-5 shadow-xs transition hover:border-gray-300">
+          <div className="rounded-3xl border border-gray-200/80 dark:border-slate-800 bg-white dark:bg-[#111726] p-5 shadow-xs">
             <span className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-slate-400">
-              Alertas de Crédito
+              Alertas de Vencimiento
             </span>
             <div className="mt-2 flex items-baseline justify-between">
               <span
-                className={`text-3xl font-black tracking-tight ${
+                className={`text-2xl sm:text-3xl font-black tracking-tight ${
                   metricas.facturasVencidas > 0
                     ? 'text-rose-600 dark:text-rose-400'
                     : metricas.facturasProximas > 0
@@ -1484,12 +1641,11 @@ export default function ProveedoresPage() {
             <p className="mt-1 text-xs text-gray-400 dark:text-slate-400">
               {metricas.facturasProximas > 0
                 ? `${metricas.facturasProximas} facturas en plazo crítico (≤ 3 días)`
-                : 'Sin urgencias de vencimiento'}
+                : 'Sin urgencias inmediatas'}
             </p>
           </div>
 
-          {/* Métrica 4: Historial Liquidado */}
-          <div className="rounded-3xl border border-gray-200/80 dark:border-slate-800 bg-white dark:bg-[#111726] p-5 shadow-xs transition hover:border-gray-300">
+          <div className="rounded-3xl border border-gray-200/80 dark:border-slate-800 bg-white dark:bg-[#111726] p-5 shadow-xs">
             <span className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-slate-400">
               Total Histórico Pagado
             </span>
@@ -1507,9 +1663,8 @@ export default function ProveedoresPage() {
           </div>
         </div>
 
-        {/* Barra de Navegación de Vistas y Filtros */}
+        {/* Barra de Navegación y Filtros */}
         <div className="mb-6 flex flex-col gap-3 rounded-3xl border border-gray-200/80 dark:border-slate-800 bg-white dark:bg-[#111726] p-4 shadow-xs">
-          {/* Fila 1: Selector de Vista (Proveedores vs Facturas) y Buscador */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
             {/* Pestañas de Vista */}
             <div className="flex items-center rounded-2xl border border-gray-200/90 dark:border-slate-800 bg-gray-50/80 dark:bg-slate-900/80 p-1 shrink-0">
@@ -1523,7 +1678,7 @@ export default function ProveedoresPage() {
                 }`}
               >
                 <Building2 className="h-4 w-4" />
-                <span>Proveedores (Consolidados)</span>
+                <span>Proveedores (Acordeón)</span>
                 <span className="rounded-full bg-indigo-100 dark:bg-indigo-900/60 px-1.5 py-0.2 text-[10px] text-indigo-700 dark:text-indigo-300">
                   {proveedoresConsolidados.length}
                 </span>
@@ -1539,7 +1694,7 @@ export default function ProveedoresPage() {
                 }`}
               >
                 <Receipt className="h-4 w-4" />
-                <span>Todas las Facturas</span>
+                <span>Facturas Sueltas</span>
                 <span className="rounded-full bg-gray-200 dark:bg-slate-700 px-1.5 py-0.2 text-[10px] text-gray-700 dark:text-slate-300">
                   {cuentas.length}
                 </span>
@@ -1555,10 +1710,10 @@ export default function ProveedoresPage() {
                 onChange={(e) => setBusqueda(e.target.value)}
                 placeholder={
                   vistaActiva === 'proveedores'
-                    ? 'Buscar proveedor por nombre, teléfono o categoría...'
-                    : 'Buscar por factura, proveedor o mercancía...'
+                    ? 'Buscar proveedor, pago móvil, cédula o banco...'
+                    : 'Buscar por factura o mercancía...'
                 }
-                className="w-full rounded-2xl border border-gray-200/90 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-900/50 py-2 pl-10 pr-9 text-xs sm:text-sm text-gray-900 dark:text-white placeholder-gray-400 outline-none transition focus:border-indigo-500 focus:bg-white dark:focus:bg-slate-900 focus:ring-2 focus:ring-indigo-100 dark:focus:ring-indigo-950"
+                className="w-full rounded-2xl border border-gray-200/90 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-900/50 py-2 pl-10 pr-9 text-xs sm:text-sm text-gray-900 dark:text-white placeholder-gray-400 outline-none transition focus:border-indigo-500 focus:bg-white dark:focus:bg-slate-900"
               />
               {busqueda && (
                 <button
@@ -1573,7 +1728,7 @@ export default function ProveedoresPage() {
             </div>
           </div>
 
-          {/* Fila 2: Filtros de Estado y Categoría */}
+          {/* Fila 2: Filtros de Estado y Acciones de Acordeón */}
           <div className="flex flex-wrap items-center justify-between gap-2.5 pt-2 border-t border-gray-100 dark:border-slate-800/80">
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="text-[11px] font-semibold text-gray-400 dark:text-slate-500 mr-1">Filtrar:</span>
@@ -1629,11 +1784,31 @@ export default function ProveedoresPage() {
                     : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-100'
                 }`}
               >
-                <span>Solventes / Pagadas</span>
+                <span>Solventes</span>
               </button>
             </div>
 
             <div className="flex items-center gap-2">
+              {vistaActiva === 'proveedores' && proveedoresFiltrados.length > 0 && (
+                <div className="flex items-center gap-1 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={expandirTodos}
+                    className="text-indigo-600 dark:text-indigo-400 hover:underline px-1 py-0.5"
+                  >
+                    Expandir todo
+                  </button>
+                  <span className="text-gray-300 dark:text-slate-700">•</span>
+                  <button
+                    type="button"
+                    onClick={colapsarTodos}
+                    className="text-gray-500 hover:underline px-1 py-0.5"
+                  >
+                    Colapsar todo
+                  </button>
+                </div>
+              )}
+
               <button
                 type="button"
                 onClick={() => {
@@ -1651,13 +1826,13 @@ export default function ProveedoresPage() {
           </div>
         </div>
 
-        {/* VISTA 1: TARJETAS CONSOLIDADAS POR PROVEEDOR */}
+        {/* VISTA 1: TARJETA ÚNICA DESPLEGABLE POR PROVEEDOR (ACORDEÓN) */}
         {vistaActiva === 'proveedores' && (
-          <div>
+          <div className="space-y-4">
             {cargandoProveedores && cargandoCuentas ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {[1, 2, 3, 4, 5, 6].map((n) => (
-                  <div key={n} className="h-60 rounded-3xl border border-gray-200/80 bg-white dark:bg-slate-800 p-5 animate-pulse" />
+              <div className="space-y-3">
+                {[1, 2, 3, 4].map((n) => (
+                  <div key={n} className="h-28 rounded-3xl border border-gray-200/80 bg-white dark:bg-slate-800 p-5 animate-pulse" />
                 ))}
               </div>
             ) : proveedoresFiltrados.length === 0 ? (
@@ -1673,7 +1848,7 @@ export default function ProveedoresPage() {
                 <p className="mt-1 text-xs text-gray-500 dark:text-slate-400 max-w-sm">
                   {busqueda || filtroEstado !== 'todos'
                     ? 'Prueba modificando la búsqueda o los filtros activos.'
-                    : 'Comienza registrando a tus proveedores habituales para controlar saldos y notas de entrega a crédito.'}
+                    : 'Registra a tus proveedores para llevar sus cuentas por pagar y datos de Pago Móvil unificados.'}
                 </p>
                 <div className="mt-5 flex items-center gap-2">
                   <button
@@ -1682,7 +1857,7 @@ export default function ProveedoresPage() {
                     className="flex items-center gap-1.5 rounded-2xl bg-indigo-600 px-4 py-2.5 text-xs font-bold text-white shadow-xs hover:bg-indigo-700 transition"
                   >
                     <Building2 className="h-4 w-4" />
-                    <span>+ Crear Primer Proveedor</span>
+                    <span>Crear Proveedor</span>
                   </button>
                   <button
                     type="button"
@@ -1690,194 +1865,399 @@ export default function ProveedoresPage() {
                     className="flex items-center gap-1.5 rounded-2xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-2.5 text-xs font-bold text-gray-700 dark:text-slate-200 hover:bg-gray-50 transition"
                   >
                     <Plus className="h-4 w-4" />
-                    <span>Registrar Factura</span>
+                    <span>Factura</span>
                   </button>
                 </div>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                <AnimatePresence mode="popLayout">
-                  {proveedoresFiltrados.map((p, index) => {
-                    const tieneDeuda = p.totalPendienteUsd > 0;
-                    return (
-                      <motion.div
-                        key={p.id}
-                        initial={{ opacity: 0, y: 12, scale: 0.98 }}
-                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, scale: 0.95 }}
-                        transition={{ duration: 0.2, delay: Math.min(index * 0.02, 0.2) }}
-                        onClick={() => setProveedorSeleccionadoId(p.id)}
-                        className={`group relative flex flex-col justify-between rounded-3xl border bg-white dark:bg-[#111726] p-5 shadow-xs hover:shadow-md transition cursor-pointer ${
-                          p.estadoGeneral === 'vencido'
-                            ? 'border-rose-200/90 dark:border-rose-900/50 bg-rose-50/15 dark:bg-rose-950/10'
-                            : p.estadoGeneral === 'proximo'
-                            ? 'border-amber-200/90 dark:border-amber-900/50 bg-amber-50/15 dark:bg-amber-950/10'
-                            : tieneDeuda
-                            ? 'border-gray-200/90 dark:border-slate-800 hover:border-indigo-300'
-                            : 'border-emerald-200/60 dark:border-emerald-950/60 bg-emerald-50/10 dark:bg-emerald-950/5'
+              <div className="space-y-3">
+                {proveedoresFiltrados.map((p) => {
+                  const expandido = proveedoresExpandidos.has(p.id);
+                  const tieneDeuda = p.totalPendienteUsd > 0;
+                  const tienePagoMovil = Boolean(p.telefono_pagomovil || p.banco || p.cedula_rif);
+
+                  return (
+                    <div
+                      key={p.id}
+                      className={`rounded-3xl border bg-white dark:bg-[#111726] shadow-xs transition-all overflow-hidden ${
+                        p.estadoGeneral === 'vencido'
+                          ? 'border-rose-300 dark:border-rose-900/60'
+                          : p.estadoGeneral === 'proximo'
+                          ? 'border-amber-300 dark:border-amber-900/60'
+                          : tieneDeuda
+                          ? 'border-gray-200 dark:border-slate-800 hover:border-indigo-300'
+                          : 'border-emerald-200/80 dark:border-emerald-950/60'
+                      }`}
+                    >
+                      {/* Cabecera / Barra Acordeón Principal de la Tarjeta */}
+                      <div
+                        onClick={() => toggleExpandido(p.id)}
+                        className={`p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-3.5 cursor-pointer select-none transition ${
+                          expandido
+                            ? 'bg-gray-50/70 dark:bg-slate-900/60 border-b border-gray-100 dark:border-slate-800'
+                            : 'hover:bg-gray-50/40 dark:hover:bg-slate-900/30'
                         }`}
                       >
-                        <div>
-                          {/* Cabecera del Proveedor */}
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="flex items-start gap-3 min-w-0">
-                              <div
-                                className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border text-sm font-black shadow-2xs ${
-                                  p.estadoGeneral === 'vencido'
-                                    ? 'bg-rose-50 dark:bg-rose-950/60 border-rose-100 dark:border-rose-900/60 text-rose-700 dark:text-rose-300'
-                                    : p.estadoGeneral === 'proximo'
-                                    ? 'bg-amber-50 dark:bg-amber-950/60 border-amber-100 dark:border-amber-900/60 text-amber-700 dark:text-amber-300'
-                                    : tieneDeuda
-                                    ? 'bg-indigo-50 dark:bg-indigo-950/60 border-indigo-100 dark:border-indigo-900/60 text-indigo-700 dark:text-indigo-300'
-                                    : 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-100 dark:border-emerald-900/60 text-emerald-700 dark:text-emerald-300'
-                                }`}
+                        {/* Bloque Izquierdo: Icono, Nombre, Tags y Teléfono */}
+                        <div className="flex items-start sm:items-center gap-3 min-w-0">
+                          <div
+                            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border text-sm font-black shadow-2xs ${
+                              p.estadoGeneral === 'vencido'
+                                ? 'bg-rose-50 dark:bg-rose-950/60 border-rose-100 dark:border-rose-900/60 text-rose-700 dark:text-rose-300'
+                                : p.estadoGeneral === 'proximo'
+                                ? 'bg-amber-50 dark:bg-amber-950/60 border-amber-100 dark:border-amber-900/60 text-amber-700 dark:text-amber-300'
+                                : tieneDeuda
+                                ? 'bg-indigo-50 dark:bg-indigo-950/60 border-indigo-100 dark:border-indigo-900/60 text-indigo-700 dark:text-indigo-300'
+                                : 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-100 dark:border-emerald-900/60 text-emerald-700 dark:text-emerald-300'
+                            }`}
+                          >
+                            <Building2 className="h-5 w-5" />
+                          </div>
+
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h3 className="text-base font-bold text-gray-900 dark:text-white leading-tight truncate">
+                                {p.nombre}
+                              </h3>
+
+                              {/* Contador exacto de días de vencimiento */}
+                              <span
+                                className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-bold ${p.badgeClassConsolidada}`}
                               >
-                                <Building2 className="h-5 w-5" />
-                              </div>
-
-                              <div className="min-w-0">
-                                <h3 className="text-base font-bold text-gray-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition leading-snug truncate">
-                                  {p.nombre}
-                                </h3>
-
-                                <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                                  {p.categoria && (
-                                    <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 dark:bg-slate-800 px-2 py-0.5 text-[10px] font-semibold text-gray-600 dark:text-slate-300">
-                                      <Tag className="h-2.5 w-2.5" />
-                                      <span>{p.categoria}</span>
-                                    </span>
-                                  )}
-                                  {p.telefono && (
-                                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">
-                                      <Phone className="h-2.5 w-2.5" />
-                                      <span>{p.telefono}</span>
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
+                                {p.etiquetaVencimientoConsolidada}
+                              </span>
                             </div>
 
-                            {/* Badge de Estado General */}
+                            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+                              {p.categoria && (
+                                <span className="inline-flex items-center gap-1 rounded-lg bg-gray-100 dark:bg-slate-800 px-2 py-0.5 text-[10px] font-medium text-gray-600 dark:text-slate-300">
+                                  <Tag className="h-2.5 w-2.5" />
+                                  <span>{p.categoria}</span>
+                                </span>
+                              )}
+
+                              {p.telefono && (
+                                <span className="inline-flex items-center gap-1 text-[11px] font-medium text-gray-500 dark:text-slate-400">
+                                  <Phone className="h-3 w-3 text-emerald-600" />
+                                  <span>{p.telefono}</span>
+                                </span>
+                              )}
+
+                              {tienePagoMovil && (
+                                <span className="inline-flex items-center gap-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700 dark:text-indigo-300">
+                                  <Smartphone className="h-2.5 w-2.5" />
+                                  <span>Pago Móvil disponible</span>
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Bloque Derecho: Saldo Adeudado, Conteo de Facturas y Controles */}
+                        <div className="flex items-center justify-between lg:justify-end gap-3 sm:gap-4 shrink-0 pt-2 lg:pt-0 border-t lg:border-t-0 border-gray-100 dark:border-slate-800">
+                          {/* Resumen Financiero */}
+                          <div className="text-left lg:text-right">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-slate-500 block">
+                              Saldo Adeudado:
+                            </span>
                             <span
-                              className={`shrink-0 rounded-full border px-2.5 py-0.5 text-[11px] font-bold ${
-                                p.estadoGeneral === 'vencido'
-                                  ? 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900 dark:bg-rose-950/60 dark:text-rose-200 animate-pulse'
-                                  : p.estadoGeneral === 'proximo'
-                                  ? 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950/60 dark:text-amber-200'
-                                  : tieneDeuda
-                                  ? 'border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-900 dark:bg-indigo-950/60 dark:text-indigo-300'
-                                  : 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-200'
+                              className={`text-lg sm:text-xl font-black font-mono tracking-tight ${
+                                tieneDeuda ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'
                               }`}
                             >
-                              {p.estadoGeneral === 'vencido'
-                                ? `⚠️ ${p.facturasVencidas} vencidas`
-                                : p.estadoGeneral === 'proximo'
-                                ? '🟡 Vencimiento próximo'
-                                : tieneDeuda
-                                ? 'Crédito al día'
-                                : '✓ Solvente'}
+                              {formatUSD(p.totalPendienteUsd)}
+                            </span>
+                            {tieneDeuda && (
+                              <p className="text-[11px] font-mono text-gray-500 dark:text-slate-400">
+                                {formatBs(p.totalPendienteBs)}
+                              </p>
+                            )}
+                          </div>
+
+                          {/* Facturas Activas */}
+                          <div className="hidden sm:block text-left lg:text-right text-xs text-gray-500 dark:text-slate-400">
+                            <span className="block font-bold text-gray-900 dark:text-white">
+                              {p.facturasPendientes} pendientes
+                            </span>
+                            <span className="text-[11px] text-gray-400">
+                              {p.totalFacturas} facturas total
                             </span>
                           </div>
 
-                          {/* Bloque Financiero del Proveedor */}
-                          <div className="mt-4 rounded-2xl border border-gray-100 dark:border-slate-800 bg-gray-50/70 dark:bg-slate-900/60 p-3.5 space-y-1.5">
-                            <div className="flex items-center justify-between">
-                              <span className="text-xs font-semibold text-gray-500 dark:text-slate-400">
-                                Saldo Adeudado:
-                              </span>
-                              <span
-                                className={`text-xl font-black font-mono tracking-tight ${
-                                  tieneDeuda
-                                    ? 'text-rose-600 dark:text-rose-400'
-                                    : 'text-emerald-600 dark:text-emerald-400'
-                                }`}
-                              >
-                                {formatUSD(p.totalPendienteUsd)}
-                              </span>
-                            </div>
-
-                            {tieneDeuda && (
-                              <div className="flex items-center justify-between text-xs text-gray-600 dark:text-slate-400 border-t border-gray-200/50 dark:border-slate-800 pt-1">
-                                <span>Equivalente BCV:</span>
-                                <span className="font-mono font-bold text-gray-800 dark:text-slate-200">
-                                  {formatBs(p.totalPendienteBs)}
-                                </span>
-                              </div>
-                            )}
-
-                            <div className="flex items-center justify-between text-[11px] text-gray-500 dark:text-slate-400 pt-0.5">
-                              <span>Total facturas:</span>
-                              <span className="font-medium">
-                                <strong className="text-gray-900 dark:text-white">{p.facturasPendientes}</strong> pendientes / {p.totalFacturas} total
-                              </span>
-                            </div>
-                          </div>
-
-                          {/* Próximo Vencimiento */}
-                          {p.proximaFechaVencimiento && tieneDeuda && (
-                            <div className="mt-2.5 flex items-center justify-between text-[11px] px-1 text-gray-500 dark:text-slate-400">
-                              <span className="flex items-center gap-1">
-                                <Clock className="h-3 w-3 text-gray-400" />
-                                <span>Próximo vencimiento:</span>
-                              </span>
-                              <span className="font-semibold text-gray-700 dark:text-slate-300">
-                                {formatearFechaLegible(p.proximaFechaVencimiento)}
-                              </span>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Footer y Acciones de la Tarjeta */}
-                        <div className="mt-4 pt-3 border-t border-gray-100 dark:border-slate-800 flex items-center justify-between gap-2">
+                          {/* Botón Acción Rápida: + Factura (Limpio, sin duplicación ++) */}
                           <button
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
                               handleAbrirCrear(p);
                             }}
-                            className="flex items-center gap-1 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-xs font-semibold text-gray-700 dark:text-slate-200 hover:bg-gray-50 transition active:scale-95"
-                            title="Registrar nueva factura para este proveedor"
+                            className="flex items-center gap-1 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs font-bold text-gray-700 dark:text-slate-200 hover:bg-gray-50 dark:hover:bg-slate-700 transition active:scale-95 shadow-2xs"
+                            title="Registrar factura para este proveedor"
                           >
                             <Plus className="h-3.5 w-3.5 text-indigo-600" />
-                            <span>+ Factura</span>
+                            <span>Factura</span>
                           </button>
 
-                          <div className="flex items-center gap-1">
-                            {tieneDeuda ? (
+                          {/* Flecha Chevron Desplegable */}
+                          <div
+                            className={`flex h-8 w-8 items-center justify-center rounded-xl bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-slate-300 transition-transform duration-200 ${
+                              expandido ? 'rotate-180 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600' : ''
+                            }`}
+                            title={expandido ? 'Colapsar tarjeta' : 'Desplegar facturas y datos bancarios'}
+                          >
+                            <ChevronDown className="h-4 w-4" />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* CONTENIDO DESPLEGABLE (ACORDEÓN EXPANDIDO) */}
+                      {expandido && (
+                        <div className="p-4 sm:p-6 bg-white dark:bg-[#111726] border-t border-gray-100 dark:border-slate-800 space-y-4 animate-in fade-in-50 duration-200">
+                          {/* Fila Superior del Acordeón: Datos de Pago Móvil y Acciones del Proveedor */}
+                          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                            {/* Tarjeta de Datos de Pago Móvil */}
+                            <div className="lg:col-span-2 rounded-2xl border border-indigo-100 dark:border-indigo-900/60 bg-gradient-to-br from-indigo-50/50 to-blue-50/30 dark:from-indigo-950/30 dark:to-blue-950/20 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2">
+                                  <div className="flex h-7 w-7 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-2xs">
+                                    <Smartphone className="h-3.5 w-3.5" />
+                                  </div>
+                                  <span className="text-xs font-bold text-indigo-950 dark:text-indigo-200 uppercase tracking-wider">
+                                    Datos de Pago Móvil / Transferencia
+                                  </span>
+                                </div>
+
+                                {tienePagoMovil ? (
+                                  <div className="pt-1 text-xs text-indigo-900 dark:text-indigo-300 space-y-0.5">
+                                    {p.banco && (
+                                      <p>
+                                        <span className="text-indigo-700/80 dark:text-indigo-400 font-semibold">Banco:</span>{' '}
+                                        <strong>{p.banco}</strong>
+                                      </p>
+                                    )}
+                                    <div className="flex flex-wrap items-center gap-3 font-mono text-[11px]">
+                                      {p.telefono_pagomovil && (
+                                        <span>
+                                          Tel: <strong>{p.telefono_pagomovil}</strong>
+                                        </span>
+                                      )}
+                                      {p.cedula_rif && (
+                                        <span>
+                                          CI/RIF: <strong>{p.cedula_rif}</strong>
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <p className="pt-1 text-xs text-gray-500 dark:text-slate-400 italic">
+                                    Sin datos bancarios registrados aún.
+                                  </p>
+                                )}
+                              </div>
+
+                              <div className="flex items-center gap-2 shrink-0 pt-2 sm:pt-0">
+                                {tienePagoMovil ? (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => handleCopiarPagoMovil(p, e)}
+                                    className="flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2 text-xs font-bold text-white shadow-xs hover:bg-indigo-700 transition active:scale-95"
+                                  >
+                                    <Copy className="h-3.5 w-3.5" />
+                                    <span>Copiar Pago Móvil</span>
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => handleAbrirEditarProveedor(p, e)}
+                                    className="flex items-center gap-1 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs font-bold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50"
+                                  >
+                                    <Plus className="h-3.5 w-3.5" />
+                                    <span>Agregar Pago Móvil</span>
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Acciones y Gestión de Proveedor */}
+                            <div className="rounded-2xl border border-gray-200 dark:border-slate-800 bg-gray-50/70 dark:bg-slate-900/60 p-4 flex flex-col justify-between gap-3">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold text-gray-600 dark:text-slate-300">
+                                  Opciones de Proveedor
+                                </span>
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => handleAbrirEditarProveedor(p, e)}
+                                    className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-200 dark:hover:bg-slate-800 hover:text-gray-900 transition"
+                                    title="Editar datos y pago móvil del proveedor"
+                                  >
+                                    <Pencil className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => handleAbrirEliminarProveedor(p, e)}
+                                    className="rounded-lg p-1.5 text-gray-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 hover:text-rose-600 transition"
+                                    title="Eliminar proveedor"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                {p.totalPendienteUsd > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => handleAbrirLiquidarTotal(p, e)}
+                                    className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 py-2 px-3 text-xs font-bold text-white shadow-xs hover:bg-emerald-700 transition active:scale-95"
+                                  >
+                                    <CheckCircle2 className="h-3.5 w-3.5" />
+                                    <span>Liquidar Total ({formatUSD(p.totalPendienteUsd)})</span>
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Notas / Observaciones */}
+                          {p.notas && (
+                            <div className="rounded-xl bg-gray-50 dark:bg-slate-900/80 px-3 py-2 text-xs text-gray-600 dark:text-slate-400 border border-gray-100 dark:border-slate-800">
+                              <span className="font-semibold text-gray-500">Notas comerciales:</span> {p.notas}
+                            </div>
+                          )}
+
+                          {/* Lista e Historial de Facturas (Una debajo de la otra) */}
+                          <div className="space-y-2 pt-1">
+                            <div className="flex items-center justify-between pb-1 border-b border-gray-100 dark:border-slate-800">
+                              <h4 className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-slate-400">
+                                Historial de Facturas ({p.cuentas.length})
+                              </h4>
                               <button
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  handleAbrirLiquidarTotal(p);
+                                  handleAbrirCrear(p);
                                 }}
-                                className="flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white shadow-2xs hover:bg-emerald-700 transition active:scale-95"
-                                title="Liquidar saldo adeudado a este proveedor"
+                                className="flex items-center gap-1 text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline"
                               >
-                                <CheckCircle2 className="h-3.5 w-3.5" />
-                                <span>Liquidar</span>
+                                <Plus className="h-3 w-3" />
+                                <span>Nueva Factura</span>
                               </button>
-                            ) : (
-                              <span className="flex items-center gap-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-                                <ShieldCheck className="h-4 w-4" />
-                                <span>Solvente</span>
-                              </span>
-                            )}
+                            </div>
 
-                            <span className="text-gray-400 dark:text-slate-600 group-hover:text-indigo-600 transition pl-1">
-                              <ChevronRight className="h-4 w-4" />
-                            </span>
+                            {p.cuentas.length === 0 ? (
+                              <div className="py-6 text-center text-xs text-gray-400 border border-dashed rounded-2xl">
+                                Sin facturas registradas para este proveedor.
+                              </div>
+                            ) : (
+                              <div className="space-y-2">
+                                {p.cuentas.map((c) => {
+                                  const infoV = calcularDetalleVencimiento(c.fecha_vencimiento_pago, c.pagado);
+                                  const montoBsHoy = calcularConversionBs(c.monto_usd, tasaBcv);
+
+                                  return (
+                                    <div
+                                      key={c.id}
+                                      className={`rounded-2xl border p-3 sm:p-3.5 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                                        c.pagado
+                                          ? 'border-gray-200/60 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-900/40 opacity-75'
+                                          : infoV.estado === 'vencida'
+                                          ? 'border-rose-200 dark:border-rose-900/60 bg-rose-50/30 dark:bg-rose-950/20'
+                                          : infoV.estado === 'hoy' || infoV.estado === 'proxima'
+                                          ? 'border-amber-200 dark:border-amber-900/60 bg-amber-50/30 dark:bg-amber-950/20'
+                                          : 'border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#111726]'
+                                      }`}
+                                    >
+                                      {/* Detalle y Concepto */}
+                                      <div className="min-w-0 flex-1">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                          <span
+                                            className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${infoV.badgeClass}`}
+                                          >
+                                            {infoV.etiqueta}
+                                          </span>
+                                          <span className="text-[11px] text-gray-400 dark:text-slate-500">
+                                            Recibido: {formatearFechaLegible(c.fecha_recepcion)} • Límite: {formatearFechaLegible(c.fecha_vencimiento_pago)}
+                                          </span>
+                                        </div>
+                                        <p className="mt-1 text-xs font-semibold text-gray-800 dark:text-slate-200 leading-snug">
+                                          {c.concepto_mercancia}
+                                        </p>
+                                      </div>
+
+                                      {/* Monto y Botones */}
+                                      <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-gray-100 dark:border-slate-800">
+                                        <div className="text-left sm:text-right">
+                                          <span className="font-mono text-base font-black text-gray-900 dark:text-white block">
+                                            {formatUSD(c.monto_usd)}
+                                          </span>
+                                          <span className="text-[10px] font-mono text-gray-500 dark:text-slate-400 block">
+                                            {c.pagado && c.tasa_bcv_historica
+                                              ? `Pagado: ${formatBs(calcularConversionBs(c.monto_usd, c.tasa_bcv_historica))}`
+                                              : `Hoy: ${formatBs(montoBsHoy)}`}
+                                          </span>
+                                        </div>
+
+                                        <div className="flex items-center gap-1.5">
+                                          {!c.pagado && (
+                                            <button
+                                              type="button"
+                                              onClick={(e) => handleAbrirEditar(c)}
+                                              className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-800 hover:text-gray-700 transition"
+                                              title="Editar factura"
+                                            >
+                                              <Pencil className="h-3.5 w-3.5" />
+                                            </button>
+                                          )}
+
+                                          <button
+                                            type="button"
+                                            onClick={(e) => handleAbrirEliminarFactura(c, e)}
+                                            className="rounded-lg p-1.5 text-gray-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 hover:text-rose-600 transition"
+                                            title="Eliminar factura"
+                                          >
+                                            <Trash2 className="h-3.5 w-3.5" />
+                                          </button>
+
+                                          {c.pagado ? (
+                                            <button
+                                              type="button"
+                                              onClick={(e) => handleRevertirPago(c, e)}
+                                              className="inline-flex items-center gap-1 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1 text-[11px] font-semibold text-gray-600 dark:text-slate-300 hover:bg-gray-50 transition"
+                                              title="Revertir a Pendiente"
+                                            >
+                                              <RotateCcw className="h-3 w-3" />
+                                              <span>Revertir</span>
+                                            </button>
+                                          ) : (
+                                            <button
+                                              type="button"
+                                              onClick={(e) => handleAbrirLiquidar(c, e)}
+                                              className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white shadow-2xs hover:bg-emerald-700 transition active:scale-95"
+                                            >
+                                              <CheckCircle2 className="h-3.5 w-3.5" />
+                                              <span>Liquidar</span>
+                                            </button>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
                           </div>
                         </div>
-                      </motion.div>
-                    );
-                  })}
-                </AnimatePresence>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
         )}
 
-        {/* VISTA 2: LISTA DE FACTURAS INDIVIDUALES */}
+        {/* VISTA 2: LISTA DE FACTURAS INDIVIDUALES (MODO TABLA/TARJETAS) */}
         {vistaActiva === 'facturas' && (
           <div>
             {cargandoCuentas ? (
@@ -1910,7 +2290,7 @@ export default function ProveedoresPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 <AnimatePresence mode="popLayout">
                   {cuentasFiltradas.map((cuenta, index) => {
-                    const infoVenc = calcularVencimiento(cuenta.fecha_vencimiento_pago, cuenta.pagado);
+                    const infoV = calcularDetalleVencimiento(cuenta.fecha_vencimiento_pago, cuenta.pagado);
                     const montoBsHoy = calcularConversionBs(cuenta.monto_usd, tasaBcv);
                     const montoBsHistorico = cuenta.tasa_bcv_historica
                       ? calcularConversionBs(cuenta.monto_usd, cuenta.tasa_bcv_historica)
@@ -1926,22 +2306,21 @@ export default function ProveedoresPage() {
                         className={`flex flex-col justify-between rounded-3xl border bg-white dark:bg-[#111726] p-5 shadow-xs hover:shadow-md transition group ${
                           cuenta.pagado
                             ? 'border-gray-200/70 bg-gray-50/40 opacity-90'
-                            : infoVenc.estado === 'vencida'
+                            : infoV.estado === 'vencida'
                             ? 'border-rose-200/90 bg-rose-50/15'
-                            : infoVenc.estado === 'hoy' || infoVenc.estado === 'proxima'
+                            : infoV.estado === 'hoy' || infoV.estado === 'proxima'
                             ? 'border-amber-200/90 bg-amber-50/15'
                             : 'border-gray-200/80 hover:border-gray-300'
                         }`}
                       >
                         <div>
-                          {/* Cabecera */}
                           <div className="flex items-start justify-between gap-3">
                             <div className="flex items-start gap-3 min-w-0">
                               <div
                                 className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border text-sm font-black shadow-2xs ${
                                   cuenta.pagado
                                     ? 'bg-emerald-50 border-emerald-100 text-emerald-700'
-                                    : infoVenc.estado === 'vencida'
+                                    : infoV.estado === 'vencida'
                                     ? 'bg-rose-50 border-rose-100 text-rose-700'
                                     : 'bg-indigo-50 border-indigo-100 text-indigo-700'
                                 }`}
@@ -1955,24 +2334,9 @@ export default function ProveedoresPage() {
                                 </h3>
 
                                 <span
-                                  className={`mt-1 inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${
-                                    cuenta.pagado
-                                      ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                                      : infoVenc.estado === 'vencida'
-                                      ? 'border-rose-200 bg-rose-50 text-rose-800 animate-pulse'
-                                      : infoVenc.estado === 'hoy' || infoVenc.estado === 'proxima'
-                                      ? 'border-amber-200 bg-amber-50 text-amber-900'
-                                      : 'border-indigo-200 bg-indigo-50 text-indigo-700'
-                                  }`}
+                                  className={`mt-1 inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${infoV.badgeClass}`}
                                 >
-                                  {cuenta.pagado ? (
-                                    <CheckCircle2 className="h-3 w-3 shrink-0" />
-                                  ) : infoVenc.estado === 'vencida' ? (
-                                    <AlertTriangle className="h-3 w-3 shrink-0 text-rose-600" />
-                                  ) : (
-                                    <Clock className="h-3 w-3 shrink-0" />
-                                  )}
-                                  <span>{infoVenc.etiqueta}</span>
+                                  <span>{infoV.etiqueta}</span>
                                 </span>
                               </div>
                             </div>
@@ -1990,7 +2354,7 @@ export default function ProveedoresPage() {
                               )}
                               <button
                                 type="button"
-                                onClick={() => handleAbrirEliminarFactura(cuenta)}
+                                onClick={(e) => handleAbrirEliminarFactura(cuenta, e)}
                                 className="rounded-xl p-1.5 text-gray-400 hover:bg-rose-50 hover:text-rose-600 transition"
                                 title="Eliminar registro"
                               >
@@ -1999,7 +2363,6 @@ export default function ProveedoresPage() {
                             </div>
                           </div>
 
-                          {/* Concepto de Mercancía */}
                           <div className="mt-3 rounded-2xl border border-gray-100 dark:border-slate-800 bg-gray-50/70 dark:bg-slate-900/60 p-2.5 text-xs text-gray-700 dark:text-slate-300">
                             <span className="font-semibold text-gray-500 uppercase text-[10px] tracking-wider block mb-0.5">
                               Mercancía / Concepto:
@@ -2009,7 +2372,6 @@ export default function ProveedoresPage() {
                             </p>
                           </div>
 
-                          {/* Monto */}
                           <div className="mt-3 space-y-1.5 rounded-2xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 text-xs shadow-2xs">
                             <div className="flex items-center justify-between text-gray-600 dark:text-slate-400">
                               <span className="font-medium">Monto Factura:</span>
@@ -2045,7 +2407,6 @@ export default function ProveedoresPage() {
                             )}
                           </div>
 
-                          {/* Fechas */}
                           <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-gray-500 dark:text-slate-400">
                             <div className="flex items-center gap-1 rounded-xl bg-gray-50 dark:bg-slate-900 px-2 py-1 border border-gray-100 dark:border-slate-800">
                               <Calendar className="h-3 w-3 text-gray-400 shrink-0" />
@@ -2053,7 +2414,7 @@ export default function ProveedoresPage() {
                             </div>
                             <div
                               className={`flex items-center gap-1 rounded-xl px-2 py-1 border ${
-                                infoVenc.estado === 'vencida'
+                                infoV.estado === 'vencida'
                                   ? 'bg-rose-50 border-rose-100 text-rose-800 font-semibold'
                                   : 'bg-gray-50 dark:bg-slate-900 border-gray-100 dark:border-slate-800 text-gray-600 dark:text-slate-400'
                               }`}
@@ -2064,7 +2425,6 @@ export default function ProveedoresPage() {
                           </div>
                         </div>
 
-                        {/* Footer Acciones */}
                         <div className="mt-4 pt-3 border-t border-gray-100 dark:border-slate-800 flex items-center gap-2">
                           {cuenta.pagado ? (
                             <>
@@ -2074,7 +2434,7 @@ export default function ProveedoresPage() {
                               </div>
                               <button
                                 type="button"
-                                onClick={() => handleRevertirPago(cuenta)}
+                                onClick={(e) => handleRevertirPago(cuenta, e)}
                                 className="inline-flex items-center gap-1 rounded-xl border border-gray-200 bg-white px-2 py-1.5 text-[11px] font-semibold text-gray-500 hover:bg-gray-50 transition"
                                 title="Revertir a Pendiente"
                               >
@@ -2085,7 +2445,7 @@ export default function ProveedoresPage() {
                           ) : (
                             <button
                               type="button"
-                              onClick={() => handleAbrirLiquidar(cuenta)}
+                              onClick={(e) => handleAbrirLiquidar(cuenta, e)}
                               className="flex-1 flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 py-2.5 px-3 text-xs font-bold text-white shadow-xs hover:bg-emerald-700 transition active:scale-98"
                             >
                               <CheckCircle2 className="h-4 w-4" />
@@ -2103,287 +2463,7 @@ export default function ProveedoresPage() {
         )}
       </main>
 
-      {/* VISTA DETALLADA DEL PROVEEDOR (ESTADO DE CUENTA UNIFICADO) */}
-      <Dialog.Root
-        open={!!proveedorSeleccionadoId}
-        onOpenChange={(abierto) => !abierto && setProveedorSeleccionadoId(null)}
-      >
-        <Dialog.Portal>
-          <Dialog.Overlay
-            {...dragScrollDetalle.overlayProps}
-            className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs transition-opacity animate-in fade-in"
-          />
-          <Dialog.Content
-            style={dragScrollDetalle.style}
-            {...dragScrollDetalle.dragProps}
-            className="fixed inset-x-0 bottom-0 z-50 max-h-[92dvh] sm:max-h-[90vh] overflow-y-auto overscroll-contain touch-scroll-ios rounded-t-3xl sm:rounded-3xl border-t sm:border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#111726] p-4 sm:p-6 pb-28 sm:pb-6 shadow-2xl outline-none duration-300 animate-in slide-in-from-bottom sm:slide-in-from-bottom-0 sm:fade-in-0 sm:zoom-in-95 sm:inset-auto sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:w-[95vw] sm:max-w-2xl cursor-grab active:cursor-grabbing"
-          >
-            <div className="mx-auto mb-3 -mt-1 flex h-6 w-full cursor-grab active:cursor-grabbing items-center justify-center sm:hidden touch-none">
-              <div className="h-1.5 w-12 rounded-full bg-gray-300 dark:bg-slate-700 transition-colors" />
-            </div>
-
-            {proveedorDetalle && (
-              <div>
-                {/* Cabecera del Detalle */}
-                <div className="flex items-start justify-between border-b border-gray-100 dark:border-slate-800 pb-4">
-                  <div className="flex items-start gap-3 min-w-0">
-                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-100 dark:border-indigo-900/60 text-indigo-700 dark:text-indigo-400 text-lg font-black shadow-xs">
-                      <Building2 className="h-6 w-6" />
-                    </div>
-                    <div className="min-w-0">
-                      <Dialog.Title className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white leading-tight truncate">
-                        {proveedorDetalle.nombre}
-                      </Dialog.Title>
-                      <div className="mt-1 flex flex-wrap items-center gap-2">
-                        <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 dark:bg-indigo-950/60 px-2.5 py-0.5 text-xs font-semibold text-indigo-700 dark:text-indigo-300">
-                          <Tag className="h-3 w-3" />
-                          <span>{proveedorDetalle.categoria || 'Varios'}</span>
-                        </span>
-
-                        {proveedorDetalle.telefono && (
-                          <a
-                            href={`https://wa.me/${normalizarTelefonoWhatsApp(proveedorDetalle.telefono)}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 rounded-full bg-emerald-50 dark:bg-emerald-950/50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 transition"
-                            title="Contactar por WhatsApp"
-                          >
-                            <Phone className="h-3 w-3" />
-                            <span>{proveedorDetalle.telefono}</span>
-                            <ExternalLink className="h-2.5 w-2.5" />
-                          </a>
-                        )}
-                      </div>
-                      {proveedorDetalle.notas && (
-                        <p className="mt-1.5 text-xs text-gray-500 dark:text-slate-400 italic">
-                          "{proveedorDetalle.notas}"
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => handleAbrirEditarProveedor(proveedorDetalle)}
-                      className="rounded-xl p-2 text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-800 hover:text-gray-700 dark:hover:text-white transition"
-                      title="Editar datos del proveedor"
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleAbrirEliminarProveedor(proveedorDetalle)}
-                      className="rounded-xl p-2 text-gray-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 hover:text-rose-600 transition"
-                      title="Eliminar proveedor"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                    <Dialog.Close asChild>
-                      <button
-                        type="button"
-                        className="rounded-xl p-2 text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-800 hover:text-gray-700 dark:hover:text-white transition"
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
-                    </Dialog.Close>
-                  </div>
-                </div>
-
-                {/* Resumen Financiero del Proveedor */}
-                <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div className="rounded-2xl border border-rose-200 dark:border-rose-900/60 bg-rose-50/30 dark:bg-rose-950/20 p-3.5">
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-rose-900 dark:text-rose-300">
-                      Saldo Adeudado
-                    </span>
-                    <p className="mt-1 text-2xl font-black font-mono text-rose-950 dark:text-rose-200">
-                      {formatUSD(proveedorDetalle.totalPendienteUsd)}
-                    </p>
-                    <p className="text-[11px] font-mono text-rose-800 dark:text-rose-400 font-semibold">
-                      {formatBs(proveedorDetalle.totalPendienteBs)}
-                    </p>
-                  </div>
-
-                  <div className="rounded-2xl border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/30 dark:bg-emerald-950/20 p-3.5">
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-900 dark:text-emerald-300">
-                      Total Pagado
-                    </span>
-                    <p className="mt-1 text-2xl font-black font-mono text-emerald-900 dark:text-emerald-200">
-                      {formatUSD(proveedorDetalle.totalPagadoUsd)}
-                    </p>
-                    <p className="text-[11px] text-emerald-700 dark:text-emerald-400">
-                      {proveedorDetalle.facturasPagadas} facturas liquidadas
-                    </p>
-                  </div>
-
-                  <div className="rounded-2xl border border-gray-200 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-900/40 p-3.5">
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-slate-400">
-                      Facturas Pendientes
-                    </span>
-                    <p className="mt-1 text-2xl font-black text-gray-900 dark:text-white">
-                      {proveedorDetalle.facturasPendientes}{' '}
-                      <span className="text-xs font-normal text-gray-400">/ {proveedorDetalle.totalFacturas}</span>
-                    </p>
-                    <p className="text-[11px] text-gray-500 dark:text-slate-400">
-                      {proveedorDetalle.facturasVencidas > 0 ? (
-                        <span className="text-rose-600 font-bold">⚠️ {proveedorDetalle.facturasVencidas} vencidas</span>
-                      ) : (
-                        'Al día con plazos'
-                      )}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Acciones Rápidas */}
-                <div className="mt-4 flex flex-wrap items-center justify-between gap-2.5 bg-gray-50/80 dark:bg-slate-900/80 p-3 rounded-2xl border border-gray-200/80 dark:border-slate-800">
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleAbrirCrear(proveedorDetalle)}
-                      className="flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2 text-xs font-bold text-white shadow-2xs hover:bg-indigo-700 transition active:scale-95"
-                    >
-                      <Plus className="h-3.5 w-3.5" />
-                      <span>+ Registrar Nueva Factura</span>
-                    </button>
-                  </div>
-
-                  {proveedorDetalle.totalPendienteUsd > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => handleAbrirLiquidarTotal(proveedorDetalle)}
-                      className="flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white shadow-xs hover:bg-emerald-700 transition active:scale-95"
-                    >
-                      <CheckCircle2 className="h-4 w-4" />
-                      <span>Liquidar Total ({formatUSD(proveedorDetalle.totalPendienteUsd)})</span>
-                    </button>
-                  )}
-                </div>
-
-                {/* Historial Cronológico de Facturas del Proveedor */}
-                <div className="mt-5">
-                  <div className="flex items-center justify-between mb-3">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-gray-600 dark:text-slate-300">
-                      Historial Cronológico de Cuentas y Facturas ({proveedorDetalle.cuentas.length})
-                    </h4>
-                    <span className="text-[11px] text-gray-400 dark:text-slate-500">
-                      Ordenadas por urgencia y fecha
-                    </span>
-                  </div>
-
-                  {proveedorDetalle.cuentas.length === 0 ? (
-                    <div className="py-8 text-center text-xs text-gray-500 border border-dashed rounded-2xl">
-                      No hay facturas asociadas a este proveedor.
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      {proveedorDetalle.cuentas.map((c) => {
-                        const infoVenc = calcularVencimiento(c.fecha_vencimiento_pago, c.pagado);
-                        const montoBsHoy = calcularConversionBs(c.monto_usd, tasaBcv);
-
-                        return (
-                          <div
-                            key={c.id}
-                            className={`rounded-2xl border p-3.5 transition ${
-                              c.pagado
-                                ? 'border-gray-200/60 dark:border-slate-800 bg-gray-50/40 dark:bg-slate-900/30 opacity-80'
-                                : infoVenc.estado === 'vencida'
-                                ? 'border-rose-200 dark:border-rose-900/60 bg-rose-50/20 dark:bg-rose-950/20'
-                                : 'border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#111726]'
-                            }`}
-                          >
-                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-2">
-                                  <span
-                                    className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                                      c.pagado
-                                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300'
-                                        : infoVenc.estado === 'vencida'
-                                        ? 'bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300 animate-pulse'
-                                        : 'bg-amber-100 text-amber-900 dark:bg-amber-950/80 dark:text-amber-300'
-                                    }`}
-                                  >
-                                    {infoVenc.etiqueta}
-                                  </span>
-                                  <span className="text-[11px] text-gray-400 dark:text-slate-500">
-                                    Recibido: {formatearFechaLegible(c.fecha_recepcion)} | Límite: {formatearFechaLegible(c.fecha_vencimiento_pago)}
-                                  </span>
-                                </div>
-                                <p className="mt-1 text-xs font-semibold text-gray-800 dark:text-slate-200 leading-snug">
-                                  {c.concepto_mercancia}
-                                </p>
-                              </div>
-
-                              <div className="flex sm:flex-col items-baseline sm:items-end justify-between sm:justify-center shrink-0">
-                                <span className="font-mono text-base font-black text-gray-900 dark:text-white">
-                                  {formatUSD(c.monto_usd)}
-                                </span>
-                                <span className="text-[11px] font-mono text-gray-500 dark:text-slate-400">
-                                  {c.pagado && c.tasa_bcv_historica
-                                    ? `Liquidado: ${formatBs(calcularConversionBs(c.monto_usd, c.tasa_bcv_historica))}`
-                                    : `Hoy: ${formatBs(montoBsHoy)}`}
-                                </span>
-                              </div>
-                            </div>
-
-                            <div className="mt-2.5 pt-2 border-t border-gray-100 dark:border-slate-800/80 flex items-center justify-between gap-2">
-                              <div className="flex items-center gap-1">
-                                {!c.pagado && (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleAbrirEditar(c)}
-                                    className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-800 hover:text-gray-700 transition"
-                                    title="Editar factura"
-                                  >
-                                    <Pencil className="h-3.5 w-3.5" />
-                                  </button>
-                                )}
-                                <button
-                                  type="button"
-                                  onClick={() => handleAbrirEliminarFactura(c)}
-                                  className="rounded-lg p-1 text-gray-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 hover:text-rose-600 transition"
-                                  title="Eliminar factura"
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </button>
-                              </div>
-
-                              <div>
-                                {c.pagado ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleRevertirPago(c)}
-                                    className="inline-flex items-center gap-1 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1 text-[11px] font-semibold text-gray-600 dark:text-slate-300 hover:bg-gray-50 transition"
-                                    title="Revertir a Pendiente"
-                                  >
-                                    <RotateCcw className="h-3 w-3" />
-                                    <span>Revertir</span>
-                                  </button>
-                                ) : (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleAbrirLiquidar(c)}
-                                    className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white shadow-2xs hover:bg-emerald-700 transition active:scale-95"
-                                  >
-                                    <CheckCircle2 className="h-3.5 w-3.5" />
-                                    <span>Liquidar Factura</span>
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>
-
-      {/* MODAL REGISTRAR / EDITAR FACTURA (COMPRA DE MERCANCÍA) */}
+      {/* MODAL REGISTRAR / EDITAR FACTURA */}
       <Dialog.Root
         open={modalForm.abierto}
         onOpenChange={(abierto) => setModalForm((prev) => ({ ...prev, abierto }))}
@@ -2429,7 +2509,7 @@ export default function ProveedoresPage() {
                 </div>
               )}
 
-              {/* Selector / Autocompletado de Proveedores con Botón + Crear Nuevo */}
+              {/* Selector / Autocompletado de Proveedores */}
               <div className="relative" ref={selectorRef}>
                 <div className="flex items-center justify-between mb-1">
                   <label className="block text-xs font-semibold text-gray-700 dark:text-slate-300">
@@ -2444,6 +2524,9 @@ export default function ProveedoresPage() {
                         telefono: '',
                         categoria: '',
                         notas: '',
+                        banco: '',
+                        telefono_pagomovil: '',
+                        cedula_rif: '',
                         guardando: false,
                         error: null,
                       });
@@ -2451,7 +2534,7 @@ export default function ProveedoresPage() {
                     className="flex items-center gap-1 text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline"
                   >
                     <Plus className="h-3.5 w-3.5" />
-                    <span>+ Crear Nuevo Proveedor</span>
+                    <span>Crear Nuevo Proveedor</span>
                   </button>
                 </div>
 
@@ -2468,7 +2551,6 @@ export default function ProveedoresPage() {
                   <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform ${selectorAbierto ? 'rotate-180' : ''}`} />
                 </div>
 
-                {/* Dropdown del Selector */}
                 {selectorAbierto && (
                   <div className="absolute left-0 right-0 top-full mt-1 z-30 max-h-60 overflow-y-auto rounded-2xl border border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xl p-2 animate-in fade-in-50 zoom-in-95">
                     <div className="relative mb-2">
@@ -2496,6 +2578,9 @@ export default function ProveedoresPage() {
                                 telefono: '',
                                 categoria: '',
                                 notas: '',
+                                banco: '',
+                                telefono_pagomovil: '',
+                                cedula_rif: '',
                                 guardando: false,
                                 error: null,
                               });
@@ -2528,7 +2613,7 @@ export default function ProveedoresPage() {
                               <p className="truncate font-semibold">{p.nombre}</p>
                               <div className="flex items-center gap-1.5 text-[10px] text-gray-400">
                                 <span>{p.categoria}</span>
-                                {p.telefono && <span>• {p.telefono}</span>}
+                                {p.telefono_pagomovil && <span>• PM: {p.telefono_pagomovil}</span>}
                               </div>
                             </div>
                             {p.totalPendienteUsd > 0 && (
@@ -2557,11 +2642,11 @@ export default function ProveedoresPage() {
                     setModalForm((prev) => ({ ...prev, concepto_mercancia: e.target.value }))
                   }
                   placeholder="Ej. 10 cajas de malta, 5 paquetes de tequeños y servilletas"
-                  className="w-full rounded-2xl border border-gray-200 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-900/50 px-3.5 py-2.5 text-sm text-gray-900 dark:text-white placeholder-gray-400 outline-none transition focus:border-indigo-500 focus:bg-white dark:focus:bg-slate-900 focus:ring-2 focus:ring-indigo-100"
+                  className="w-full rounded-2xl border border-gray-200 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-900/50 px-3.5 py-2.5 text-sm text-gray-900 dark:text-white placeholder-gray-400 outline-none transition focus:border-indigo-500 focus:bg-white dark:focus:bg-slate-900"
                 />
               </div>
 
-              {/* Monto en USD y Conversión en vivo */}
+              {/* Monto en USD */}
               <div>
                 <label className="block text-xs font-semibold text-gray-700 dark:text-slate-300 mb-1">
                   Monto Total de la Factura (USD $) *
@@ -2580,13 +2665,13 @@ export default function ProveedoresPage() {
                       setModalForm((prev) => ({ ...prev, monto_usd: e.target.value }))
                     }
                     placeholder="0.00"
-                    className="w-full rounded-2xl border border-gray-200 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-900/50 py-2.5 pl-8 pr-4 text-sm font-mono font-bold text-gray-900 dark:text-white outline-none transition focus:border-indigo-500 focus:bg-white dark:focus:bg-slate-900"
+                    className="w-full rounded-2xl border border-gray-200 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-900/50 py-2.5 pl-8 pr-4 text-sm font-mono font-bold text-gray-900 dark:text-white outline-none transition focus:border-indigo-500"
                   />
                 </div>
 
                 {parseFloat(modalForm.monto_usd) > 0 && (
                   <div className="mt-2 flex items-center justify-between rounded-xl bg-amber-50/70 dark:bg-amber-950/40 p-2.5 border border-amber-200/70 dark:border-amber-900/60 text-xs">
-                    <span className="text-amber-800 dark:text-amber-300 font-medium">Equivalente en Bolívares (BCV):</span>
+                    <span className="text-amber-800 dark:text-amber-300 font-medium">Equivalente BCV:</span>
                     <span className="font-mono font-bold text-amber-950 dark:text-amber-100">
                       {formatBs(calcularConversionBs(parseFloat(modalForm.monto_usd), tasaBcv))}
                     </span>
@@ -2694,14 +2779,14 @@ export default function ProveedoresPage() {
         </Dialog.Portal>
       </Dialog.Root>
 
-      {/* MODAL RÁPIDO: CREAR NUEVO PROVEEDOR (DESDE SELECTOR DE COMPRA) */}
+      {/* MODAL RÁPIDO: CREAR NUEVO PROVEEDOR (CON PAGO MÓVIL) */}
       <Dialog.Root
         open={modalNuevoProveedorRapido.abierto}
         onOpenChange={(abierto) => setModalNuevoProveedorRapido((prev) => ({ ...prev, abierto }))}
       >
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs transition-opacity animate-in fade-in" />
-          <Dialog.Content className="fixed inset-x-0 bottom-0 sm:inset-auto sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 z-50 max-h-[90vh] overflow-y-auto w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl border border-gray-200 dark:border-slate-800 bg-white dark:bg-[#111726] p-5 sm:p-6 shadow-2xl animate-in slide-in-from-bottom sm:zoom-in-95">
+          <Dialog.Content className="fixed inset-x-0 bottom-0 sm:inset-auto sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 z-50 max-h-[92vh] overflow-y-auto w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl border border-gray-200 dark:border-slate-800 bg-white dark:bg-[#111726] p-5 sm:p-6 shadow-2xl animate-in slide-in-from-bottom sm:zoom-in-95">
             <div className="flex items-center justify-between border-b border-gray-100 dark:border-slate-800 pb-3">
               <div className="flex items-center gap-2.5">
                 <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400">
@@ -2712,7 +2797,7 @@ export default function ProveedoresPage() {
                     Crear Nuevo Proveedor
                   </Dialog.Title>
                   <Dialog.Description className="text-xs text-gray-500">
-                    Se registrará al instante y quedará seleccionado en tu factura.
+                    Registra datos de contacto y datos bancarios para Pago Móvil.
                   </Dialog.Description>
                 </div>
               </div>
@@ -2748,40 +2833,103 @@ export default function ProveedoresPage() {
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 dark:text-slate-300 mb-1">
-                  Teléfono / WhatsApp (Opcional)
-                </label>
-                <input
-                  type="text"
-                  value={modalNuevoProveedorRapido.telefono}
-                  onChange={(e) =>
-                    setModalNuevoProveedorRapido((prev) => ({ ...prev, telefono: e.target.value }))
-                  }
-                  placeholder="Ej. 0412 1234567"
-                  className="w-full rounded-2xl border border-gray-200 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-900/50 px-3.5 py-2.5 text-sm outline-none focus:border-indigo-500"
-                />
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 dark:text-slate-300 mb-1">
+                    Teléfono General
+                  </label>
+                  <input
+                    type="text"
+                    value={modalNuevoProveedorRapido.telefono}
+                    onChange={(e) =>
+                      setModalNuevoProveedorRapido((prev) => ({ ...prev, telefono: e.target.value }))
+                    }
+                    placeholder="Ej. 0412 1234567"
+                    className="w-full rounded-2xl border border-gray-200 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-900/50 px-3 py-2 text-xs outline-none focus:border-indigo-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 dark:text-slate-300 mb-1">
+                    Categoría
+                  </label>
+                  <input
+                    type="text"
+                    list="categorias-list-rapido"
+                    value={modalNuevoProveedorRapido.categoria}
+                    onChange={(e) =>
+                      setModalNuevoProveedorRapido((prev) => ({ ...prev, categoria: e.target.value }))
+                    }
+                    placeholder="Ej. Galletas..."
+                    className="w-full rounded-2xl border border-gray-200 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-900/50 px-3 py-2 text-xs outline-none focus:border-indigo-500"
+                  />
+                  <datalist id="categorias-list-rapido">
+                    {CATEGORIAS_PROVEEDORES.map((c) => (
+                      <option key={c} value={c} />
+                    ))}
+                  </datalist>
+                </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 dark:text-slate-300 mb-1">
-                  Categoría de Productos (Opcional)
-                </label>
-                <input
-                  type="text"
-                  list="categorias-list"
-                  value={modalNuevoProveedorRapido.categoria}
-                  onChange={(e) =>
-                    setModalNuevoProveedorRapido((prev) => ({ ...prev, categoria: e.target.value }))
-                  }
-                  placeholder="Ej. Galletas y Snacks, Bebidas..."
-                  className="w-full rounded-2xl border border-gray-200 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-900/50 px-3.5 py-2.5 text-sm outline-none focus:border-indigo-500"
-                />
-                <datalist id="categorias-list">
-                  {CATEGORIAS_PROVEEDORES.map((c) => (
-                    <option key={c} value={c} />
-                  ))}
-                </datalist>
+              {/* Sección Datos de Pago Móvil */}
+              <div className="p-3 rounded-2xl border border-indigo-100 dark:border-indigo-900/60 bg-indigo-50/40 dark:bg-indigo-950/20 space-y-2.5">
+                <span className="text-[11px] font-bold text-indigo-900 dark:text-indigo-300 uppercase tracking-wider flex items-center gap-1.5">
+                  <Smartphone className="h-3.5 w-3.5 text-indigo-600" />
+                  <span>Datos para Pago Móvil (Opcional)</span>
+                </span>
+
+                <div>
+                  <label className="block text-[11px] font-medium text-gray-600 dark:text-slate-300 mb-0.5">
+                    Banco de Pago Móvil
+                  </label>
+                  <input
+                    type="text"
+                    list="bancos-venezuela-rapido"
+                    value={modalNuevoProveedorRapido.banco}
+                    onChange={(e) =>
+                      setModalNuevoProveedorRapido((prev) => ({ ...prev, banco: e.target.value }))
+                    }
+                    placeholder="Ej. 0102 - Banco de Venezuela"
+                    className="w-full rounded-xl border border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-1.5 text-xs outline-none focus:border-indigo-500"
+                  />
+                  <datalist id="bancos-venezuela-rapido">
+                    {BANCOS_VENEZUELA.map((b) => (
+                      <option key={b} value={b} />
+                    ))}
+                  </datalist>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[11px] font-medium text-gray-600 dark:text-slate-300 mb-0.5">
+                      Teléfono Pago Móvil
+                    </label>
+                    <input
+                      type="text"
+                      value={modalNuevoProveedorRapido.telefono_pagomovil}
+                      onChange={(e) =>
+                        setModalNuevoProveedorRapido((prev) => ({ ...prev, telefono_pagomovil: e.target.value }))
+                      }
+                      placeholder="04141234567"
+                      className="w-full rounded-xl border border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-1.5 text-xs outline-none focus:border-indigo-500 font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-medium text-gray-600 dark:text-slate-300 mb-0.5">
+                      Cédula o RIF
+                    </label>
+                    <input
+                      type="text"
+                      value={modalNuevoProveedorRapido.cedula_rif}
+                      onChange={(e) =>
+                        setModalNuevoProveedorRapido((prev) => ({ ...prev, cedula_rif: e.target.value }))
+                      }
+                      placeholder="V-12345678"
+                      className="w-full rounded-xl border border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-1.5 text-xs outline-none focus:border-indigo-500 font-mono"
+                    />
+                  </div>
+                </div>
               </div>
 
               <div>
@@ -2834,7 +2982,7 @@ export default function ProveedoresPage() {
           <Dialog.Content
             style={dragScrollCrudProveedor.style}
             {...dragScrollCrudProveedor.dragProps}
-            className="fixed inset-x-0 bottom-0 sm:inset-auto sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 z-50 max-h-[90vh] overflow-y-auto w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl border border-gray-200 dark:border-slate-800 bg-white dark:bg-[#111726] p-5 sm:p-6 shadow-2xl animate-in slide-in-from-bottom sm:zoom-in-95 cursor-grab active:cursor-grabbing"
+            className="fixed inset-x-0 bottom-0 sm:inset-auto sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 z-50 max-h-[92vh] overflow-y-auto w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl border border-gray-200 dark:border-slate-800 bg-white dark:bg-[#111726] p-5 sm:p-6 shadow-2xl animate-in slide-in-from-bottom sm:zoom-in-95 cursor-grab active:cursor-grabbing"
           >
             <div className="flex items-center justify-between border-b border-gray-100 dark:border-slate-800 pb-3">
               <div className="flex items-center gap-2.5">
@@ -2843,10 +2991,10 @@ export default function ProveedoresPage() {
                 </div>
                 <div>
                   <Dialog.Title className="text-base font-bold text-gray-900 dark:text-white">
-                    {modalProveedorCrud.modo === 'crear' ? 'Registrar Proveedor' : 'Editar Datos de Proveedor'}
+                    {modalProveedorCrud.modo === 'crear' ? 'Registrar Proveedor' : 'Editar Ficha de Proveedor'}
                   </Dialog.Title>
                   <Dialog.Description className="text-xs text-gray-500">
-                    Ficha comercial y datos de contacto del proveedor
+                    Datos comerciales y de Pago Móvil para transferencias rápidas
                   </Dialog.Description>
                 </div>
               </div>
@@ -2881,45 +3029,108 @@ export default function ProveedoresPage() {
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 dark:text-slate-300 mb-1">
-                  Teléfono de Contacto / WhatsApp
-                </label>
-                <input
-                  type="text"
-                  value={modalProveedorCrud.telefono}
-                  onChange={(e) =>
-                    setModalProveedorCrud((prev) => ({ ...prev, telefono: e.target.value }))
-                  }
-                  placeholder="Ej. 0412 1234567"
-                  className="w-full rounded-2xl border border-gray-200 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-900/50 px-3.5 py-2.5 text-sm outline-none focus:border-indigo-500"
-                />
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 dark:text-slate-300 mb-1">
+                    Teléfono General
+                  </label>
+                  <input
+                    type="text"
+                    value={modalProveedorCrud.telefono}
+                    onChange={(e) =>
+                      setModalProveedorCrud((prev) => ({ ...prev, telefono: e.target.value }))
+                    }
+                    placeholder="Ej. 0412 1234567"
+                    className="w-full rounded-2xl border border-gray-200 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-900/50 px-3 py-2 text-xs outline-none focus:border-indigo-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 dark:text-slate-300 mb-1">
+                    Categoría / Rubro
+                  </label>
+                  <input
+                    type="text"
+                    list="categorias-crud"
+                    value={modalProveedorCrud.categoria}
+                    onChange={(e) =>
+                      setModalProveedorCrud((prev) => ({ ...prev, categoria: e.target.value }))
+                    }
+                    placeholder="Ej. Galletas y Snacks..."
+                    className="w-full rounded-2xl border border-gray-200 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-900/50 px-3 py-2 text-xs outline-none focus:border-indigo-500"
+                  />
+                  <datalist id="categorias-crud">
+                    {CATEGORIAS_PROVEEDORES.map((c) => (
+                      <option key={c} value={c} />
+                    ))}
+                  </datalist>
+                </div>
+              </div>
+
+              {/* Bloque Datos de Pago Móvil */}
+              <div className="p-3.5 rounded-2xl border border-indigo-100 dark:border-indigo-900/60 bg-indigo-50/40 dark:bg-indigo-950/20 space-y-2.5">
+                <span className="text-[11px] font-bold text-indigo-900 dark:text-indigo-300 uppercase tracking-wider flex items-center gap-1.5">
+                  <Smartphone className="h-3.5 w-3.5 text-indigo-600" />
+                  <span>Datos Bancarios (Pago Móvil)</span>
+                </span>
+
+                <div>
+                  <label className="block text-[11px] font-medium text-gray-600 dark:text-slate-300 mb-0.5">
+                    Banco de Pago Móvil
+                  </label>
+                  <input
+                    type="text"
+                    list="bancos-venezuela-crud"
+                    value={modalProveedorCrud.banco}
+                    onChange={(e) =>
+                      setModalProveedorCrud((prev) => ({ ...prev, banco: e.target.value }))
+                    }
+                    placeholder="Ej. 0102 - Banco de Venezuela"
+                    className="w-full rounded-xl border border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-1.5 text-xs outline-none focus:border-indigo-500"
+                  />
+                  <datalist id="bancos-venezuela-crud">
+                    {BANCOS_VENEZUELA.map((b) => (
+                      <option key={b} value={b} />
+                    ))}
+                  </datalist>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[11px] font-medium text-gray-600 dark:text-slate-300 mb-0.5">
+                      Teléfono Pago Móvil
+                    </label>
+                    <input
+                      type="text"
+                      value={modalProveedorCrud.telefono_pagomovil}
+                      onChange={(e) =>
+                        setModalProveedorCrud((prev) => ({ ...prev, telefono_pagomovil: e.target.value }))
+                      }
+                      placeholder="04141234567"
+                      className="w-full rounded-xl border border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-1.5 text-xs outline-none focus:border-indigo-500 font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-medium text-gray-600 dark:text-slate-300 mb-0.5">
+                      Cédula / RIF
+                    </label>
+                    <input
+                      type="text"
+                      value={modalProveedorCrud.cedula_rif}
+                      onChange={(e) =>
+                        setModalProveedorCrud((prev) => ({ ...prev, cedula_rif: e.target.value }))
+                      }
+                      placeholder="V-12345678"
+                      className="w-full rounded-xl border border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-1.5 text-xs outline-none focus:border-indigo-500 font-mono"
+                    />
+                  </div>
+                </div>
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-gray-700 dark:text-slate-300 mb-1">
-                  Categoría / Rubro
-                </label>
-                <input
-                  type="text"
-                  list="categorias-crud"
-                  value={modalProveedorCrud.categoria}
-                  onChange={(e) =>
-                    setModalProveedorCrud((prev) => ({ ...prev, categoria: e.target.value }))
-                  }
-                  placeholder="Ej. Galletas y Snacks, Bebidas..."
-                  className="w-full rounded-2xl border border-gray-200 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-900/50 px-3.5 py-2.5 text-sm outline-none focus:border-indigo-500"
-                />
-                <datalist id="categorias-crud">
-                  {CATEGORIAS_PROVEEDORES.map((c) => (
-                    <option key={c} value={c} />
-                  ))}
-                </datalist>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 dark:text-slate-300 mb-1">
-                  Notas / Condiciones de Entrega y Pago
+                  Notas / Observaciones
                 </label>
                 <textarea
                   rows={2}
@@ -3174,7 +3385,7 @@ export default function ProveedoresPage() {
         </Dialog.Portal>
       </Dialog.Root>
 
-      {/* MODAL ELIMINAR FACTURA INDIVIDUAL */}
+      {/* MODAL ELIMINAR FACTURA */}
       <Dialog.Root
         open={modalEliminarFactura.abierto}
         onOpenChange={(abierto) =>
@@ -3209,7 +3420,7 @@ export default function ProveedoresPage() {
               <strong className="text-gray-900 dark:text-white">
                 {modalEliminarFactura.cuenta && formatUSD(modalEliminarFactura.cuenta.monto_usd)}
               </strong>
-              ? Esta acción borrará el registro permanentemente.
+              ? Esta acción no se puede deshacer.
             </Dialog.Description>
 
             {modalEliminarFactura.error && (

@@ -59,6 +59,9 @@ export interface Proveedor {
   telefono?: string | null;
   categoria?: string | null;
   notas?: string | null;
+  banco?: string | null;
+  telefono_pagomovil?: string | null;
+  cedula_rif?: string | null;
   created_at?: string;
 }
 

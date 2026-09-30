@@ -6,15 +6,32 @@
 -- (Dashboard de Supabase -> SQL Editor -> New Query -> Run).
 -- ==============================================================================
 
--- 1. Crear tabla independiente 'proveedores'
+-- 1. Crear tabla independiente 'proveedores' con datos de Pago Móvil
 CREATE TABLE IF NOT EXISTS public.proveedores (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     nombre TEXT NOT NULL UNIQUE,
     telefono TEXT,
     categoria TEXT,
     notas TEXT,
+    banco TEXT,
+    telefono_pagomovil TEXT,
+    cedula_rif TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
+
+-- Si la tabla ya fue creada previamente sin estas columnas, agregarlas de forma segura:
+DO $$ 
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'proveedores' AND column_name = 'banco') THEN
+        ALTER TABLE public.proveedores ADD COLUMN banco TEXT;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'proveedores' AND column_name = 'telefono_pagomovil') THEN
+        ALTER TABLE public.proveedores ADD COLUMN telefono_pagomovil TEXT;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'proveedores' AND column_name = 'cedula_rif') THEN
+        ALTER TABLE public.proveedores ADD COLUMN cedula_rif TEXT;
+    END IF;
+END $$;
 
 -- 2. Habilitar Row Level Security (RLS) en 'proveedores'
 ALTER TABLE public.proveedores ENABLE ROW LEVEL SECURITY;
