@@ -19,6 +19,9 @@ import {
   Clock,
   ArrowRight,
   RotateCcw,
+  Pencil,
+  Plus,
+  Trash2,
   Smartphone,
   Banknote,
   DollarSign,
@@ -45,6 +48,7 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { supabase } from '@/lib/supabaseClient';
 import { obtenerTasaBCV, TASA_BCV_FALLBACK_DEFAULT } from '@/lib/dolarApi';
 import { formatUSD, formatBs, calcularConversionBs } from '@/lib/utils';
+import { Producto } from '@/types/pos';
 import { NotificationBell } from '@/components/NotificationBell';
 import { refrescarNotificacionesGlobales } from '@/components/NotificationsContext';
 import { useSidebar } from '@/components/SidebarContext';
@@ -52,6 +56,8 @@ import { useModalDragScroll } from '@/lib/useModalDragScroll';
 import {
   parseConsumoAudit,
   anularConsumo,
+  editarConsumoPedido,
+  ItemEdicionConsumo,
   ConsumoInfoAudit,
 } from '@/lib/clientBalance';
 
@@ -464,6 +470,38 @@ export default function TransaccionesPage() {
       !modalAnular.procesando && setModalAnular((prev) => ({ ...prev, abierto: false })),
   });
 
+  // 5.1 Modal Editar Pedido / Ticket Registrado
+  const [catalogoProductos, setCatalogoProductos] = useState<Producto[]>([]);
+  const [busquedaProductoEditar, setBusquedaProductoEditar] = useState<string>('');
+  const [modalEditar, setModalEditar] = useState<{
+    abierto: boolean;
+    transaccion: TransaccionRegistro | null;
+    items: Array<{
+      idTemp: string;
+      producto_id: string;
+      nombre: string;
+      precio_unitario_usd: number;
+      cantidad: number;
+      imagen_url?: string | null;
+    }>;
+    productoSeleccionadoId: string;
+    procesando: boolean;
+    error: string | null;
+  }>({
+    abierto: false,
+    transaccion: null,
+    items: [],
+    productoSeleccionadoId: '',
+    procesando: false,
+    error: null,
+  });
+
+  const dragScrollEditar = useModalDragScroll({
+    isOpen: modalEditar.abierto,
+    onDismiss: () =>
+      !modalEditar.procesando && setModalEditar((prev) => ({ ...prev, abierto: false })),
+  });
+
   // Cargar Tasa BCV
   const cargarTasa = useCallback(async () => {
     setCargandoTasa(true);
@@ -804,6 +842,154 @@ export default function TransaccionesPage() {
       console.error('Error al anular transacción:', err);
       const msg = err instanceof Error ? err.message : 'Error al anular la transacción.';
       setModalAnular((prev) => ({ ...prev, procesando: false, error: msg }));
+    }
+  };
+
+  // Manejo de la acción de editar pedido registrado
+  const handleAbrirEditarPedido = async (transaccion: TransaccionRegistro) => {
+    let prods = catalogoProductos;
+    if (prods.length === 0) {
+      try {
+        const { data } = await supabase
+          .from('productos')
+          .select('*')
+          .order('nombre', { ascending: true });
+        if (data && data.length > 0) {
+          prods = data;
+          setCatalogoProductos(data);
+        }
+      } catch (err) {
+        console.error('Error cargando catálogo para edición:', err);
+      }
+    }
+
+    const items = (transaccion.consumo_detalles || []).map((det, idx) => ({
+      idTemp: det.id || `temp-${idx}-${Date.now()}`,
+      producto_id: det.producto_id || (det.productos ? det.productos.id : ''),
+      nombre: det.productos?.nombre || 'Producto',
+      precio_unitario_usd: Number(det.precio_unitario_usd) || 0,
+      cantidad: Number(det.cantidad) || 1,
+      imagen_url: det.productos?.imagen_url || null,
+    }));
+
+    setBusquedaProductoEditar('');
+    setModalEditar({
+      abierto: true,
+      transaccion,
+      items,
+      productoSeleccionadoId: prods.length > 0 ? prods[0].id : '',
+      procesando: false,
+      error: null,
+    });
+  };
+
+  const handleCambiarCantidadItem = (idTemp: string, delta: number) => {
+    setModalEditar((prev) => {
+      const nuevosItems = prev.items
+        .map((it) => {
+          if (it.idTemp === idTemp) {
+            const nuevaCantidad = it.cantidad + delta;
+            return nuevaCantidad > 0 ? { ...it, cantidad: nuevaCantidad } : null;
+          }
+          return it;
+        })
+        .filter(Boolean) as typeof prev.items;
+
+      return { ...prev, items: nuevosItems, error: null };
+    });
+  };
+
+  const handleEliminarItem = (idTemp: string) => {
+    setModalEditar((prev) => ({
+      ...prev,
+      items: prev.items.filter((it) => it.idTemp !== idTemp),
+      error: null,
+    }));
+  };
+
+  const handleAgregarProductoAlTicket = () => {
+    if (!modalEditar.productoSeleccionadoId) return;
+    const prod = catalogoProductos.find((p) => p.id === modalEditar.productoSeleccionadoId);
+    if (!prod) return;
+
+    setModalEditar((prev) => {
+      const existente = prev.items.find((it) => it.producto_id === prod.id);
+      if (existente) {
+        return {
+          ...prev,
+          items: prev.items.map((it) =>
+            it.producto_id === prod.id ? { ...it, cantidad: it.cantidad + 1 } : it
+          ),
+          error: null,
+        };
+      }
+      return {
+        ...prev,
+        items: [
+          ...prev.items,
+          {
+            idTemp: `nuevo-${Date.now()}-${Math.random()}`,
+            producto_id: prod.id,
+            nombre: prod.nombre,
+            precio_unitario_usd: Number(prod.precio_usd) || 0,
+            cantidad: 1,
+            imagen_url: prod.imagen_url || null,
+          },
+        ],
+        error: null,
+      };
+    });
+  };
+
+  const handleGuardarEdicionPedido = async () => {
+    if (!modalEditar.transaccion) return;
+    if (modalEditar.items.length === 0) {
+      setModalEditar((prev) => ({
+        ...prev,
+        error: 'El pedido debe contener al menos 1 producto. Si deseas cancelarlo por completo, utiliza la opción "Anular".',
+      }));
+      return;
+    }
+
+    setModalEditar((prev) => ({ ...prev, procesando: true, error: null }));
+
+    try {
+      const nuevosItemsPayload: ItemEdicionConsumo[] = modalEditar.items.map((it) => ({
+        producto_id: it.producto_id,
+        nombre: it.nombre,
+        cantidad: it.cantidad,
+        precio_unitario_usd: it.precio_unitario_usd,
+      }));
+
+      const res = await editarConsumoPedido({
+        consumoId: modalEditar.transaccion.id,
+        nuevosItems: nuevosItemsPayload,
+      });
+
+      mostrarNotificacion('exito', res.mensaje);
+      setModalEditar({
+        abierto: false,
+        transaccion: null,
+        items: [],
+        productoSeleccionadoId: '',
+        procesando: false,
+        error: null,
+      });
+
+      if (modalDetalle.abierto) {
+        setModalDetalle({ abierto: false, transaccion: null });
+      }
+
+      await ejecutarMiniRecarga({
+        router,
+        recargarDatosLocales: async () => {
+          await Promise.all([cargarTransacciones(), cargarMetricasResumen(), cargarLiquidaciones()]);
+        },
+      });
+    } catch (err: unknown) {
+      console.error('Error al guardar edición del pedido:', err);
+      const msg = err instanceof Error ? err.message : 'Error al guardar modificaciones del pedido.';
+      setModalEditar((prev) => ({ ...prev, procesando: false, error: msg }));
     }
   };
 
@@ -1491,6 +1677,18 @@ export default function TransaccionesPage() {
                                                           {!audit.esAnulado && (
                                                             <button
                                                               type="button"
+                                                              onClick={() => handleAbrirEditarPedido(t)}
+                                                              className="rounded-xl border border-indigo-200 dark:border-indigo-900 bg-indigo-50 dark:bg-indigo-950/40 px-2.5 py-1.5 text-xs font-bold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 transition active:scale-95 flex items-center gap-1"
+                                                              title="Modificar productos o cantidades del ticket"
+                                                            >
+                                                              <Pencil className="h-3 w-3" />
+                                                              <span>Editar</span>
+                                                            </button>
+                                                          )}
+
+                                                          {!audit.esAnulado && (
+                                                            <button
+                                                              type="button"
                                                               onClick={() =>
                                                                 setModalAnular({
                                                                   abierto: true,
@@ -1633,6 +1831,17 @@ export default function TransaccionesPage() {
                                                               >
                                                                 Ticket
                                                               </button>
+                                                               {!audit.esAnulado && (
+                                                                <button
+                                                                  type="button"
+                                                                  onClick={() => handleAbrirEditarPedido(t)}
+                                                                  className="rounded-xl border border-indigo-200 dark:border-indigo-900 bg-indigo-50 dark:bg-indigo-950/40 px-2 py-1 text-xs font-bold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 transition active:scale-95 flex items-center gap-1"
+                                                                  title="Modificar productos o cantidades del ticket"
+                                                                >
+                                                                  <Pencil className="h-3 w-3" />
+                                                                  <span>Editar</span>
+                                                                </button>
+                                                              )}
                                                               {!audit.esAnulado && (
                                                                 <button
                                                                   type="button"
@@ -2352,6 +2561,20 @@ export default function TransaccionesPage() {
                       <button
                         type="button"
                         onClick={() => {
+                          setModalDetalle({ abierto: false, transaccion: null });
+                          handleAbrirEditarPedido(t);
+                        }}
+                        className="flex items-center gap-1.5 rounded-2xl bg-indigo-600 px-4 py-2.5 text-xs font-bold text-white shadow-xs hover:bg-indigo-700 transition"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                        <span>Editar Pedido</span>
+                      </button>
+                    )}
+
+                    {!audit.esAnulado && (
+                      <button
+                        type="button"
+                        onClick={() => {
                           setModalAnular({
                             abierto: true,
                             transaccion: t,
@@ -2492,6 +2715,291 @@ export default function TransaccionesPage() {
                         </>
                       ) : (
                         <span>Confirmar y Anular</span>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+
+      {/* Modal Edición / Modificación de Pedido Registrado (Radix UI Dialog) */}
+      <Dialog.Root
+        open={modalEditar.abierto}
+        onOpenChange={(abierto) =>
+          !modalEditar.procesando && setModalEditar((prev) => ({ ...prev, abierto }))
+        }
+      >
+        <Dialog.Portal>
+          <Dialog.Overlay
+            {...dragScrollEditar.overlayProps}
+            className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs transition-opacity animate-in fade-in"
+          />
+          <Dialog.Content
+            style={dragScrollEditar.style}
+            {...dragScrollEditar.dragProps}
+            className="fixed inset-x-0 bottom-0 z-50 max-h-[92dvh] overflow-y-auto overscroll-contain touch-scroll-ios rounded-t-3xl sm:rounded-3xl border-t sm:border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#0D111A] p-4 sm:p-6 pb-28 sm:pb-6 shadow-2xl outline-none duration-300 animate-in slide-in-from-bottom sm:slide-in-from-bottom-0 sm:fade-in-0 sm:zoom-in-95 sm:inset-auto sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:w-[95vw] sm:max-w-xl cursor-grab active:cursor-grabbing"
+          >
+            {/* Manija táctil */}
+            <div className="mx-auto mb-3 -mt-1 flex h-6 w-full cursor-grab active:cursor-grabbing items-center justify-center sm:hidden touch-none">
+              <div className="h-1.5 w-12 rounded-full bg-gray-300 dark:bg-slate-700" />
+            </div>
+
+            <div className="flex items-center gap-3 mb-4">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-100 dark:border-indigo-900 text-indigo-600 dark:text-indigo-400">
+                <Pencil className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <Dialog.Title className="text-base font-bold text-gray-900 dark:text-slate-100">
+                  Modificar Pedido / Ticket
+                </Dialog.Title>
+                <Dialog.Description className="text-xs text-gray-500 dark:text-slate-400 truncate">
+                  {modalEditar.transaccion ? (
+                    <>
+                      Ticket #{modalEditar.transaccion.id.slice(0, 8)} &bull;{' '}
+                      {modalEditar.transaccion.clientes?.nombre_estudiante || 'Público General / Caja'}
+                    </>
+                  ) : (
+                    'Edita los ítems y cantidades de esta venta.'
+                  )}
+                </Dialog.Description>
+              </div>
+            </div>
+
+            {modalEditar.transaccion && (() => {
+              const t = modalEditar.transaccion;
+              const audit = parseConsumoAudit({ metodo_pago: t.metodo_pago, pagado: t.pagado });
+              const tasa = t.tasa_bcv_historica || tasaBcv;
+
+              const montoOriginalUsd = Number(t.monto_total_usd || 0);
+              const nuevoMontoUsd = Math.round(
+                modalEditar.items.reduce((acc, it) => acc + (it.cantidad * it.precio_unitario_usd), 0) * 100
+              ) / 100;
+              const nuevoMontoBs = calcularConversionBs(nuevoMontoUsd, tasa);
+              const diferenciaUsd = Math.round((nuevoMontoUsd - montoOriginalUsd) * 100) / 100;
+              const diferenciaBs = calcularConversionBs(Math.abs(diferenciaUsd), tasa);
+
+              return (
+                <div className="space-y-4 text-xs">
+                  {/* Banner Cliente y Método */}
+                  <div className="flex items-center justify-between gap-2 rounded-2xl border border-gray-100 dark:border-slate-800 bg-gray-50/70 dark:bg-[#111726] p-3">
+                    <div>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">
+                        Cliente / Cuenta:
+                      </span>
+                      <span className="font-bold text-gray-900 dark:text-slate-100 text-xs">
+                        {t.clientes?.nombre_estudiante || 'Público General (Caja)'}
+                      </span>
+                      {t.clientes?.grado_seccion && (
+                        <span className="text-[10px] text-gray-500 ml-1.5 font-medium">
+                          ({t.clientes.grado_seccion})
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-right">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">
+                        Método:
+                      </span>
+                      <span className="rounded-full bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 px-2 py-0.5 text-[10px] font-bold">
+                        {audit.nombreLegible}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Selector para Agregar Productos al Ticket */}
+                  <div className="rounded-2xl border border-indigo-100 dark:border-indigo-950 bg-indigo-50/40 dark:bg-indigo-950/20 p-3 space-y-2">
+                    <span className="font-bold text-indigo-950 dark:text-indigo-200 block text-[11px]">
+                      Añadir Producto del Menú:
+                    </span>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <div className="flex-1">
+                        <select
+                          value={modalEditar.productoSeleccionadoId}
+                          onChange={(e) =>
+                            setModalEditar((prev) => ({ ...prev, productoSeleccionadoId: e.target.value }))
+                          }
+                          className="w-full rounded-xl border border-gray-200 dark:border-slate-800 bg-white dark:bg-[#111726] px-3 py-2 text-xs font-medium text-gray-900 dark:text-slate-100 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                        >
+                          {catalogoProductos.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.nombre} &mdash; {formatUSD(p.precio_usd)} ({formatBs(calcularConversionBs(p.precio_usd, tasa))})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleAgregarProductoAlTicket}
+                        className="flex items-center justify-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2 text-xs font-bold text-white shadow-2xs hover:bg-indigo-700 transition active:scale-95 shrink-0"
+                      >
+                        <Plus className="h-4 w-4" />
+                        <span>Agregar</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Lista de Ítems del Ticket */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-gray-500 text-[11px] font-bold uppercase tracking-wider px-1">
+                      <span>Artículos en el Ticket ({modalEditar.items.reduce((s, it) => s + it.cantidad, 0)})</span>
+                      <span>Subtotal</span>
+                    </div>
+
+                    <div className="divide-y divide-gray-100 dark:divide-slate-800 rounded-2xl border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#111726] p-2 max-h-56 overflow-y-auto">
+                      {modalEditar.items.length === 0 ? (
+                        <div className="py-6 text-center text-gray-400">
+                          <ShoppingBag className="h-8 w-8 mx-auto mb-1 opacity-40 text-gray-400" />
+                          <p className="font-semibold text-xs text-gray-500">Ticket sin artículos</p>
+                          <p className="text-[10px] text-gray-400">Agrega productos utilizando el menú de arriba.</p>
+                        </div>
+                      ) : (
+                        modalEditar.items.map((item) => {
+                          const itemTotalUsd = item.cantidad * item.precio_unitario_usd;
+                          return (
+                            <div
+                              key={item.idTemp}
+                              className="py-2 px-1 flex items-center justify-between gap-2 first:pt-1 last:pb-1"
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="font-bold text-gray-900 dark:text-slate-100 truncate">
+                                  {item.nombre}
+                                </div>
+                                <div className="text-[10px] text-gray-400 font-mono">
+                                  {formatUSD(item.precio_unitario_usd)} c/u
+                                </div>
+                              </div>
+
+                              {/* Controles de Cantidad */}
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => handleCambiarCantidadItem(item.idTemp, -1)}
+                                  className="h-7 w-7 rounded-lg border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 text-gray-700 dark:text-slate-300 font-black hover:bg-gray-200 dark:hover:bg-slate-700 transition flex items-center justify-center text-sm active:scale-90"
+                                >
+                                  -
+                                </button>
+                                <span className="w-6 text-center font-mono font-bold text-xs text-gray-900 dark:text-slate-100">
+                                  {item.cantidad}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleCambiarCantidadItem(item.idTemp, 1)}
+                                  className="h-7 w-7 rounded-lg border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 text-gray-700 dark:text-slate-300 font-black hover:bg-gray-200 dark:hover:bg-slate-700 transition flex items-center justify-center text-sm active:scale-90"
+                                >
+                                  +
+                                </button>
+                              </div>
+
+                              {/* Subtotal del Ítem */}
+                              <div className="w-16 text-right font-mono font-bold text-xs text-gray-800 dark:text-slate-200 shrink-0">
+                                {formatUSD(itemTotalUsd)}
+                              </div>
+
+                              {/* Eliminar Ítem */}
+                              <button
+                                type="button"
+                                onClick={() => handleEliminarItem(item.idTemp)}
+                                className="h-7 w-7 rounded-lg text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition flex items-center justify-center shrink-0 active:scale-90"
+                                title="Eliminar este producto"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Resumen Financiero y Diferencia */}
+                  <div className="rounded-2xl border border-gray-100 dark:border-slate-800 bg-gray-50/70 dark:bg-[#111726] p-3 space-y-2">
+                    <div className="flex justify-between items-center text-gray-500">
+                      <span>Total Original:</span>
+                      <span className="font-mono font-bold">{formatUSD(montoOriginalUsd)}</span>
+                    </div>
+
+                    <div className="flex justify-between items-center text-gray-900 dark:text-slate-100 font-bold border-t border-gray-200/60 dark:border-slate-800 pt-2">
+                      <span className="text-sm">Nuevo Total Modificado:</span>
+                      <div className="text-right">
+                        <span className="font-mono font-black text-base text-indigo-600 dark:text-indigo-400">
+                          {formatUSD(nuevoMontoUsd)}
+                        </span>
+                        <span className="block font-mono text-[10px] text-gray-400">
+                          {formatBs(nuevoMontoBs)}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Badge de Diferencia */}
+                    <div className="flex items-center justify-between pt-1 border-t border-dashed border-gray-200/80 dark:border-slate-800 text-xs">
+                      <span className="font-medium text-gray-500">Diferencia:</span>
+                      {diferenciaUsd > 0 ? (
+                        <span className="font-mono font-bold text-amber-600 dark:text-amber-400">
+                          +{formatUSD(diferenciaUsd)} (+{formatBs(diferenciaBs)})
+                        </span>
+                      ) : diferenciaUsd < 0 ? (
+                        <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                          -{formatUSD(Math.abs(diferenciaUsd))} (-{formatBs(diferenciaBs)})
+                        </span>
+                      ) : (
+                        <span className="font-mono text-gray-400 font-medium">$0.00 (Sin cambio)</span>
+                      )}
+                    </div>
+
+                    {/* Explicación contable del ajuste */}
+                    <div className="rounded-xl bg-white dark:bg-[#0D111A] p-2.5 border border-gray-200/70 dark:border-slate-800 text-[11px] leading-relaxed">
+                      {audit.metodoBase === 'pendiente' ? (
+                        <p className="text-amber-800 dark:text-amber-300">
+                          ℹ️ <strong>Cuenta por Cobrar:</strong> el saldo adeudado de{' '}
+                          {t.clientes?.nombre_estudiante || 'el cliente'} se actualizará automáticamente{' '}
+                          {diferenciaUsd > 0 ? `aumentando en +$${diferenciaUsd.toFixed(2)}` : diferenciaUsd < 0 ? `disminuyendo en -$${Math.abs(diferenciaUsd).toFixed(2)}` : 'sin variación'}.
+                        </p>
+                      ) : audit.metodoBase === 'saldo_favor' ? (
+                        <p className="text-emerald-800 dark:text-emerald-300">
+                          ℹ️ <strong>Saldo a Favor:</strong> el crédito prepagado del cliente se ajustará automáticamente por la diferencia.
+                        </p>
+                      ) : (
+                        <p className="text-gray-600 dark:text-slate-300">
+                          ℹ️ <strong>Caja ({audit.nombreLegible}):</strong> el ticket registrará el nuevo total de {formatUSD(nuevoMontoUsd)}. Gestionar la diferencia de cobro o devolución en efectivo/pago móvil en mostrador.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {modalEditar.error && (
+                    <div className="rounded-2xl border border-rose-200 bg-rose-50 p-2.5 text-xs text-rose-800 font-medium">
+                      {modalEditar.error}
+                    </div>
+                  )}
+
+                  {/* Acciones */}
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-gray-100 dark:border-slate-800">
+                    <button
+                      type="button"
+                      disabled={modalEditar.procesando}
+                      onClick={() => setModalEditar((prev) => ({ ...prev, abierto: false }))}
+                      className="rounded-2xl border border-gray-200 dark:border-slate-800 bg-white dark:bg-[#111726] px-4 py-2.5 text-xs font-semibold text-gray-700 dark:text-slate-300 hover:bg-gray-50 transition"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      disabled={modalEditar.procesando || modalEditar.items.length === 0}
+                      onClick={handleGuardarEdicionPedido}
+                      className="flex items-center gap-1.5 rounded-2xl bg-indigo-600 px-4 py-2.5 text-xs font-bold text-white shadow-xs hover:bg-indigo-700 transition disabled:opacity-50 active:scale-95"
+                    >
+                      {modalEditar.procesando ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <span>Guardando cambios...</span>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 className="h-4 w-4" />
+                          <span>Guardar Modificaciones</span>
+                        </>
                       )}
                     </button>
                   </div>

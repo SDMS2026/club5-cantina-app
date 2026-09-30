@@ -248,6 +248,30 @@ export default function DeudasPage() {
     onDismiss: () => setModalAbono((prev) => ({ ...prev, abierto: false })),
   });
 
+  // Modal WhatsApp Consolidado Familiar
+  const [modalWhatsAppFamiliar, setModalWhatsAppFamiliar] = useState<{
+    abierto: boolean;
+    cuentaPrincipal: CuentaEstudianteAgrupada | null;
+    cuentasFamiliares: CuentaEstudianteAgrupada[];
+    seleccionadosKeys: string[];
+    telefonoDestino: string;
+    nombreRepresentante: string;
+    copiado: boolean;
+  }>({
+    abierto: false,
+    cuentaPrincipal: null,
+    cuentasFamiliares: [],
+    seleccionadosKeys: [],
+    telefonoDestino: '',
+    nombreRepresentante: '',
+    copiado: false,
+  });
+
+  const dragScrollWhatsApp = useModalDragScroll({
+    isOpen: modalWhatsAppFamiliar.abierto,
+    onDismiss: () => setModalWhatsAppFamiliar((prev) => ({ ...prev, abierto: false })),
+  });
+
   // Notificación toast
   const [notificacion, setNotificacion] = useState<{ tipo: 'exito' | 'info'; texto: string } | null>(null);
   const [creandoDeudaMuestra, setCreandoDeudaMuestra] = useState<boolean>(false);
@@ -828,52 +852,141 @@ export default function DeudasPage() {
     }
   };
 
-  // Enviar resumen consolidado por WhatsApp con datos oficiales de pago móvil
-  const handleEnviarWhatsAppConsolidado = (cuenta: CuentaEstudianteAgrupada) => {
-    const estudiante = cuenta.cliente?.nombre_estudiante || 'el estudiante';
-    const representante = cuenta.cliente?.nombre_representante || 'Estimado(a) Representante';
-    const grado = cuenta.cliente?.grado_seccion ? `(${cuenta.cliente.grado_seccion})` : '';
-    const telefono = cuenta.cliente?.telefono_whatsapp || '';
+  /**
+   * Detecta y agrupa los estudiantes pertenecientes al mismo núcleo familiar
+   * (mismo representante o mismo número de WhatsApp o apellidos vinculados).
+   */
+  const obtenerGrupoFamiliarCuentas = useCallback(
+    (cuentaPrincipal: CuentaEstudianteAgrupada, todasLasCuentas: CuentaEstudianteAgrupada[]) => {
+      if (!cuentaPrincipal?.cliente) return [cuentaPrincipal];
 
-    const montoUsd = cuenta.totalDeudaUsd;
-    const montoBs = cuenta.totalDeudaBs;
+      const telPrincipal = (cuentaPrincipal.cliente.telefono_whatsapp || '').replace(/\D/g, '');
+      const repPrincipal = (cuentaPrincipal.cliente.nombre_representante || '').trim().toLowerCase();
 
-    // Desglose limpio de consumos
-    const detalleConsumos = cuenta.consumos
-      .map((c, index) => {
-        let fTexto = 'Fecha';
-        try {
-          fTexto = new Date(c.fecha).toLocaleDateString('es-VE', {
-            day: '2-digit',
-            month: 'short',
-          });
-        } catch {
-          fTexto = c.fecha;
+      const partesNombre = (cuentaPrincipal.cliente.nombre_estudiante || '').trim().split(/\s+/);
+      const apellidosPrincipal = partesNombre.length > 1 ? partesNombre.slice(1).join(' ').toLowerCase() : '';
+
+      const familiares: CuentaEstudianteAgrupada[] = [cuentaPrincipal];
+
+      const palabrasGenericas = new Set([
+        'papa', 'mama', 'papá', 'mamá', 'padre', 'madre', 'representante', 'tutor', 'tutora',
+        'abuelo', 'abuela', 'sin representante', 'particular', 'caja', 'responsable'
+      ]);
+
+      for (const c of todasLasCuentas) {
+        if (!c.cliente) continue;
+        if (c.clienteKey === cuentaPrincipal.clienteKey) continue;
+
+        let esFamiliar = false;
+
+        // 1. Detección por número de WhatsApp (mínimo 7 dígitos)
+        const telOtro = (c.cliente.telefono_whatsapp || '').replace(/\D/g, '');
+        if (telPrincipal.length >= 7 && telOtro.length >= 7) {
+          if (
+            telPrincipal === telOtro ||
+            telPrincipal.endsWith(telOtro.slice(-8)) ||
+            telOtro.endsWith(telPrincipal.slice(-8))
+          ) {
+            esFamiliar = true;
+          }
         }
 
-        let productosTexto = '';
-        if (c.consumo_detalles && c.consumo_detalles.length > 0) {
-          productosTexto = c.consumo_detalles
-            .map(
-              (d) =>
-                `    - ${d.cantidad}x ${d.productos?.nombre || 'Producto'} (${formatUSD(d.precio_unitario_usd * d.cantidad)})`
-            )
-            .join('\n');
-        } else {
-          productosTexto = '    - Consumo en cantina escolar';
+        // 2. Detección por Nombre de Representante idéntico o coincidente (no genérico, min 4 caracteres)
+        const repOtro = (c.cliente.nombre_representante || '').trim().toLowerCase();
+        if (
+          !esFamiliar &&
+          repPrincipal.length >= 4 &&
+          repOtro.length >= 4 &&
+          !palabrasGenericas.has(repPrincipal) &&
+          !palabrasGenericas.has(repOtro)
+        ) {
+          if (repPrincipal === repOtro) {
+            esFamiliar = true;
+          }
         }
 
-        return `*Consumo #${index + 1} (${fTexto})* - ${formatUSD(c.monto_total_usd)}:\n${productosTexto}`;
-      })
-      .join('\n\n');
+        // 3. Detección por coincidencia de apellido de estudiante si el representante coincide
+        if (!esFamiliar && apellidosPrincipal && repPrincipal && repOtro && !palabrasGenericas.has(repPrincipal)) {
+          const partesOtro = (c.cliente.nombre_estudiante || '').trim().split(/\s+/);
+          const apellidosOtro = partesOtro.length > 1 ? partesOtro.slice(1).join(' ').toLowerCase() : '';
+          if (
+            apellidosOtro &&
+            apellidosPrincipal === apellidosOtro &&
+            (repPrincipal.includes(repOtro) || repOtro.includes(repPrincipal))
+          ) {
+            esFamiliar = true;
+          }
+        }
 
-    const esProf = esProfesorOPersonal(cuenta.cliente?.grado_seccion);
-    const encabezado = esProf
-      ? `Hola, estimado(a) *Prof./Personal ${cuenta.cliente?.nombre_estudiante}* (${cuenta.cliente?.grado_seccion}).\nLe escribimos cordialmente de *Club 5 Cantina Escolar*.\n\nLe compartimos el estado de cuenta pendiente consolidado:`
-      : `Hola, *${representante}*.\nLe escribimos cordialmente de *Club 5 Cantina Escolar*.\n\nLe compartimos el estado de cuenta pendiente consolidado de *${estudiante}* ${grado}:`;
+        if (esFamiliar) {
+          familiares.push(c);
+        }
+      }
 
-    // Mensaje redactado con caracteres seguros que NO generan diamantes ni signos de interrogación
-    const mensaje = `${encabezado}
+      return familiares;
+    },
+    []
+  );
+
+  /**
+   * Genera el texto del mensaje para WhatsApp, unificando la deuda familiar
+   * con formato limpio, desglose con nombres en paréntesis y datos de pago móvil oficiales.
+   */
+  const generarMensajeWhatsAppFamiliar = useCallback(
+    ({
+      nombreRepresentante,
+      cuentas,
+      tasaBcvActual,
+    }: {
+      nombreRepresentante: string;
+      cuentas: CuentaEstudianteAgrupada[];
+      tasaBcvActual: number;
+    }): string => {
+      if (cuentas.length === 0) return '';
+
+      // Caso de 1 solo estudiante (o profesor/personal)
+      if (cuentas.length === 1) {
+        const cuenta = cuentas[0];
+        const estudiante = cuenta.cliente?.nombre_estudiante || 'el estudiante';
+        const rep = nombreRepresentante || cuenta.cliente?.nombre_representante || 'Estimado(a) Representante';
+        const grado = cuenta.cliente?.grado_seccion ? `(${cuenta.cliente.grado_seccion})` : '';
+        const montoUsd = cuenta.totalDeudaUsd;
+        const montoBs = cuenta.totalDeudaBs;
+
+        const detalleConsumos = cuenta.consumos
+          .map((c, index) => {
+            let fTexto = 'Fecha';
+            try {
+              fTexto = new Date(c.fecha).toLocaleDateString('es-VE', {
+                day: '2-digit',
+                month: 'short',
+              });
+            } catch {
+              fTexto = c.fecha;
+            }
+
+            let productosTexto = '';
+            if (c.consumo_detalles && c.consumo_detalles.length > 0) {
+              productosTexto = c.consumo_detalles
+                .map(
+                  (d) =>
+                    `    - ${d.cantidad}x ${d.productos?.nombre || 'Producto'} (${formatUSD(d.precio_unitario_usd * d.cantidad)})`
+                )
+                .join('\n');
+            } else {
+              productosTexto = '    - Consumo en cantina escolar';
+            }
+
+            return `*Consumo #${index + 1} (${fTexto})* - ${formatUSD(c.monto_total_usd)}:\n${productosTexto}`;
+          })
+          .join('\n\n');
+
+        const esProf = esProfesorOPersonal(cuenta.cliente?.grado_seccion);
+        const encabezado = esProf
+          ? `Hola, estimado(a) *Prof./Personal ${cuenta.cliente?.nombre_estudiante}* (${cuenta.cliente?.grado_seccion}).\nLe escribimos cordialmente de *Club 5 Cantina Escolar*.\n\nLe compartimos el estado de cuenta pendiente:`
+          : `Hola, *${rep}*.\nLe escribimos cordialmente de *Club 5 Cantina Escolar*.\n\nLe compartimos el estado de cuenta pendiente de *${estudiante}* ${grado}:`;
+
+        return `${encabezado}
 
 *Detalle de consumos (${cuenta.consumos.length}):*
 ${detalleConsumos}
@@ -881,7 +994,7 @@ ${detalleConsumos}
 ---------------------------------
 *TOTAL A PAGAR:* ${formatUSD(montoUsd)}
 *Equivalente en Bolívares:* ${formatBs(montoBs)}
-(Tasa oficial BCV del día: ${formatBs(tasaBcv)})
+(Tasa oficial BCV del día: ${formatBs(tasaBcvActual)})
 ---------------------------------
 
 *Datos para realizar el Pago Móvil:*
@@ -894,9 +1007,157 @@ ${detalleConsumos}
 Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123588848*
 
 ¡Muchas gracias y que tenga un excelente día!`;
+      }
 
-    // Sanitizar teléfono del representante
-    let telefonoLimpio = telefono.replace(/\D/g, '');
+      // Caso familiar consolidado (2 o más estudiantes)
+      const granTotalUsd = cuentas.reduce((acc, c) => acc + c.totalDeudaUsd, 0);
+      const granTotalBs = calcularConversionBs(granTotalUsd, tasaBcvActual);
+
+      // Resumen claro: - Pedro (3er Año): $4.00, - Sofía (1er Año): $3.50
+      const resumenFamiliar = cuentas
+        .map((c) => {
+          const nombre = c.cliente?.nombre_estudiante || 'Estudiante';
+          const seccion = c.cliente?.grado_seccion ? `(${c.cliente.grado_seccion})` : '';
+          return `- ${nombre} ${seccion}: ${formatUSD(c.totalDeudaUsd)} (${formatBs(c.totalDeudaBs)})`;
+        })
+        .join('\n');
+
+      // Desglose detallado de consumos por cada estudiante
+      const desgloseEstudiantes = cuentas
+        .map((c) => {
+          const nombre = c.cliente?.nombre_estudiante || 'Estudiante';
+          const seccion = c.cliente?.grado_seccion ? `(${c.cliente.grado_seccion})` : '';
+          const cantConsumos = c.consumos.length;
+
+          const detalleConsumos = c.consumos
+            .map((cons, index) => {
+              let fTexto = 'Fecha';
+              try {
+                fTexto = new Date(cons.fecha).toLocaleDateString('es-VE', {
+                  day: '2-digit',
+                  month: 'short',
+                });
+              } catch {
+                fTexto = cons.fecha;
+              }
+
+              let itemsTexto = '';
+              if (cons.consumo_detalles && cons.consumo_detalles.length > 0) {
+                itemsTexto = cons.consumo_detalles
+                  .map(
+                    (d) =>
+                      `    - ${d.cantidad}x ${d.productos?.nombre || 'Producto'} (${formatUSD(d.precio_unitario_usd * d.cantidad)})`
+                  )
+                  .join('\n');
+              } else {
+                itemsTexto = '    - Consumo en cantina escolar';
+              }
+
+              return `  • *Consumo #${index + 1} (${fTexto})* - ${formatUSD(cons.monto_total_usd)}:\n${itemsTexto}`;
+            })
+            .join('\n\n');
+
+          return `*👤 ${nombre}* ${seccion} - *Total: ${formatUSD(c.totalDeudaUsd)}* (${cantConsumos} ${cantConsumos === 1 ? 'consumo' : 'consumos'}):\n${detalleConsumos}`;
+        })
+        .join('\n\n------------------\n\n');
+
+      const encabezado = `Hola, estimado(a) *${nombreRepresentante || 'Representante / Familia'}*.\nLe escribimos cordialmente de *Club 5 Cantina Escolar*.\n\nLe compartimos el estado de cuenta pendiente consolidado familiar de sus representados:`;
+
+      return `${encabezado}
+
+*Resumen de Cuentas:*
+${resumenFamiliar}
+
+*Detalle de Consumos por Estudiante:*
+${desgloseEstudiantes}
+
+---------------------------------
+*GRAN TOTAL A PAGAR:* ${formatUSD(granTotalUsd)}
+*Equivalente en Bolívares:* ${formatBs(granTotalBs)}
+(Tasa oficial BCV del día: ${formatBs(tasaBcvActual)})
+---------------------------------
+
+*Datos para realizar el Pago Móvil:*
+- Banco: BNC (Banco Nacional de Crédito - 0191)
+- Cédula: 14953511
+- Teléfono Pago Móvil: 04125404830
+- Efectivo: Directamente en caja de cantina ($ o Bs.)
+
+*Reporte de Referencia:*
+Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123588848*
+
+¡Muchas gracias y que tenga un excelente día!`;
+    },
+    []
+  );
+
+  // Abrir modal unificado de WhatsApp (individual o consolidado familiar)
+  const handleAbrirModalWhatsApp = (cuenta: CuentaEstudianteAgrupada) => {
+    const grupo = obtenerGrupoFamiliarCuentas(cuenta, cuentasAgrupadas);
+
+    // Encontrar teléfono: el del estudiante actual, o el de algún hermano/representante
+    let tel = (cuenta.cliente?.telefono_whatsapp || '').trim();
+    if (!tel) {
+      const otroConTel = grupo.find((g) => g.cliente?.telefono_whatsapp?.trim());
+      if (otroConTel) {
+        tel = otroConTel.cliente?.telefono_whatsapp?.trim() || '';
+      }
+    }
+
+    // Nombre de representante: el del estudiante actual o algún hermano
+    let rep = (cuenta.cliente?.nombre_representante || '').trim();
+    if (!rep) {
+      const otroConRep = grupo.find((g) => g.cliente?.nombre_representante?.trim());
+      if (otroConRep) {
+        rep = otroConRep.cliente?.nombre_representante?.trim() || '';
+      }
+    }
+
+    if (!rep) {
+      const partes = (cuenta.cliente?.nombre_estudiante || '').trim().split(/\s+/);
+      const apellido = partes.length > 1 ? partes.slice(1).join(' ') : '';
+      rep = apellido ? `Familia ${apellido}` : 'Estimado(a) Representante';
+    }
+
+    setModalWhatsAppFamiliar({
+      abierto: true,
+      cuentaPrincipal: cuenta,
+      cuentasFamiliares: grupo,
+      seleccionadosKeys: grupo.map((g) => g.clienteKey),
+      telefonoDestino: tel,
+      nombreRepresentante: rep,
+      copiado: false,
+    });
+  };
+
+  const handleToggleSeleccionEstudianteModal = (key: string) => {
+    setModalWhatsAppFamiliar((prev) => {
+      const yaEsta = prev.seleccionadosKeys.includes(key);
+      const nuevasKeys = yaEsta
+        ? prev.seleccionadosKeys.filter((k) => k !== key)
+        : [...prev.seleccionadosKeys, key];
+      return { ...prev, seleccionadosKeys: nuevasKeys };
+    });
+  };
+
+  const handleEnviarMensajeModal = (soloPrincipal: boolean = false) => {
+    if (!modalWhatsAppFamiliar.cuentaPrincipal) return;
+
+    let cuentasAEnviar = modalWhatsAppFamiliar.cuentasFamiliares.filter((c) =>
+      modalWhatsAppFamiliar.seleccionadosKeys.includes(c.clienteKey)
+    );
+
+    if (soloPrincipal || cuentasAEnviar.length === 0) {
+      cuentasAEnviar = [modalWhatsAppFamiliar.cuentaPrincipal];
+    }
+
+    const mensaje = generarMensajeWhatsAppFamiliar({
+      nombreRepresentante: modalWhatsAppFamiliar.nombreRepresentante,
+      cuentas: cuentasAEnviar,
+      tasaBcvActual: tasaBcv,
+    });
+
+    let telefonoLimpio = modalWhatsAppFamiliar.telefonoDestino.replace(/\D/g, '');
     if (telefonoLimpio.startsWith('0')) {
       telefonoLimpio = '58' + telefonoLimpio.slice(1);
     } else if (!telefonoLimpio.startsWith('58') && telefonoLimpio.length === 10) {
@@ -907,15 +1168,43 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
       navigator.clipboard.writeText(mensaje);
       setNotificacion({
         tipo: 'info',
-        texto: 'El estudiante no tiene WhatsApp registrado. ¡Mensaje copiado al portapapeles!',
+        texto: 'No se detectó número WhatsApp. ¡Mensaje copiado al portapapeles!',
       });
       setTimeout(() => setNotificacion(null), 4000);
       return;
     }
 
-    // Usamos api.whatsapp.com directamente con encodeURIComponent estricto para evitar bugs de wa.me
     const url = `https://api.whatsapp.com/send?phone=${telefonoLimpio}&text=${encodeURIComponent(mensaje)}`;
     window.open(url, '_blank');
+  };
+
+  const handleCopiarMensajeModal = () => {
+    if (!modalWhatsAppFamiliar.cuentaPrincipal) return;
+
+    let cuentasAEnviar = modalWhatsAppFamiliar.cuentasFamiliares.filter((c) =>
+      modalWhatsAppFamiliar.seleccionadosKeys.includes(c.clienteKey)
+    );
+
+    if (cuentasAEnviar.length === 0) {
+      cuentasAEnviar = [modalWhatsAppFamiliar.cuentaPrincipal];
+    }
+
+    const mensaje = generarMensajeWhatsAppFamiliar({
+      nombreRepresentante: modalWhatsAppFamiliar.nombreRepresentante,
+      cuentas: cuentasAEnviar,
+      tasaBcvActual: tasaBcv,
+    });
+
+    navigator.clipboard.writeText(mensaje);
+    setModalWhatsAppFamiliar((prev) => ({ ...prev, copiado: true }));
+    setTimeout(() => {
+      setModalWhatsAppFamiliar((prev) => ({ ...prev, copiado: false }));
+    }, 3000);
+    setNotificacion({
+      tipo: 'exito',
+      texto: '¡Mensaje copiado al portapapeles!',
+    });
+    setTimeout(() => setNotificacion(null), 3500);
   };
 
   // Crear consumo fiado de prueba si la lista está vacía
@@ -1335,6 +1624,9 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
                   ? saldosClientes[cuenta.cliente.id]?.saldoAFavorTotalUsd || 0
                   : 0;
 
+                const grupoFamiliar = obtenerGrupoFamiliarCuentas(cuenta, cuentasAgrupadas);
+                const esFamiliaConVarios = grupoFamiliar.length > 1;
+
                 let fechaRecienteTxt = cuenta.fechaMasReciente;
                 try {
                   const d = new Date(cuenta.fechaMasReciente);
@@ -1399,6 +1691,13 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
                                 <span>+{formatUSD(saldoAFavorEstudiante)} a favor</span>
                               </span>
                             )}
+                            {/* Badge de Familia vinculada */}
+                            {esFamiliaConVarios && (
+                              <span className="inline-flex items-center gap-1 rounded-full border border-purple-200 bg-purple-50 px-2 py-0.5 text-[11px] font-bold text-purple-800 shadow-2xs">
+                                <Users className="h-3 w-3 text-purple-600" />
+                                <span>Familia ({grupoFamiliar.length} estudiantes con deuda)</span>
+                              </span>
+                            )}
                           </div>
 
                           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
@@ -1440,15 +1739,31 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
 
                         {/* Botones de acción */}
                         <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-                          {/* Botón WhatsApp Consolidado */}
+                          {/* Botón WhatsApp Consolidado Familiar */}
                           <button
                             type="button"
-                            onClick={() => handleEnviarWhatsAppConsolidado(cuenta)}
-                            className="flex items-center gap-1.5 rounded-2xl border border-emerald-200/90 bg-emerald-50 px-3.5 py-2 text-xs font-bold text-emerald-800 shadow-2xs hover:bg-emerald-100 hover:border-emerald-300 transition active:scale-95"
-                            title="Enviar resumen consolidado a WhatsApp"
+                            onClick={() => handleAbrirModalWhatsApp(cuenta)}
+                            className={`flex items-center gap-1.5 rounded-2xl border px-3.5 py-2 text-xs font-bold shadow-2xs transition active:scale-95 ${
+                              esFamiliaConVarios
+                                ? 'border-purple-300 bg-purple-50 text-purple-800 hover:bg-purple-100 hover:border-purple-400'
+                                : 'border-emerald-200/90 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 hover:border-emerald-300'
+                            }`}
+                            title={
+                              esFamiliaConVarios
+                                ? `Reporte Consolidado Familiar (${grupoFamiliar.length} estudiantes)`
+                                : 'Enviar resumen a WhatsApp'
+                            }
                           >
-                            <MessageCircle className="h-4 w-4 text-emerald-600" />
-                            <span>WhatsApp</span>
+                            {esFamiliaConVarios ? (
+                              <Users className="h-4 w-4 text-purple-600" />
+                            ) : (
+                              <MessageCircle className="h-4 w-4 text-emerald-600" />
+                            )}
+                            <span>
+                              {esFamiliaConVarios
+                                ? `WhatsApp Familiar (${grupoFamiliar.length})`
+                                : 'WhatsApp'}
+                            </span>
                           </button>
 
                           {/* Botón Abonar / Anticipo */}
@@ -2477,6 +2792,277 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
                 </button>
               </div>
             </form>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+
+      {/* Modal Reporte Consolidado Familiar para WhatsApp (Radix UI Dialog) */}
+      <Dialog.Root
+        open={modalWhatsAppFamiliar.abierto}
+        onOpenChange={(abierto) =>
+          setModalWhatsAppFamiliar((prev) => ({ ...prev, abierto }))
+        }
+      >
+        <Dialog.Portal>
+          <Dialog.Overlay
+            {...dragScrollWhatsApp.overlayProps}
+            className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs transition-opacity animate-in fade-in"
+          />
+          <Dialog.Content
+            style={dragScrollWhatsApp.style}
+            {...dragScrollWhatsApp.dragProps}
+            className="fixed inset-x-0 bottom-0 z-50 max-h-[92dvh] overflow-y-auto overscroll-contain touch-scroll-ios rounded-t-3xl sm:rounded-3xl border-t sm:border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#0D111A] p-4 sm:p-6 pb-28 sm:pb-6 shadow-2xl outline-none duration-300 animate-in slide-in-from-bottom sm:slide-in-from-bottom-0 sm:fade-in-0 sm:zoom-in-95 sm:inset-auto sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:w-[95vw] sm:max-w-xl cursor-grab active:cursor-grabbing"
+          >
+            {/* Manija táctil */}
+            <div className="mx-auto mb-3 -mt-1 flex h-6 w-full cursor-grab active:cursor-grabbing items-center justify-center sm:hidden touch-none">
+              <div className="h-1.5 w-12 rounded-full bg-gray-300 dark:bg-slate-700" />
+            </div>
+
+            {modalWhatsAppFamiliar.cuentaPrincipal && (() => {
+              const esGrupoFamiliar = modalWhatsAppFamiliar.cuentasFamiliares.length > 1;
+              const cuentasSeleccionadas = modalWhatsAppFamiliar.cuentasFamiliares.filter((c) =>
+                modalWhatsAppFamiliar.seleccionadosKeys.includes(c.clienteKey)
+              );
+              const cuentasParaMensaje =
+                cuentasSeleccionadas.length > 0
+                  ? cuentasSeleccionadas
+                  : [modalWhatsAppFamiliar.cuentaPrincipal];
+
+              const totalUsdFamiliar = cuentasParaMensaje.reduce((acc, c) => acc + c.totalDeudaUsd, 0);
+              const totalBsFamiliar = calcularConversionBs(totalUsdFamiliar, tasaBcv);
+
+              const mensajeVistaPrevia = generarMensajeWhatsAppFamiliar({
+                nombreRepresentante: modalWhatsAppFamiliar.nombreRepresentante,
+                cuentas: cuentasParaMensaje,
+                tasaBcvActual: tasaBcv,
+              });
+
+              return (
+                <div className="space-y-4 text-xs">
+                  {/* Encabezado del Modal */}
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-emerald-600 dark:text-emerald-400 shadow-2xs">
+                      {esGrupoFamiliar ? (
+                        <Users className="h-6 w-6" />
+                      ) : (
+                        <MessageCircle className="h-6 w-6" />
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <Dialog.Title className="text-base font-bold text-gray-900 dark:text-slate-100">
+                        {esGrupoFamiliar
+                          ? 'Reporte Consolidado Familiar (WhatsApp)'
+                          : 'Reporte de Cuenta para WhatsApp'}
+                      </Dialog.Title>
+                      <Dialog.Description className="text-xs text-gray-500 dark:text-slate-400 truncate">
+                        {esGrupoFamiliar
+                          ? `Se unifican ${modalWhatsAppFamiliar.cuentasFamiliares.length} estudiantes vinculados en un solo mensaje profesional.`
+                          : `Resumen de consumos pendientes para ${modalWhatsAppFamiliar.cuentaPrincipal.cliente?.nombre_estudiante || 'el estudiante'}.`}
+                      </Dialog.Description>
+                    </div>
+                  </div>
+
+                  {/* Banner de Familia Detectada con Checkboxes */}
+                  {esGrupoFamiliar && (
+                    <div className="rounded-2xl border border-purple-200 dark:border-purple-900/60 bg-purple-50/60 dark:bg-purple-950/30 p-3 space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-purple-900 dark:text-purple-300 text-[11px] flex items-center gap-1.5">
+                          <Users className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400" />
+                          Estudiantes Vinculados al Representante:
+                        </span>
+                        <span className="font-mono text-[10px] text-purple-700 dark:text-purple-300 font-bold">
+                          {cuentasSeleccionadas.length} de {modalWhatsAppFamiliar.cuentasFamiliares.length} incluidos
+                        </span>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        {modalWhatsAppFamiliar.cuentasFamiliares.map((c) => {
+                          const estaSeleccionado = modalWhatsAppFamiliar.seleccionadosKeys.includes(c.clienteKey);
+                          const esPrincipal = c.clienteKey === modalWhatsAppFamiliar.cuentaPrincipal?.clienteKey;
+
+                          return (
+                            <div
+                              key={c.clienteKey}
+                              onClick={() => handleToggleSeleccionEstudianteModal(c.clienteKey)}
+                              className={`flex items-center justify-between p-2 rounded-xl border cursor-pointer transition select-none ${
+                                estaSeleccionado
+                                  ? 'border-purple-300 bg-white dark:bg-[#111726] shadow-2xs'
+                                  : 'border-purple-100 dark:border-purple-900/40 bg-purple-50/40 dark:bg-purple-950/10 opacity-60'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <div
+                                  className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-md border text-white transition ${
+                                    estaSeleccionado
+                                      ? 'border-purple-600 bg-purple-600'
+                                      : 'border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800'
+                                  }`}
+                                >
+                                  {estaSeleccionado && <Check className="h-3 w-3 stroke-[3]" />}
+                                </div>
+                                <div className="truncate">
+                                  <span className="font-bold text-gray-900 dark:text-slate-100 text-xs">
+                                    {c.cliente?.nombre_estudiante}
+                                  </span>
+                                  {c.cliente?.grado_seccion && (
+                                    <span className="text-[10px] text-gray-500 ml-1.5 font-medium">
+                                      ({c.cliente.grado_seccion})
+                                    </span>
+                                  )}
+                                  {esPrincipal && (
+                                    <span className="ml-1.5 rounded-full bg-indigo-50 border border-indigo-200 px-1.5 py-0.2 text-[9px] font-bold text-indigo-700">
+                                      Seleccionado
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="text-right shrink-0">
+                                <span className="font-mono font-bold text-gray-900 dark:text-slate-100 text-xs block">
+                                  {formatUSD(c.totalDeudaUsd)}
+                                </span>
+                                <span className="font-mono text-[10px] text-amber-700 dark:text-amber-400 block">
+                                  {formatBs(c.totalDeudaBs)}
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Campos de Representante y Teléfono destino */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-slate-400 block mb-1">
+                        Nombre Representante / Familia:
+                      </label>
+                      <input
+                        type="text"
+                        value={modalWhatsAppFamiliar.nombreRepresentante}
+                        onChange={(e) =>
+                          setModalWhatsAppFamiliar((prev) => ({
+                            ...prev,
+                            nombreRepresentante: e.target.value,
+                          }))
+                        }
+                        placeholder="Ej: Juan Pérez"
+                        className="w-full rounded-xl border border-gray-200 dark:border-slate-800 bg-gray-50/60 dark:bg-[#111726] px-3 py-2 text-xs font-medium text-gray-900 dark:text-slate-100 outline-none focus:border-emerald-500 focus:bg-white dark:focus:bg-[#0D111A]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-slate-400 block mb-1">
+                        Teléfono WhatsApp de Envío:
+                      </label>
+                      <div className="relative">
+                        <Phone className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-emerald-600" />
+                        <input
+                          type="text"
+                          value={modalWhatsAppFamiliar.telefonoDestino}
+                          onChange={(e) =>
+                            setModalWhatsAppFamiliar((prev) => ({
+                              ...prev,
+                              telefonoDestino: e.target.value,
+                            }))
+                          }
+                          placeholder="Ej: 04125404830 o +58..."
+                          className="w-full rounded-xl border border-gray-200 dark:border-slate-800 bg-gray-50/60 dark:bg-[#111726] pl-8 pr-3 py-2 text-xs font-mono font-medium text-gray-900 dark:text-slate-100 outline-none focus:border-emerald-500 focus:bg-white dark:focus:bg-[#0D111A]"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Resumen Total y Totales Familiares */}
+                  <div className="flex items-center justify-between rounded-2xl border border-emerald-200/80 dark:border-emerald-900/60 bg-emerald-50/50 dark:bg-emerald-950/20 p-3">
+                    <div>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-400 block">
+                        {esGrupoFamiliar ? 'Gran Total Familiar a Pagar:' : 'Total de la Cuenta a Pagar:'}
+                      </span>
+                      <span className="text-[11px] text-gray-500 dark:text-slate-400">
+                        {cuentasParaMensaje.length} {cuentasParaMensaje.length === 1 ? 'estudiante' : 'estudiantes'} &bull; Tasa BCV: {formatBs(tasaBcv)}
+                      </span>
+                    </div>
+                    <div className="text-right">
+                      <span className="font-mono font-black text-lg text-gray-900 dark:text-slate-100 block">
+                        {formatUSD(totalUsdFamiliar)}
+                      </span>
+                      <span className="font-mono font-bold text-xs text-amber-700 dark:text-amber-400 block">
+                        {formatBs(totalBsFamiliar)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Vista Previa del Mensaje formateado */}
+                  <div>
+                    <div className="flex items-center justify-between text-gray-500 dark:text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1 px-1">
+                      <span>Vista previa del mensaje a enviar:</span>
+                      <span className="text-emerald-700 dark:text-emerald-400">Formato limpio Club 5</span>
+                    </div>
+                    <div className="rounded-2xl border border-gray-200/90 dark:border-slate-800 bg-[#EFEAE2]/60 dark:bg-[#0B141A] p-3 text-[11px] font-sans text-gray-800 dark:text-slate-200 max-h-48 overflow-y-auto whitespace-pre-wrap leading-relaxed shadow-inner">
+                      {mensajeVistaPrevia}
+                    </div>
+                  </div>
+
+                  {/* Acciones */}
+                  <div className="flex items-center justify-between gap-2 pt-2 border-t border-gray-100 dark:border-slate-800 flex-wrap">
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setModalWhatsAppFamiliar((prev) => ({ ...prev, abierto: false }))}
+                        className="rounded-2xl border border-gray-200 dark:border-slate-800 bg-white dark:bg-[#111726] px-3.5 py-2 text-xs font-semibold text-gray-700 dark:text-slate-300 hover:bg-gray-50 transition"
+                      >
+                        Cerrar
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleCopiarMensajeModal}
+                        className="flex items-center gap-1 rounded-2xl border border-gray-200 dark:border-slate-800 bg-white dark:bg-[#111726] px-3.5 py-2 text-xs font-bold text-gray-700 dark:text-slate-300 hover:bg-gray-50 transition active:scale-95 shadow-2xs"
+                      >
+                        {modalWhatsAppFamiliar.copiado ? (
+                          <>
+                            <Check className="h-3.5 w-3.5 text-emerald-600" />
+                            <span className="text-emerald-600">¡Copiado!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="h-3.5 w-3.5 text-gray-500" />
+                            <span>Copiar</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {esGrupoFamiliar && (
+                        <button
+                          type="button"
+                          onClick={() => handleEnviarMensajeModal(true)}
+                          className="rounded-2xl border border-gray-200 dark:border-slate-800 bg-white dark:bg-[#111726] px-3 py-2 text-xs font-medium text-gray-600 dark:text-slate-300 hover:bg-gray-50 transition"
+                          title="Enviar solo el reporte individual del estudiante seleccionado"
+                        >
+                          Solo {modalWhatsAppFamiliar.cuentaPrincipal?.cliente?.nombre_estudiante?.split(' ')[0]}
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => handleEnviarMensajeModal(false)}
+                        className="flex items-center gap-1.5 rounded-2xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white shadow-xs hover:bg-emerald-700 transition active:scale-95"
+                      >
+                        <MessageCircle className="h-4 w-4" />
+                        <span>
+                          {esGrupoFamiliar
+                            ? `Enviar Familiar (${formatUSD(totalUsdFamiliar)})`
+                            : `Enviar WhatsApp (${formatUSD(totalUsdFamiliar)})`}
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>

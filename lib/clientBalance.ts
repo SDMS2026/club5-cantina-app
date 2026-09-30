@@ -559,3 +559,225 @@ export async function anularConsumo({
     consumoId,
   };
 }
+
+export interface ItemEdicionConsumo {
+  producto_id: string;
+  nombre?: string;
+  cantidad: number;
+  precio_unitario_usd: number;
+}
+
+export interface ResultadoEdicionConsumo {
+  exito: boolean;
+  mensaje: string;
+  montoAnteriorUsd: number;
+  nuevoTotalUsd: number;
+  diferenciaUsd: number;
+  nuevoSaldoCliente?: number;
+}
+
+/**
+ * Modifica los ítems, cantidades y monto total de un consumo/ticket previamente registrado.
+ * - Sincroniza las filas en consumo_detalles.
+ * - Actualiza consumos.monto_total_usd.
+ * - Ajusta existencias en productos (si la columna stock existe).
+ * - Ajusta clientes.saldo si el consumo fue fiado ('pendiente') o pagado con saldo_favor.
+ */
+export async function editarConsumoPedido({
+  consumoId,
+  nuevosItems,
+  motivo,
+}: {
+  consumoId: string;
+  nuevosItems: ItemEdicionConsumo[];
+  motivo?: string;
+}): Promise<ResultadoEdicionConsumo> {
+  if (!consumoId) throw new Error('ID de consumo requerido para editar el pedido.');
+  if (!nuevosItems || nuevosItems.length === 0) {
+    throw new Error('El pedido debe contener al menos un producto.');
+  }
+
+  for (const item of nuevosItems) {
+    if (!item.producto_id || item.cantidad <= 0 || item.precio_unitario_usd < 0) {
+      throw new Error('Todos los productos deben tener cantidad mayor a 0 y precio válido.');
+    }
+  }
+
+  // 1. Obtener la transacción original
+  const { data: consumo, error: errConsumo } = await supabase
+    .from('consumos')
+    .select(`
+      id,
+      cliente_id,
+      monto_total_usd,
+      tasa_bcv_historica,
+      metodo_pago,
+      pagado
+    `)
+    .eq('id', consumoId)
+    .single();
+
+  if (errConsumo || !consumo) {
+    throw new Error(errConsumo?.message || 'No se encontró la transacción de venta especificada.');
+  }
+
+  // 2. Verificar que no esté anulada
+  if (consumo.metodo_pago?.toLowerCase().startsWith('anulado')) {
+    throw new Error('No es posible editar una transacción que ya se encuentra anulada.');
+  }
+
+  const metodoOriginal = consumo.metodo_pago || '';
+  const montoAnteriorUsd = Number(consumo.monto_total_usd || 0);
+
+  // 3. Obtener los detalles originales para cálculo de diferencias de stock
+  const { data: detallesOriginales, error: errDetalles } = await supabase
+    .from('consumo_detalles')
+    .select('id, producto_id, cantidad, precio_unitario_usd')
+    .eq('consumo_id', consumoId);
+
+  if (errDetalles) {
+    console.error('Error obteniendo items originales del consumo:', errDetalles);
+  }
+
+  // Mapear cantidades originales vs nuevas por producto
+  const cantOriginales = new Map<string, number>();
+  (detallesOriginales || []).forEach((d) => {
+    if (d.producto_id) {
+      cantOriginales.set(d.producto_id, (cantOriginales.get(d.producto_id) || 0) + Number(d.cantidad || 0));
+    }
+  });
+
+  const cantNuevas = new Map<string, number>();
+  nuevosItems.forEach((d) => {
+    if (d.producto_id) {
+      cantNuevas.set(d.producto_id, (cantNuevas.get(d.producto_id) || 0) + Number(d.cantidad || 0));
+    }
+  });
+
+  // Ajuste de existencias: si delta > 0 descontar stock; si delta < 0 devolver stock
+  const todosLosProdIds = Array.from(new Set([...cantOriginales.keys(), ...cantNuevas.keys()]));
+  for (const prodId of todosLosProdIds) {
+    const orig = cantOriginales.get(prodId) || 0;
+    const nueva = cantNuevas.get(prodId) || 0;
+    const delta = nueva - orig;
+
+    if (delta !== 0) {
+      try {
+        const { data: prodData } = await supabase
+          .from('productos')
+          .select('id, stock')
+          .eq('id', prodId)
+          .single();
+
+        if (prodData && prodData.stock !== undefined && prodData.stock !== null) {
+          const nuevoStock = Math.max(0, Number(prodData.stock) - delta);
+          await supabase.from('productos').update({ stock: nuevoStock }).eq('id', prodId);
+        }
+      } catch (errStock) {
+        // Omisión segura si la columna stock no existe en la base de datos
+        console.warn('Ajuste de stock omitido:', errStock);
+      }
+    }
+  }
+
+  // 4. Calcular nuevo monto total
+  const nuevoTotalUsd = Math.round(
+    nuevosItems.reduce((acc, it) => acc + (it.cantidad * it.precio_unitario_usd), 0) * 100
+  ) / 100;
+  const diferenciaUsd = Math.round((nuevoTotalUsd - montoAnteriorUsd) * 100) / 100;
+
+  // 5. Ajustar saldo del cliente en clientes.saldo
+  let nuevoSaldoCliente: number | undefined = undefined;
+
+  if (
+    consumo.cliente_id &&
+    (metodoOriginal === 'pendiente' ||
+      metodoOriginal === 'saldo_favor' ||
+      metodoOriginal.startsWith('mixto:'))
+  ) {
+    const { data: clienteActual, error: errCliente } = await supabase
+      .from('clientes')
+      .select('saldo')
+      .eq('id', consumo.cliente_id)
+      .single();
+
+    if (!errCliente && clienteActual) {
+      const saldoPrevio = Number(clienteActual.saldo || 0);
+      nuevoSaldoCliente = Math.round((saldoPrevio - diferenciaUsd) * 100) / 100;
+
+      const { error: errUpdateCliente } = await supabase
+        .from('clientes')
+        .update({ saldo: nuevoSaldoCliente })
+        .eq('id', consumo.cliente_id);
+
+      if (errUpdateCliente) {
+        console.error('Error actualizando saldo de cliente al editar consumo:', errUpdateCliente);
+        throw new Error('Error al actualizar el saldo de la cuenta corriente del cliente.');
+      }
+    }
+  }
+
+  // 6. Actualizar las filas de consumo_detalles
+  const { error: errDeleteDetalles } = await supabase
+    .from('consumo_detalles')
+    .delete()
+    .eq('consumo_id', consumoId);
+
+  if (errDeleteDetalles) {
+    console.error('Error eliminando detalles anteriores de consumo:', errDeleteDetalles);
+    throw new Error('Error al actualizar los ítems del ticket.');
+  }
+
+  const filasNuevas = nuevosItems.map((it) => ({
+    consumo_id: consumoId,
+    producto_id: it.producto_id,
+    cantidad: it.cantidad,
+    precio_unitario_usd: it.precio_unitario_usd,
+  }));
+
+  const { error: errInsertDetalles } = await supabase
+    .from('consumo_detalles')
+    .insert(filasNuevas);
+
+  if (errInsertDetalles) {
+    console.error('Error insertando nuevos detalles de consumo:', errInsertDetalles);
+    throw new Error('Error al guardar los nuevos productos en el ticket.');
+  }
+
+  // 7. Actualizar cabecera en la tabla consumos
+  const { error: errUpdateConsumo } = await supabase
+    .from('consumos')
+    .update({
+      monto_total_usd: nuevoTotalUsd,
+    })
+    .eq('id', consumoId);
+
+  if (errUpdateConsumo) {
+    console.error('Error actualizando monto total del consumo:', errUpdateConsumo);
+    throw new Error('No se pudo actualizar el monto del consumo.');
+  }
+
+  // 8. Notificar actualización en tiempo real
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('club5:actualizar-notificaciones'));
+  }
+
+  let mensaje = `Pedido #${consumoId.slice(0, 8)} modificado exitosamente.`;
+  if (diferenciaUsd > 0) {
+    mensaje += ` Monto aumentó en +$${diferenciaUsd.toFixed(2)}.`;
+  } else if (diferenciaUsd < 0) {
+    mensaje += ` Monto disminuyó en -$${Math.abs(diferenciaUsd).toFixed(2)}.`;
+  } else {
+    mensaje += ` Monto total se mantuvo en $${nuevoTotalUsd.toFixed(2)}.`;
+  }
+
+  return {
+    exito: true,
+    mensaje,
+    montoAnteriorUsd,
+    nuevoTotalUsd,
+    diferenciaUsd,
+    nuevoSaldoCliente,
+  };
+}
+
