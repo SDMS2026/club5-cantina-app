@@ -243,7 +243,7 @@ export function Sidebar() {
             </motion.div>
 
             {/* Menú de Navegación */}
-            <div className="flex flex-col gap-1.5">
+            <div className="flex flex-col gap-2">
               {/* Etiqueta de Sección con animación */}
               <motion.span
                 custom={1}
@@ -254,7 +254,7 @@ export function Sidebar() {
               </motion.span>
 
               {/* Enlaces de Navegación Progresivos con efecto cascada */}
-              <nav className="flex flex-col gap-1.5 mt-1">
+              <nav className="flex flex-col gap-2 mt-1.5">
                 {NAV_ITEMS.map((item, index) => {
                   const activo = pathname === item.href;
                   const Icono = item.icono;
@@ -313,7 +313,7 @@ export function Sidebar() {
                       <Link
                         href={item.href}
                         onClick={handleCerrarMovil}
-                        className={`group relative flex items-center justify-between rounded-2xl px-3.5 py-2.5 text-sm font-medium transition-all ${
+                        className={`group relative flex items-center justify-between rounded-2xl px-3.5 py-3 text-sm font-medium transition-all ${
                           activo
                             ? 'text-indigo-950 dark:text-indigo-200 font-bold'
                             : 'text-gray-600 dark:text-slate-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100/60 dark:hover:bg-slate-800/60'

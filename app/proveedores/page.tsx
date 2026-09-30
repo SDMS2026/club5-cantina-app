@@ -210,12 +210,12 @@ export function renderBadgeEstado(
   if (estado === 'vencido' || estado === 'vencida') {
     return (
       <span
-        className={`inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-2.5 py-0.5 text-[11px] font-bold text-rose-800 dark:border-rose-900/80 dark:bg-rose-950/70 dark:text-rose-200 animate-pulse shrink-0 ${
+        className={`inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-2.5 py-0.5 text-[11px] font-bold text-rose-800 dark:border-rose-900/80 dark:bg-rose-950/70 dark:text-rose-200 animate-pulse shrink-0 whitespace-nowrap ${
           extraClass || ''
         }`}
       >
         <AlertCircle className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400 shrink-0" />
-        <span>{texto}</span>
+        <span className="whitespace-nowrap">{texto}</span>
       </span>
     );
   }
@@ -223,12 +223,12 @@ export function renderBadgeEstado(
   if (estado === 'proximo' || estado === 'proxima' || estado === 'hoy') {
     return (
       <span
-        className={`inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-[11px] font-bold text-amber-900 dark:border-amber-900/80 dark:bg-amber-950/70 dark:text-amber-200 shrink-0 ${
+        className={`inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-[11px] font-bold text-amber-900 dark:border-amber-900/80 dark:bg-amber-950/70 dark:text-amber-200 shrink-0 whitespace-nowrap ${
           extraClass || ''
         }`}
       >
         <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
-        <span>{texto}</span>
+        <span className="whitespace-nowrap">{texto}</span>
       </span>
     );
   }
@@ -236,12 +236,12 @@ export function renderBadgeEstado(
   if (estado === 'al_dia') {
     return (
       <span
-        className={`inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/60 dark:text-emerald-300 shrink-0 ${
+        className={`inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/60 dark:text-emerald-300 shrink-0 whitespace-nowrap ${
           extraClass || ''
         }`}
       >
         <Clock className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-        <span>{texto}</span>
+        <span className="whitespace-nowrap">{texto}</span>
       </span>
     );
   }
@@ -249,12 +249,12 @@ export function renderBadgeEstado(
   // solvente / pagado
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/60 dark:text-emerald-300 shrink-0 ${
+      className={`inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/60 dark:text-emerald-300 shrink-0 whitespace-nowrap ${
         extraClass || ''
       }`}
     >
       <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-      <span>{texto}</span>
+      <span className="whitespace-nowrap">{texto}</span>
     </span>
   );
 }
@@ -1517,8 +1517,8 @@ export default function ProveedoresPage() {
     <div className="min-h-screen flex flex-col bg-[#FAFAFA] dark:bg-[#090D16] text-slate-900 dark:text-slate-100 transition-colors" suppressHydrationWarning>
       {/* Header Sticky con diseño unificado */}
       <header className="sticky top-0 z-40 w-full border-b border-gray-200/80 dark:border-slate-800 bg-white/90 dark:bg-[#0D111A]/90 backdrop-blur-md">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-3 py-2 sm:px-6 lg:px-8">
-          <div className="flex items-center gap-1.5 sm:gap-3 min-w-0">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-3.5 py-2.5 sm:px-6 lg:px-8">
+          <div className="flex items-center gap-2.5 sm:gap-3.5 min-w-0">
             <button
               type="button"
               onClick={toggleSidebar}
@@ -1535,12 +1535,13 @@ export default function ProveedoresPage() {
               <Truck className="h-5 w-5" />
             </div>
             <div className="min-w-0">
-              <div className="flex items-center gap-1.5 sm:gap-2">
+              <div className="flex items-center gap-2">
                 <h1 className="text-sm sm:text-lg font-bold tracking-tight text-gray-900 dark:text-white truncate">
-                  Proveedores y Cuentas por Pagar
+                  <span className="sm:hidden">Proveedores</span>
+                  <span className="hidden sm:inline">Proveedores y Cuentas por Pagar</span>
                 </h1>
-                <span className="rounded-full border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/60 px-1.5 py-0.2 text-[10px] sm:text-[11px] font-semibold text-indigo-700 dark:text-indigo-300 shrink-0">
-                  {proveedoresConsolidados.length} proveedores
+                <span className="rounded-full border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/60 px-2 py-0.5 text-[10px] sm:text-[11px] font-semibold text-indigo-700 dark:text-indigo-300 shrink-0">
+                  {proveedoresConsolidados.length} <span className="hidden sm:inline">proveedores</span>
                 </span>
               </div>
               <p className="text-[11px] sm:text-xs text-gray-500 dark:text-slate-400 hidden sm:block">
@@ -1549,7 +1550,7 @@ export default function ProveedoresPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
             <NotificationBell />
 
             {/* Botón Crear Proveedor */}
@@ -1557,7 +1558,7 @@ export default function ProveedoresPage() {
               type="button"
               onClick={handleAbrirCrearProveedor}
               title="Registrar Nuevo Proveedor"
-              className="flex items-center justify-center gap-1.5 rounded-xl sm:rounded-2xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/70 dark:bg-indigo-950/50 px-2.5 sm:px-3 py-2 text-xs font-bold text-indigo-700 dark:text-indigo-300 shadow-2xs hover:bg-indigo-100 transition active:scale-95 shrink-0"
+              className="flex h-9 w-9 sm:h-auto sm:w-auto items-center justify-center gap-1.5 rounded-xl sm:rounded-2xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/70 dark:bg-indigo-950/50 sm:px-3 sm:py-2 text-xs font-bold text-indigo-700 dark:text-indigo-300 shadow-2xs hover:bg-indigo-100 transition active:scale-95 shrink-0"
             >
               <Building2 className="h-4 w-4" />
               <span className="hidden md:inline">Proveedor</span>
@@ -1942,7 +1943,7 @@ export default function ProveedoresPage() {
                         }`}
                       >
                         {/* Bloque Izquierdo: Icono, Nombre, Tags y Teléfono */}
-                        <div className="flex items-start sm:items-center gap-3 min-w-0">
+                        <div className="flex items-center gap-3 min-w-0 flex-1">
                           <div
                             className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border text-sm font-black shadow-2xs ${
                               p.estadoGeneral === 'vencido'
@@ -1957,19 +1958,20 @@ export default function ProveedoresPage() {
                             <Building2 className="h-5 w-5" />
                           </div>
 
-                          <div className="min-w-0">
-                            <div className="flex flex-row items-center gap-2 flex-wrap">
-                              <h3 className="text-base font-bold text-gray-900 dark:text-white leading-tight">
+                          <div className="min-w-0 flex-1">
+                            {/* Fila 1: [ Nombre Proveedor ] ------ [ Badge Estado ] (sin saltos de línea) */}
+                            <div className="flex flex-row items-center gap-2 min-w-0">
+                              <h3 className="text-base font-bold text-gray-900 dark:text-white leading-tight truncate min-w-0">
                                 {p.nombre}
                               </h3>
 
                               {/* Contador exacto de días de vencimiento */}
-                              {renderBadgeEstado(p.estadoGeneral, p.textoVencimientoConsolidado)}
+                              {renderBadgeEstado(p.estadoGeneral, p.textoVencimientoConsolidado, 'whitespace-nowrap shrink-0')}
                             </div>
 
                             <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
                               {p.categoria && (
-                                <span className="inline-flex items-center gap-1 rounded-lg bg-gray-100 dark:bg-slate-800 px-2 py-0.5 text-[10px] font-medium text-gray-600 dark:text-slate-300">
+                                <span className="inline-flex items-center gap-1 rounded-lg bg-gray-100 dark:bg-slate-800 px-2 py-0.5 text-[10px] font-medium text-gray-600 dark:text-slate-300 shrink-0">
                                   <Tag className="h-2.5 w-2.5" />
                                   <span>{p.categoria}</span>
                                 </span>
@@ -2209,8 +2211,8 @@ export default function ProveedoresPage() {
                                     >
                                       {/* Detalle y Concepto */}
                                       <div className="min-w-0 flex-1">
-                                        <div className="flex flex-row items-center gap-2 flex-wrap">
-                                          {renderBadgeEstado(infoV.estado, infoV.etiqueta)}
+                                        <div className="flex flex-row items-center gap-2 min-w-0">
+                                          {renderBadgeEstado(infoV.estado, infoV.etiqueta, 'whitespace-nowrap shrink-0')}
                                           <span className="text-[11px] text-gray-400 dark:text-slate-500">
                                             Recibido: {formatearFechaLegible(c.fecha_recepcion)} • Límite: {formatearFechaLegible(c.fecha_vencimiento_pago)}
                                           </span>
@@ -2363,12 +2365,12 @@ export default function ProveedoresPage() {
                                 <Truck className="h-5 w-5" />
                               </div>
 
-                              <div className="min-w-0">
-                                <div className="flex flex-row items-center gap-2 flex-wrap">
-                                  <h3 className="text-sm font-bold text-gray-900 dark:text-white group-hover:text-indigo-600 transition leading-snug">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-row items-center gap-2 min-w-0">
+                                  <h3 className="text-sm font-bold text-gray-900 dark:text-white group-hover:text-indigo-600 transition leading-snug truncate min-w-0">
                                     {cuenta.nombre_proveedor}
                                   </h3>
-                                  {renderBadgeEstado(infoV.estado, infoV.etiqueta)}
+                                  {renderBadgeEstado(infoV.estado, infoV.etiqueta, 'whitespace-nowrap shrink-0')}
                                 </div>
                               </div>
                             </div>
