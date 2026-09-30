@@ -120,7 +120,7 @@ const CATEGORIAS_PROVEEDORES = [
   'Varios',
 ];
 
-// Helper: Cálculo de tiempo exacto y días restantes de vencimiento por factura
+// Helper: Cálculo de tiempo exacto y días restantes de vencimiento por factura (sin emojis)
 export interface InfoVencimiento {
   estado: 'pagado' | 'vencida' | 'hoy' | 'proxima' | 'al_dia';
   diffDays: number;
@@ -136,7 +136,7 @@ export function calcularDetalleVencimiento(fechaVencimientoStr: string, pagado: 
       estado: 'pagado',
       diffDays: 0,
       diasAbsolutos: 0,
-      etiqueta: '🟢 Liquidada',
+      etiqueta: 'Liquidada',
       badgeClass: 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/60 dark:text-emerald-300',
       colorTema: 'emerald',
     };
@@ -158,7 +158,7 @@ export function calcularDetalleVencimiento(fechaVencimientoStr: string, pagado: 
       estado: 'vencida',
       diffDays,
       diasAbsolutos,
-      etiqueta: `🔴 Vencida hace ${diasAbsolutos} ${diasAbsolutos === 1 ? 'día' : 'días'}`,
+      etiqueta: `Vencida hace ${diasAbsolutos} ${diasAbsolutos === 1 ? 'día' : 'días'}`,
       badgeClass: 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900/80 dark:bg-rose-950/70 dark:text-rose-200 animate-pulse',
       colorTema: 'rose',
     };
@@ -167,16 +167,16 @@ export function calcularDetalleVencimiento(fechaVencimientoStr: string, pagado: 
       estado: 'hoy',
       diffDays: 0,
       diasAbsolutos: 0,
-      etiqueta: '🟡 Vence hoy',
+      etiqueta: 'Vence hoy',
       badgeClass: 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/80 dark:bg-amber-950/70 dark:text-amber-200 font-black',
       colorTema: 'amber',
     };
   } else if (diffDays === 1) {
     return {
       estado: 'proxima',
-      diffDays: 1,
+      diffDays,
       diasAbsolutos: 1,
-      etiqueta: '🟡 Vence en 1 día',
+      etiqueta: 'Vence en 1 día',
       badgeClass: 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/80 dark:bg-amber-950/70 dark:text-amber-200',
       colorTema: 'amber',
     };
@@ -185,7 +185,7 @@ export function calcularDetalleVencimiento(fechaVencimientoStr: string, pagado: 
       estado: 'proxima',
       diffDays,
       diasAbsolutos,
-      etiqueta: `🟡 Vence en ${diffDays} días`,
+      etiqueta: `Vence en ${diffDays} días`,
       badgeClass: 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/80 dark:bg-amber-950/70 dark:text-amber-200',
       colorTema: 'amber',
     };
@@ -194,11 +194,69 @@ export function calcularDetalleVencimiento(fechaVencimientoStr: string, pagado: 
       estado: 'al_dia',
       diffDays,
       diasAbsolutos,
-      etiqueta: `🟢 Vence en ${diffDays} días`,
+      etiqueta: `Vence en ${diffDays} días`,
       badgeClass: 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/60 dark:text-emerald-300',
       colorTema: 'emerald',
     };
   }
+}
+
+// Renderizador unificado de Badge de Estado con Iconos Lucide React (sin emojis)
+export function renderBadgeEstado(
+  estado: 'vencido' | 'proximo' | 'al_dia' | 'solvente' | 'pagado' | 'vencida' | 'hoy' | 'proxima',
+  texto: string,
+  extraClass?: string
+) {
+  if (estado === 'vencido' || estado === 'vencida') {
+    return (
+      <span
+        className={`inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-2.5 py-0.5 text-[11px] font-bold text-rose-800 dark:border-rose-900/80 dark:bg-rose-950/70 dark:text-rose-200 animate-pulse shrink-0 ${
+          extraClass || ''
+        }`}
+      >
+        <AlertCircle className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400 shrink-0" />
+        <span>{texto}</span>
+      </span>
+    );
+  }
+
+  if (estado === 'proximo' || estado === 'proxima' || estado === 'hoy') {
+    return (
+      <span
+        className={`inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-[11px] font-bold text-amber-900 dark:border-amber-900/80 dark:bg-amber-950/70 dark:text-amber-200 shrink-0 ${
+          extraClass || ''
+        }`}
+      >
+        <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+        <span>{texto}</span>
+      </span>
+    );
+  }
+
+  if (estado === 'al_dia') {
+    return (
+      <span
+        className={`inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/60 dark:text-emerald-300 shrink-0 ${
+          extraClass || ''
+        }`}
+      >
+        <Clock className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+        <span>{texto}</span>
+      </span>
+    );
+  }
+
+  // solvente / pagado
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/60 dark:text-emerald-300 shrink-0 ${
+        extraClass || ''
+      }`}
+    >
+      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+      <span>{texto}</span>
+    </span>
+  );
 }
 
 // Estructura consolidada por proveedor
@@ -222,8 +280,7 @@ interface ProveedorConsolidado {
   facturasProximas: number;
   maxDiasVencida: number;
   minDiasRestantes: number | null;
-  etiquetaVencimientoConsolidada: string;
-  badgeClassConsolidada: string;
+  textoVencimientoConsolidado: string;
   estadoGeneral: 'vencido' | 'proximo' | 'al_dia' | 'solvente';
   cuentas: ProveedorCuenta[];
 }
@@ -616,8 +673,7 @@ export default function ProveedoresPage() {
         facturasProximas: 0,
         maxDiasVencida: 0,
         minDiasRestantes: null,
-        etiquetaVencimientoConsolidada: '🟢 Solvente',
-        badgeClassConsolidada: 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/60 dark:text-emerald-300',
+        textoVencimientoConsolidado: 'Solvente',
         estadoGeneral: 'solvente',
         cuentas: [],
       });
@@ -648,8 +704,7 @@ export default function ProveedoresPage() {
           facturasProximas: 0,
           maxDiasVencida: 0,
           minDiasRestantes: null,
-          etiquetaVencimientoConsolidada: '🟢 Solvente',
-          badgeClassConsolidada: 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/60 dark:text-emerald-300',
+          textoVencimientoConsolidado: 'Solvente',
           estadoGeneral: 'solvente',
           cuentas: [],
         });
@@ -692,40 +747,28 @@ export default function ProveedoresPage() {
         return a.fecha_vencimiento_pago.localeCompare(b.fecha_vencimiento_pago);
       });
 
-      // Cálculo del Contador de Días de Vencimiento Consolidado
+      // Cálculo del Contador de Días de Vencimiento Consolidado (sin emojis)
       if (p.totalPendienteUsd === 0) {
         p.estadoGeneral = 'solvente';
-        p.etiquetaVencimientoConsolidada = '🟢 Solvente';
-        p.badgeClassConsolidada =
-          'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-200';
+        p.textoVencimientoConsolidado = 'Solvente';
       } else if (p.facturasVencidas > 0) {
         p.estadoGeneral = 'vencido';
         const d = p.maxDiasVencida;
-        p.etiquetaVencimientoConsolidada = `🔴 Vencida hace ${d} ${d === 1 ? 'día' : 'días'}`;
-        p.badgeClassConsolidada =
-          'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900 dark:bg-rose-950/60 dark:text-rose-200 animate-pulse';
+        p.textoVencimientoConsolidado = `Vencida hace ${d} ${d === 1 ? 'día' : 'días'}`;
       } else if (p.minDiasRestantes !== null) {
         const d = p.minDiasRestantes;
         if (d === 0) {
           p.estadoGeneral = 'proximo';
-          p.etiquetaVencimientoConsolidada = '🟡 Vence hoy';
-          p.badgeClassConsolidada =
-            'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950/60 dark:text-amber-200 font-black';
+          p.textoVencimientoConsolidado = 'Vence hoy';
         } else if (d === 1) {
           p.estadoGeneral = 'proximo';
-          p.etiquetaVencimientoConsolidada = '🟡 Vence en 1 día';
-          p.badgeClassConsolidada =
-            'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950/60 dark:text-amber-200';
+          p.textoVencimientoConsolidado = 'Vence en 1 día';
         } else if (d <= 3) {
           p.estadoGeneral = 'proximo';
-          p.etiquetaVencimientoConsolidada = `🟡 Vence en ${d} días`;
-          p.badgeClassConsolidada =
-            'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950/60 dark:text-amber-200';
+          p.textoVencimientoConsolidado = `Vence en ${d} días`;
         } else {
           p.estadoGeneral = 'al_dia';
-          p.etiquetaVencimientoConsolidada = `🟢 Vence en ${d} días`;
-          p.badgeClassConsolidada =
-            'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-300';
+          p.textoVencimientoConsolidado = `Vence en ${d} días`;
         }
       }
 
@@ -1915,17 +1958,13 @@ export default function ProveedoresPage() {
                           </div>
 
                           <div className="min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <h3 className="text-base font-bold text-gray-900 dark:text-white leading-tight truncate">
+                            <div className="flex flex-row items-center gap-2 flex-wrap">
+                              <h3 className="text-base font-bold text-gray-900 dark:text-white leading-tight">
                                 {p.nombre}
                               </h3>
 
                               {/* Contador exacto de días de vencimiento */}
-                              <span
-                                className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-bold ${p.badgeClassConsolidada}`}
-                              >
-                                {p.etiquetaVencimientoConsolidada}
-                              </span>
+                              {renderBadgeEstado(p.estadoGeneral, p.textoVencimientoConsolidado)}
                             </div>
 
                             <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
@@ -2170,12 +2209,8 @@ export default function ProveedoresPage() {
                                     >
                                       {/* Detalle y Concepto */}
                                       <div className="min-w-0 flex-1">
-                                        <div className="flex items-center gap-2 flex-wrap">
-                                          <span
-                                            className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${infoV.badgeClass}`}
-                                          >
-                                            {infoV.etiqueta}
-                                          </span>
+                                        <div className="flex flex-row items-center gap-2 flex-wrap">
+                                          {renderBadgeEstado(infoV.estado, infoV.etiqueta)}
                                           <span className="text-[11px] text-gray-400 dark:text-slate-500">
                                             Recibido: {formatearFechaLegible(c.fecha_recepcion)} • Límite: {formatearFechaLegible(c.fecha_vencimiento_pago)}
                                           </span>
@@ -2329,15 +2364,12 @@ export default function ProveedoresPage() {
                               </div>
 
                               <div className="min-w-0">
-                                <h3 className="text-sm font-bold text-gray-900 dark:text-white group-hover:text-indigo-600 transition leading-snug truncate">
-                                  {cuenta.nombre_proveedor}
-                                </h3>
-
-                                <span
-                                  className={`mt-1 inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${infoV.badgeClass}`}
-                                >
-                                  <span>{infoV.etiqueta}</span>
-                                </span>
+                                <div className="flex flex-row items-center gap-2 flex-wrap">
+                                  <h3 className="text-sm font-bold text-gray-900 dark:text-white group-hover:text-indigo-600 transition leading-snug">
+                                    {cuenta.nombre_proveedor}
+                                  </h3>
+                                  {renderBadgeEstado(infoV.estado, infoV.etiqueta)}
+                                </div>
                               </div>
                             </div>
 
