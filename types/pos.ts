@@ -53,8 +53,18 @@ export interface ConsumoDetalleRegistro {
   precio_unitario_usd: number;
 }
 
+export interface Proveedor {
+  id: string;
+  nombre: string;
+  telefono?: string | null;
+  categoria?: string | null;
+  notas?: string | null;
+  created_at?: string;
+}
+
 export interface ProveedorCuenta {
   id: string;
+  proveedor_id?: string | null;
   nombre_proveedor: string;
   concepto_mercancia: string;
   monto_usd: number;
@@ -64,3 +74,4 @@ export interface ProveedorCuenta {
   tasa_bcv_historica?: number | null;
   created_at?: string;
 }
+
