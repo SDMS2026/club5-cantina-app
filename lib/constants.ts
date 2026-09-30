@@ -360,6 +360,42 @@ export function unirTelefonoPrefijo(prefijo: string, numero: string): string | n
   return `${prefijo} ${numLimpio}`;
 }
 
+/**
+ * Normaliza y estandariza un número telefónico de WhatsApp para comparaciones estrictas.
+ * Elimina espacios, guiones y caracteres especiales, y homogeneiza prefijos internacionales y locales.
+ * Ej: "+58 412 3594576", "+584123594576", "0412 359-4576" y "4123594576" => "584123594576"
+ */
+export function normalizarTelefonoWhatsApp(telefono?: string | null): string {
+  if (!telefono || !telefono.trim()) return '';
+  const digits = telefono.replace(/\D/g, '');
+  if (digits.length < 7) return '';
+
+  // Número venezolano con código país 58 (ej: 584123594576)
+  if (digits.startsWith('58') && digits.length >= 12) {
+    return '58' + digits.slice(2, 12);
+  }
+
+  // Número venezolano con 0 inicial (ej: 04123594576 -> 584123594576)
+  if (digits.startsWith('0') && digits.length === 11) {
+    return '58' + digits.slice(1, 11);
+  }
+
+  // Número venezolano local de 10 dígitos (ej: 4123594576 -> 584123594576)
+  if (
+    digits.length === 10 &&
+    (digits.startsWith('412') ||
+      digits.startsWith('414') ||
+      digits.startsWith('424') ||
+      digits.startsWith('416') ||
+      digits.startsWith('426') ||
+      digits.startsWith('2'))
+  ) {
+    return '58' + digits;
+  }
+
+  return digits;
+}
+
 export interface VinculoCliente {
   id: string;
   nombre: string;
@@ -380,6 +416,7 @@ export function encontrarVinculosCliente(
     grado_seccion?: string | null;
     nombre_representante?: string | null;
     telefono_whatsapp?: string | null;
+    representante_id?: string | null;
   },
   todosClientes: {
     id: string;
@@ -387,13 +424,16 @@ export function encontrarVinculosCliente(
     grado_seccion?: string | null;
     nombre_representante?: string | null;
     telefono_whatsapp?: string | null;
+    representante_id?: string | null;
   }[]
 ): VinculoCliente[] {
   if (!cliente) return [];
 
-  const telCliente = (cliente.telefono_whatsapp || '').replace(/\D/g, '');
-  // La vinculación se basa EXCLUSIVAMENTE en el número de teléfono (mínimo 7 dígitos)
-  if (telCliente.length < 7) {
+  const telCliente = normalizarTelefonoWhatsApp(cliente.telefono_whatsapp);
+  const repIdCliente = (cliente as any).representante_id || '';
+
+  // La vinculación se basa EXCLUSIVAMENTE en el número de teléfono o representante_id
+  if (!telCliente && !repIdCliente) {
     return [];
   }
 
@@ -402,15 +442,26 @@ export function encontrarVinculosCliente(
 
   for (const otro of todosClientes) {
     if (cliente.id && otro.id === cliente.id) continue;
-    const telOtro = (otro.telefono_whatsapp || '').replace(/\D/g, '');
-    if (telOtro.length < 7) continue;
 
-    const mismoTelefono =
-      telCliente === telOtro ||
-      telCliente.endsWith(telOtro.slice(-8)) ||
-      telOtro.endsWith(telCliente.slice(-8));
+    let mismoVinculo = false;
 
-    if (!mismoTelefono) continue;
+    // 1. Coincidencia por número telefónico estandarizado
+    if (telCliente) {
+      const telOtro = normalizarTelefonoWhatsApp(otro.telefono_whatsapp);
+      if (telOtro && telCliente === telOtro) {
+        mismoVinculo = true;
+      }
+    }
+
+    // 2. Coincidencia por representante_id
+    if (!mismoVinculo && repIdCliente) {
+      const repIdOtro = (otro as any).representante_id || '';
+      if (repIdOtro && repIdCliente === repIdOtro) {
+        mismoVinculo = true;
+      }
+    }
+
+    if (!mismoVinculo) continue;
 
     const otroEsAdulto = esAdultoOPersonal(otro.grado_seccion);
 

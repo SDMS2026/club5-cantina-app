@@ -54,7 +54,7 @@ import {
   handleDecimalKeyDown,
 } from '@/lib/utils';
 import { ModernClientSelect } from '@/components/ModernClientSelect';
-import { esProfesorOPersonal } from '@/lib/constants';
+import { esProfesorOPersonal, normalizarTelefonoWhatsApp } from '@/lib/constants';
 import { Cliente, Producto } from '@/types/pos';
 import { NotificationBell } from '@/components/NotificationBell';
 import { refrescarNotificacionesGlobales } from '@/components/NotificationsContext';
@@ -853,72 +853,47 @@ export default function DeudasPage() {
   };
 
   /**
-   * Detecta y agrupa los estudiantes pertenecientes al mismo núcleo familiar
-   * (mismo representante o mismo número de WhatsApp o apellidos vinculados).
+   * Agrupa estrictamente por NÚMERO DE TELÉFONO DE WHATSAPP (telefono_whatsapp) O representante_id.
+   * Dos o más estudiantes SOLO pertenecen a la misma familia si comparten exactamente el mismo número telefónico registrado.
+   * NUNCA agrupa por coincidencias de texto de nombre_representante o apellidos para evitar falsos positivos.
    */
   const obtenerGrupoFamiliarCuentas = useCallback(
     (cuentaPrincipal: CuentaEstudianteAgrupada, todasLasCuentas: CuentaEstudianteAgrupada[]) => {
       if (!cuentaPrincipal?.cliente) return [cuentaPrincipal];
 
-      const telPrincipal = (cuentaPrincipal.cliente.telefono_whatsapp || '').replace(/\D/g, '');
-      const repPrincipal = (cuentaPrincipal.cliente.nombre_representante || '').trim().toLowerCase();
+      const telPrincipal = normalizarTelefonoWhatsApp(cuentaPrincipal.cliente.telefono_whatsapp);
+      const repIdPrincipal = (cuentaPrincipal.cliente as any).representante_id || '';
 
-      const partesNombre = (cuentaPrincipal.cliente.nombre_estudiante || '').trim().split(/\s+/);
-      const apellidosPrincipal = partesNombre.length > 1 ? partesNombre.slice(1).join(' ').toLowerCase() : '';
+      // Si no tiene número de teléfono WhatsApp válido ni representante_id, es un estudiante individual sin grupo familiar
+      if (!telPrincipal && !repIdPrincipal) {
+        return [cuentaPrincipal];
+      }
 
       const familiares: CuentaEstudianteAgrupada[] = [cuentaPrincipal];
-
-      const palabrasGenericas = new Set([
-        'papa', 'mama', 'papá', 'mamá', 'padre', 'madre', 'representante', 'tutor', 'tutora',
-        'abuelo', 'abuela', 'sin representante', 'particular', 'caja', 'responsable'
-      ]);
 
       for (const c of todasLasCuentas) {
         if (!c.cliente) continue;
         if (c.clienteKey === cuentaPrincipal.clienteKey) continue;
 
-        let esFamiliar = false;
+        let esMismaFamilia = false;
 
-        // 1. Detección por número de WhatsApp (mínimo 7 dígitos)
-        const telOtro = (c.cliente.telefono_whatsapp || '').replace(/\D/g, '');
-        if (telPrincipal.length >= 7 && telOtro.length >= 7) {
-          if (
-            telPrincipal === telOtro ||
-            telPrincipal.endsWith(telOtro.slice(-8)) ||
-            telOtro.endsWith(telPrincipal.slice(-8))
-          ) {
-            esFamiliar = true;
+        // 1. Criterio Único Principal: Mismo número telefónico WhatsApp normalizado (limpiando espacios, guiones y prefijos)
+        if (telPrincipal) {
+          const telOtro = normalizarTelefonoWhatsApp(c.cliente.telefono_whatsapp);
+          if (telOtro && telPrincipal === telOtro) {
+            esMismaFamilia = true;
           }
         }
 
-        // 2. Detección por Nombre de Representante idéntico o coincidente (no genérico, min 4 caracteres)
-        const repOtro = (c.cliente.nombre_representante || '').trim().toLowerCase();
-        if (
-          !esFamiliar &&
-          repPrincipal.length >= 4 &&
-          repOtro.length >= 4 &&
-          !palabrasGenericas.has(repPrincipal) &&
-          !palabrasGenericas.has(repOtro)
-        ) {
-          if (repPrincipal === repOtro) {
-            esFamiliar = true;
+        // 2. Coincidencia por representante_id (si existiera en la base de datos)
+        if (!esMismaFamilia && repIdPrincipal) {
+          const repIdOtro = (c.cliente as any).representante_id || '';
+          if (repIdOtro && repIdPrincipal === repIdOtro) {
+            esMismaFamilia = true;
           }
         }
 
-        // 3. Detección por coincidencia de apellido de estudiante si el representante coincide
-        if (!esFamiliar && apellidosPrincipal && repPrincipal && repOtro && !palabrasGenericas.has(repPrincipal)) {
-          const partesOtro = (c.cliente.nombre_estudiante || '').trim().split(/\s+/);
-          const apellidosOtro = partesOtro.length > 1 ? partesOtro.slice(1).join(' ').toLowerCase() : '';
-          if (
-            apellidosOtro &&
-            apellidosPrincipal === apellidosOtro &&
-            (repPrincipal.includes(repOtro) || repOtro.includes(repPrincipal))
-          ) {
-            esFamiliar = true;
-          }
-        }
-
-        if (esFamiliar) {
+        if (esMismaFamilia) {
           familiares.push(c);
         }
       }
@@ -1095,18 +1070,12 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
   const handleAbrirModalWhatsApp = (cuenta: CuentaEstudianteAgrupada) => {
     const grupo = obtenerGrupoFamiliarCuentas(cuenta, cuentasAgrupadas);
 
-    // Encontrar teléfono: el del estudiante actual, o el de algún hermano/representante
-    let tel = (cuenta.cliente?.telefono_whatsapp || '').trim();
-    if (!tel) {
-      const otroConTel = grupo.find((g) => g.cliente?.telefono_whatsapp?.trim());
-      if (otroConTel) {
-        tel = otroConTel.cliente?.telefono_whatsapp?.trim() || '';
-      }
-    }
+    // Teléfono de destino: el del estudiante actual
+    const tel = (cuenta.cliente?.telefono_whatsapp || '').trim();
 
-    // Nombre de representante: el del estudiante actual o algún hermano
+    // Nombre del representante del estudiante
     let rep = (cuenta.cliente?.nombre_representante || '').trim();
-    if (!rep) {
+    if (!rep && grupo.length > 1) {
       const otroConRep = grupo.find((g) => g.cliente?.nombre_representante?.trim());
       if (otroConRep) {
         rep = otroConRep.cliente?.nombre_representante?.trim() || '';
@@ -1114,9 +1083,7 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
     }
 
     if (!rep) {
-      const partes = (cuenta.cliente?.nombre_estudiante || '').trim().split(/\s+/);
-      const apellido = partes.length > 1 ? partes.slice(1).join(' ') : '';
-      rep = apellido ? `Familia ${apellido}` : 'Estimado(a) Representante';
+      rep = 'Estimado(a) Representante';
     }
 
     setModalWhatsAppFamiliar({
@@ -1157,18 +1124,13 @@ Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123
       tasaBcvActual: tasaBcv,
     });
 
-    let telefonoLimpio = modalWhatsAppFamiliar.telefonoDestino.replace(/\D/g, '');
-    if (telefonoLimpio.startsWith('0')) {
-      telefonoLimpio = '58' + telefonoLimpio.slice(1);
-    } else if (!telefonoLimpio.startsWith('58') && telefonoLimpio.length === 10) {
-      telefonoLimpio = '58' + telefonoLimpio;
-    }
+    const telefonoLimpio = normalizarTelefonoWhatsApp(modalWhatsAppFamiliar.telefonoDestino);
 
     if (!telefonoLimpio) {
       navigator.clipboard.writeText(mensaje);
       setNotificacion({
         tipo: 'info',
-        texto: 'No se detectó número WhatsApp. ¡Mensaje copiado al portapapeles!',
+        texto: 'No se detectó número WhatsApp válido. ¡Mensaje copiado al portapapeles!',
       });
       setTimeout(() => setNotificacion(null), 4000);
       return;
