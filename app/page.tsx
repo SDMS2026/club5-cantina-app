@@ -165,50 +165,36 @@ export default function PosPage() {
     cargarClientes();
     cargarProductos();
 
-    // Suscripción Realtime en Supabase para sincronización instantánea entre dispositivos
+    // Suscripción Realtime con debounce para no disparar múltiples peticiones seguidas
+    let timerRecarga: NodeJS.Timeout | null = null;
+    const recargarConDebounce = () => {
+      if (timerRecarga) clearTimeout(timerRecarga);
+      timerRecarga = setTimeout(() => {
+        cargarClientes();
+        cargarProductos();
+        obtenerSaldosTodosClientes().then(setSaldosClientes).catch(console.error);
+      }, 600);
+    };
+
     const canalRealtime = supabase
       .channel('pos_realtime_sync')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'productos' },
-        () => {
-          cargarProductos();
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'clientes' },
-        () => {
-          cargarClientes();
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'consumos' },
-        () => {
-          obtenerSaldosTodosClientes().then(setSaldosClientes).catch(console.error);
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'abonos' },
-        () => {
-          obtenerSaldosTodosClientes().then(setSaldosClientes).catch(console.error);
-        }
-      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'productos' }, recargarConDebounce)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, recargarConDebounce)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'consumos' }, recargarConDebounce)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'abonos' }, recargarConDebounce)
       .subscribe();
 
     // Sincronización mediante evento global de mini recarga
     const handleMiniRecarga = () => {
-      cargarClientes();
-      cargarProductos();
-      obtenerSaldosTodosClientes().then(setSaldosClientes).catch(console.error);
+      recargarConDebounce();
     };
 
     window.addEventListener(EVENTO_MINI_RECARGA, handleMiniRecarga);
 
     return () => {
+      if (timerRecarga) clearTimeout(timerRecarga);
       window.removeEventListener(EVENTO_MINI_RECARGA, handleMiniRecarga);
+      canalRealtime.unsubscribe();
       supabase.removeChannel(canalRealtime);
     };
   }, [cargarTasa, cargarClientes, cargarProductos]);

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { usePathname } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import { obtenerTasaBCV, TASA_BCV_FALLBACK_DEFAULT } from '@/lib/dolarApi';
@@ -94,7 +94,18 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
   const [data, setData] = useState<NotificationsData>(DEFAULT_DATA);
   const [cargando, setCargando] = useState<boolean>(true);
 
-  const cargarDatos = useCallback(async () => {
+  const ultimoFetchRef = useRef<number>(0);
+  const ejecutandoFetchRef = useRef<boolean>(false);
+
+  const cargarDatos = useCallback(async (forzar = false) => {
+    const ahora = Date.now();
+    // Prevenir peticiones duplicadas en menos de 4 segundos salvo refresco forzado
+    if (!forzar && (ahora - ultimoFetchRef.current < 4000 || ejecutandoFetchRef.current)) {
+      return;
+    }
+    ejecutandoFetchRef.current = true;
+    ultimoFetchRef.current = ahora;
+
     try {
       // 1. Obtener Tasa BCV
       let tasaActual = TASA_BCV_FALLBACK_DEFAULT;
@@ -105,10 +116,10 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
         console.error('Error al obtener tasa BCV para notificaciones:', e);
       }
 
-      // 2. Obtener Cuentas por Pagar a Proveedores
+      // 2. Obtener Cuentas por Pagar a Proveedores (columnas estrictas, sin payload innecesario)
       const { data: cuentasData, error: cuentasErr } = await supabase
         .from('proveedores_cuentas')
-        .select('*')
+        .select('id, nombre_proveedor, concepto_mercancia, monto_usd, pagado, fecha_vencimiento_pago')
         .order('fecha_vencimiento_pago', { ascending: true });
 
       if (cuentasErr) {
@@ -258,69 +269,59 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     } catch (err) {
       console.error('Error general al refrescar centro de notificaciones:', err);
     } finally {
+      ejecutandoFetchRef.current = false;
       setCargando(false);
     }
   }, []);
 
-  // 1. Sincronización instantánea al cambiar de ruta en la aplicación
+  // 1. Sincronización bajo demanda al cambiar de ruta en la aplicación
   useEffect(() => {
     cargarDatos();
   }, [pathname, cargarDatos]);
 
-  // 2. Sondeo regular en segundo plano (cada 12s) para mantener badges 100% frescos
+  // 2. Suscripción a eventos locales y Realtime optimizado con debouncing (SIN polling continuo)
   useEffect(() => {
-    const timer = setInterval(() => {
-      cargarDatos();
-    }, 12000);
-    return () => clearInterval(timer);
-  }, [cargarDatos]);
+    let debounceTimer: NodeJS.Timeout | null = null;
+    const triggerDebounced = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        cargarDatos(true);
+      }, 1000);
+    };
 
-  useEffect(() => {
-    // Suscripción al evento personalizado local
+    // Suscripción al evento personalizado local emitido tras acciones contables
     const handleEvento = () => {
-      cargarDatos();
+      triggerDebounced();
     };
 
     if (typeof window !== 'undefined') {
       window.addEventListener(EVENTO_ACTUALIZAR_NOTIFICACIONES, handleEvento);
     }
 
-    // Sincronización Realtime con Supabase para alertas en todos los dispositivos conectados
+    // Sincronización Realtime con Supabase protegida con debounce para no saturar con múltiples eventos
     const canalRealtime = supabase
       .channel('notificaciones_realtime_sync')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'proveedores_cuentas' },
-        () => {
-          cargarDatos();
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'consumos' },
-        () => {
-          cargarDatos();
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'clientes' },
-        () => {
-          cargarDatos();
-        }
-      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'proveedores_cuentas' }, triggerDebounced)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'consumos' }, triggerDebounced)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, triggerDebounced)
       .subscribe();
 
     return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
       if (typeof window !== 'undefined') {
         window.removeEventListener(EVENTO_ACTUALIZAR_NOTIFICACIONES, handleEvento);
       }
+      canalRealtime.unsubscribe();
       supabase.removeChannel(canalRealtime);
     };
   }, [cargarDatos]);
 
+  const refrescarManual = useCallback(async () => {
+    await cargarDatos(true);
+  }, [cargarDatos]);
+
   return (
-    <NotificationsContext.Provider value={{ data, cargando, refrescar: cargarDatos }}>
+    <NotificationsContext.Provider value={{ data, cargando, refrescar: refrescarManual }}>
       {children}
     </NotificationsContext.Provider>
   );

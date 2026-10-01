@@ -33,7 +33,7 @@ export function MaintenanceScreen() {
           window.location.href = '/login';
         }
       } catch {}
-    }, 20000);
+    }, 60000);
 
     return () => {
       clearInterval(interval);

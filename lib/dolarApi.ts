@@ -19,16 +19,25 @@ export interface DolarBcvResponse {
 export const TASA_BCV_FALLBACK_DEFAULT = 854.46;
 
 let ultimaTasaConocida: number | null = null;
+let timestampUltimaTasa: number = 0;
+const CACHE_TASA_MS = 5 * 60 * 1000; // 5 minutos de caché en memoria
 
 /**
  * Realiza una consulta a la API de DolarVZLA para obtener la tasa del dólar BCV en tiempo real.
  * Si ocurre un fallo de red o la respuesta no es válida, retorna un fallback seguro.
+ * Incluye caché en memoria de 5 minutos para evitar peticiones HTTP redundantes.
  *
  * @param fallback - Tasa de respaldo personalizada (opcional).
+ * @param forzar - Si es true, ignora la caché y consulta la API fresca.
  * @returns Promesa con el valor de la tasa en bolívares por dólar (Bs/USD).
  */
-export async function obtenerTasaBCV(fallback?: number): Promise<number> {
+export async function obtenerTasaBCV(fallback?: number, forzar: boolean = false): Promise<number> {
   const fallbackSeguro = fallback ?? ultimaTasaConocida ?? TASA_BCV_FALLBACK_DEFAULT;
+
+  const ahora = Date.now();
+  if (!forzar && ultimaTasaConocida !== null && ahora - timestampUltimaTasa < CACHE_TASA_MS) {
+    return ultimaTasaConocida;
+  }
 
   try {
     const response = await fetch('https://rates.dolarvzla.com/bcv/current.json', {
@@ -47,6 +56,7 @@ export async function obtenerTasaBCV(fallback?: number): Promise<number> {
 
     if (typeof tasa === 'number' && !isNaN(tasa) && tasa > 0) {
       ultimaTasaConocida = tasa;
+      timestampUltimaTasa = Date.now();
       return tasa;
     }
 

@@ -620,27 +620,35 @@ export default function ProveedoresPage() {
     cargarCuentas();
     cargarProveedores();
 
+    // Sincronización Realtime con Supabase con debounce protector
+    let timerRecarga: NodeJS.Timeout | null = null;
+    const recargarConDebounce = () => {
+      if (timerRecarga) clearTimeout(timerRecarga);
+      timerRecarga = setTimeout(() => {
+        cargarCuentas();
+        cargarProveedores();
+      }, 600);
+    };
+
     const canalRealtimeCuentas = supabase
       .channel('proveedores_cuentas_sync')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'proveedores_cuentas' }, () => {
-        cargarCuentas();
-      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'proveedores_cuentas' }, recargarConDebounce)
       .subscribe();
 
     const canalRealtimeProveedores = supabase
       .channel('proveedores_db_sync')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'proveedores' }, () => {
-        cargarProveedores();
-      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'proveedores' }, recargarConDebounce)
       .subscribe();
 
     const handleMiniRecarga = () => {
-      cargarCuentas();
-      cargarProveedores();
+      recargarConDebounce();
     };
     window.addEventListener(EVENTO_MINI_RECARGA, handleMiniRecarga);
 
     return () => {
+      if (timerRecarga) clearTimeout(timerRecarga);
+      canalRealtimeCuentas.unsubscribe();
+      canalRealtimeProveedores.unsubscribe();
       supabase.removeChannel(canalRealtimeCuentas);
       supabase.removeChannel(canalRealtimeProveedores);
       window.removeEventListener(EVENTO_MINI_RECARGA, handleMiniRecarga);

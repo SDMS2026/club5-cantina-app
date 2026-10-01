@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -488,36 +488,54 @@ export default function EstudiantesPage() {
     cargarDatos(1, false);
   }, [cargarDatos]);
 
-  // Sincronización en tiempo real con Supabase entre dispositivos
+  // Referencias mutables para el canal Realtime sin recrear suscripciones
+  const paginaActualRef = useRef(paginaActual);
+  const cargarDatosRef = useRef(cargarDatos);
+  const cargarMetricasRef = useRef(cargarMetricasDirectorio);
+
   useEffect(() => {
+    paginaActualRef.current = paginaActual;
+  }, [paginaActual]);
+
+  useEffect(() => {
+    cargarDatosRef.current = cargarDatos;
+  }, [cargarDatos]);
+
+  useEffect(() => {
+    cargarMetricasRef.current = cargarMetricasDirectorio;
+  }, [cargarMetricasDirectorio]);
+
+  // Sincronización en tiempo real con Supabase estable (solo 1 suscripción en mount)
+  useEffect(() => {
+    let timerRecarga: NodeJS.Timeout | null = null;
+    const recargarConDebounce = () => {
+      if (timerRecarga) clearTimeout(timerRecarga);
+      timerRecarga = setTimeout(() => {
+        cargarDatosRef.current(paginaActualRef.current, false);
+        cargarMetricasRef.current();
+      }, 600);
+    };
+
     const canalRealtime = supabase
       .channel('estudiantes_realtime_sync')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, () => {
-        cargarDatos(paginaActual, false);
-        cargarMetricasDirectorio();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'consumos' }, () => {
-        cargarDatos(paginaActual, false);
-        cargarMetricasDirectorio();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'abonos' }, () => {
-        cargarDatos(paginaActual, false);
-        cargarMetricasDirectorio();
-      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, recargarConDebounce)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'consumos' }, recargarConDebounce)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'abonos' }, recargarConDebounce)
       .subscribe();
 
     const handleMiniRecarga = () => {
-      cargarDatos(paginaActual, false);
-      cargarMetricasDirectorio();
+      recargarConDebounce();
     };
 
     window.addEventListener(EVENTO_MINI_RECARGA, handleMiniRecarga);
 
     return () => {
+      if (timerRecarga) clearTimeout(timerRecarga);
       window.removeEventListener(EVENTO_MINI_RECARGA, handleMiniRecarga);
+      canalRealtime.unsubscribe();
       supabase.removeChannel(canalRealtime);
     };
-  }, [paginaActual, cargarDatos, cargarMetricasDirectorio]);
+  }, []);
 
   // Grados / Secciones disponibles para el selector de filtro
   const gradosDisponibles = useMemo(() => {

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ejecutarMiniRecarga, EVENTO_MINI_RECARGA } from '@/lib/syncUtils';
@@ -787,30 +787,53 @@ export default function TransaccionesPage() {
     cargarLiquidaciones();
   }, [cargarTransacciones, cargarMetricasResumen, cargarLiquidaciones]);
 
-  // Suscripción en tiempo real a la tabla 'consumos'
+  // Referencias mutables para el canal Realtime sin recrear suscripciones
+  const cargarTransaccionesRef = useRef(cargarTransacciones);
+  const cargarMetricasRef = useRef(cargarMetricasResumen);
+  const cargarLiquidacionesRef = useRef(cargarLiquidaciones);
+
   useEffect(() => {
+    cargarTransaccionesRef.current = cargarTransacciones;
+  }, [cargarTransacciones]);
+
+  useEffect(() => {
+    cargarMetricasRef.current = cargarMetricasResumen;
+  }, [cargarMetricasResumen]);
+
+  useEffect(() => {
+    cargarLiquidacionesRef.current = cargarLiquidaciones;
+  }, [cargarLiquidaciones]);
+
+  // Suscripción en tiempo real a la tabla 'consumos' estable (solo 1 suscripción en mount)
+  useEffect(() => {
+    let timerRecarga: NodeJS.Timeout | null = null;
+    const recargarConDebounce = () => {
+      if (timerRecarga) clearTimeout(timerRecarga);
+      timerRecarga = setTimeout(() => {
+        cargarTransaccionesRef.current();
+        cargarMetricasRef.current();
+        cargarLiquidacionesRef.current();
+      }, 600);
+    };
+
     const channel = supabase
       .channel('transacciones_realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'consumos' }, () => {
-        cargarTransacciones();
-        cargarMetricasResumen();
-        cargarLiquidaciones();
-      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'consumos' }, recargarConDebounce)
       .subscribe();
 
     const handleMiniRecarga = () => {
-      cargarTransacciones();
-      cargarMetricasResumen();
-      cargarLiquidaciones();
+      recargarConDebounce();
     };
 
     window.addEventListener(EVENTO_MINI_RECARGA, handleMiniRecarga);
 
     return () => {
+      if (timerRecarga) clearTimeout(timerRecarga);
       window.removeEventListener(EVENTO_MINI_RECARGA, handleMiniRecarga);
+      channel.unsubscribe();
       supabase.removeChannel(channel);
     };
-  }, [cargarTransacciones, cargarMetricasResumen, cargarLiquidaciones]);
+  }, []);
 
   // Manejo de la acción de anular transacción
   const handleConfirmarAnulacion = async () => {

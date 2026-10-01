@@ -362,33 +362,31 @@ export default function DeudasPage() {
     cargarTasa();
     cargarDeudas();
 
-    // Sincronización en tiempo real con Supabase entre dispositivos
+    // Sincronización en tiempo real con Supabase con debounce protector
+    let timerRecarga: NodeJS.Timeout | null = null;
+    const recargarConDebounce = () => {
+      if (timerRecarga) clearTimeout(timerRecarga);
+      timerRecarga = setTimeout(() => {
+        cargarDeudas();
+      }, 600);
+    };
+
     const canalRealtime = supabase
       .channel('deudas_realtime_sync')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'consumos' },
-        () => {
-          cargarDeudas();
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'clientes' },
-        () => {
-          cargarDeudas();
-        }
-      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'consumos' }, recargarConDebounce)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, recargarConDebounce)
       .subscribe();
 
     const handleMiniRecarga = () => {
-      cargarDeudas();
+      recargarConDebounce();
     };
 
     window.addEventListener(EVENTO_MINI_RECARGA, handleMiniRecarga);
 
     return () => {
+      if (timerRecarga) clearTimeout(timerRecarga);
       window.removeEventListener(EVENTO_MINI_RECARGA, handleMiniRecarga);
+      canalRealtime.unsubscribe();
       supabase.removeChannel(canalRealtime);
     };
   }, [cargarTasa, cargarDeudas]);

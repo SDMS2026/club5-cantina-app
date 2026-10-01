@@ -185,7 +185,7 @@ export function PaymentModal({
     } else {
       setSaldoInfo(null);
     }
-  }, [abierto, cliente]);
+  }, [abierto, cliente?.id]);
 
   // Moneda activa de la calculadora (USD o Bs) con autodetección inteligente
   const [monedaCalculadora, setMonedaCalculadora] = useState<'USD' | 'Bs'>('USD');
@@ -209,7 +209,7 @@ export function PaymentModal({
       setErrorMensaje(null);
       setExito(false);
     }
-  }, [abierto, cliente]);
+  }, [abierto, cliente?.id]);
 
   // Autodetección automática de divisa según el método de pago seleccionado
   useEffect(() => {

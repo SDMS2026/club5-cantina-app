@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -290,28 +290,52 @@ export default function ProductosPage() {
     cargarProductos(1, false);
   }, [cargarProductos]);
 
-  // Sincronización en tiempo real con Supabase entre dispositivos
+  // Referencias mutables para el canal Realtime sin recrear suscripciones
+  const paginaActualRef = useRef(paginaActual);
+  const cargarProductosRef = useRef(cargarProductos);
+  const cargarMetricasRef = useRef(cargarMetricasCatalogo);
+
   useEffect(() => {
+    paginaActualRef.current = paginaActual;
+  }, [paginaActual]);
+
+  useEffect(() => {
+    cargarProductosRef.current = cargarProductos;
+  }, [cargarProductos]);
+
+  useEffect(() => {
+    cargarMetricasRef.current = cargarMetricasCatalogo;
+  }, [cargarMetricasCatalogo]);
+
+  // Sincronización en tiempo real con Supabase estable (solo 1 suscripción en mount)
+  useEffect(() => {
+    let timerRecarga: NodeJS.Timeout | null = null;
+    const recargarConDebounce = () => {
+      if (timerRecarga) clearTimeout(timerRecarga);
+      timerRecarga = setTimeout(() => {
+        cargarProductosRef.current(paginaActualRef.current, false);
+        cargarMetricasRef.current();
+      }, 600);
+    };
+
     const canalRealtime = supabase
       .channel('productos_realtime_sync')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'productos' }, () => {
-        cargarProductos(paginaActual, false);
-        cargarMetricasCatalogo();
-      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'productos' }, recargarConDebounce)
       .subscribe();
 
     const handleMiniRecarga = () => {
-      cargarProductos(paginaActual, false);
-      cargarMetricasCatalogo();
+      recargarConDebounce();
     };
 
     window.addEventListener(EVENTO_MINI_RECARGA, handleMiniRecarga);
 
     return () => {
+      if (timerRecarga) clearTimeout(timerRecarga);
       window.removeEventListener(EVENTO_MINI_RECARGA, handleMiniRecarga);
+      canalRealtime.unsubscribe();
       supabase.removeChannel(canalRealtime);
     };
-  }, [paginaActual, cargarProductos, cargarMetricasCatalogo]);
+  }, []);
 
   // Lista de categorías detectadas del catálogo global
   const categoriasDisponibles = useMemo(() => {
