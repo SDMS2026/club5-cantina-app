@@ -463,7 +463,7 @@ export function generarMensajeCobroFamiliar(params: ParametrosCobroFamiliar): st
         })
         .join('\n\n');
 
-      return `*👤 ${nombre}* ${seccion} - *Total: ${formatUSD(c.totalDeudaUsd)}* (${cantConsumos} ${cantConsumos === 1 ? 'consumo' : 'consumos'}):\n${detalleConsumos}`;
+      return `*${nombre}* ${seccion} - *Total: ${formatUSD(c.totalDeudaUsd)}* (${cantConsumos} ${cantConsumos === 1 ? 'consumo' : 'consumos'}):\n${detalleConsumos}`;
     })
     .join('\n\n------------------\n\n');
 

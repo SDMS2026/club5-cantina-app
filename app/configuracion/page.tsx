@@ -1,11 +1,13 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import Image from 'next/image';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Settings,
   MessageCircle,
   Users,
+  User,
   Smartphone,
   Building2,
   CreditCard,
@@ -23,6 +25,7 @@ import {
   Sliders,
   AlertCircle,
   ExternalLink,
+  Lightbulb,
 } from 'lucide-react';
 import { useSidebar } from '@/components/SidebarContext';
 import {
@@ -75,7 +78,7 @@ const VARIABLES_FAMILIAR: VariableInfo[] = [
   { clave: 'representante', etiqueta: 'Representante / Familia', descripcion: 'Nombre del representante o familia', ejemplo: 'Familia González Pérez' },
   { clave: 'cantidad_estudiantes', etiqueta: 'Cant. Hijos/Estudiantes', descripcion: 'Número de estudiantes agrupados', ejemplo: '2' },
   { clave: 'resumen_familiar', etiqueta: 'Resumen Familiar', descripcion: 'Lista compacta de cada hijo y su total', ejemplo: '- Santiago (4to Grado A): $6.00 (Bs. 300,00)\n- Camila (1er Grado B): $4.50 (Bs. 225,00)' },
-  { clave: 'desglose_estudiantes', etiqueta: 'Desglose por Estudiante', descripcion: 'Consumos completos separados por estudiante', ejemplo: '*👤 Santiago* (4to Grado A) - *Total: $6.00*:\n  • *Consumo #1* - $6.00...\n\n------------------\n\n*👤 Camila* (1er Grado B) - *Total: $4.50*...' },
+  { clave: 'desglose_estudiantes', etiqueta: 'Desglose por Estudiante', descripcion: 'Consumos completos separados por estudiante', ejemplo: '*Santiago* (4to Grado A) - *Total: $6.00*:\n  • *Consumo #1* - $6.00...\n\n------------------\n\n*Camila* (1er Grado B) - *Total: $4.50*...' },
   { clave: 'total_usd', etiqueta: 'Gran Total en $ USD', descripcion: 'Suma de las deudas de todos los hijos en USD', ejemplo: '$10.50' },
   { clave: 'total_bs', etiqueta: 'Gran Total en Bs.', descripcion: 'Suma consolidada convertida a Bolívares', ejemplo: 'Bs. 525,00' },
   { clave: 'tasa_bcv', etiqueta: 'Tasa BCV', descripcion: 'Tasa oficial BCV del día', ejemplo: 'Bs. 50,00' },
@@ -308,7 +311,7 @@ export default function ConfiguracionPage() {
         resumen_familiar:
           '- Santiago (4to Grado A): $6.00 (Bs. 300,00)\n- Camila (1er Grado B): $4.50 (Bs. 225,00)',
         desglose_estudiantes:
-          '*👤 Santiago* (4to Grado A) - *Total: $6.00* (1 consumo):\n  • *Consumo #1 (04 oct)* - $6.00:\n    - 1x Hamburguesa Especial ($6.00)\n\n------------------\n\n*👤 Camila* (1er Grado B) - *Total: $4.50* (1 consumo):\n  • *Consumo #1 (04 oct)* - $4.50:\n    - 1x Croissant de Jamón ($4.50)',
+          '*Santiago* (4to Grado A) - *Total: $6.00* (1 consumo):\n  • *Consumo #1 (04 oct)* - $6.00:\n    - 1x Hamburguesa Especial ($6.00)\n\n------------------\n\n*Camila* (1er Grado B) - *Total: $4.50* (1 consumo):\n  • *Consumo #1 (04 oct)* - $4.50:\n    - 1x Croissant de Jamón ($4.50)',
         total_usd: '$10.50',
         total_bs: 'Bs. 525,00',
         tasa_bcv: 'Bs. 50,00',
@@ -527,37 +530,40 @@ export default function ConfiguracionPage() {
                   <button
                     type="button"
                     onClick={() => setTipoPlantilla('individual')}
-                    className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${
+                    className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${
                       tipoPlantilla === 'individual'
                         ? 'bg-white dark:bg-[#111726] text-emerald-700 dark:text-emerald-400 shadow-2xs font-bold'
                         : 'text-gray-600 dark:text-slate-400 hover:text-gray-900'
                     }`}
                   >
-                    👤 Cobro Individual
+                    <User className="h-3.5 w-3.5" />
+                    <span>Cobro Individual</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setTipoPlantilla('familiar')}
-                    className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${
+                    className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${
                       tipoPlantilla === 'familiar'
                         ? 'bg-white dark:bg-[#111726] text-purple-700 dark:text-purple-400 shadow-2xs font-bold'
                         : 'text-gray-600 dark:text-slate-400 hover:text-gray-900'
                     }`}
                   >
-                    👨‍👩‍👧‍👦 Cobro Familiar
+                    <Users className="h-3.5 w-3.5" />
+                    <span>Cobro Familiar</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setTipoPlantilla('estudiante')}
-                    className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${
+                    className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${
                       tipoPlantilla === 'estudiante'
                         ? 'bg-white dark:bg-[#111726] text-indigo-700 dark:text-indigo-400 shadow-2xs font-bold'
                         : 'text-gray-600 dark:text-slate-400 hover:text-gray-900'
                     }`}
                   >
-                    📋 Aviso Directorio
+                    <FileText className="h-3.5 w-3.5" />
+                    <span>Aviso Directorio</span>
                   </button>
                 </div>
               </div>
@@ -654,8 +660,11 @@ export default function ConfiguracionPage() {
                   />
 
                   <div className="flex items-center justify-between text-[11px] text-gray-400 dark:text-slate-500">
-                    <span>
-                      💡 Tip de WhatsApp: Usa <code className="bg-gray-100 dark:bg-slate-800 px-1 py-0.5 rounded text-gray-700 dark:text-slate-300">*texto*</code> para resaltar en <strong>negrita</strong>.
+                    <span className="flex items-center gap-1">
+                      <Lightbulb className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                      <span>
+                        Tip de WhatsApp: Usa <code className="bg-gray-100 dark:bg-slate-800 px-1 py-0.5 rounded text-gray-700 dark:text-slate-300">*texto*</code> para resaltar en <strong>negrita</strong>.
+                      </span>
                     </span>
                     <span>{config.plantillas[tipoPlantilla].length} caracteres</span>
                   </div>
@@ -695,8 +704,15 @@ export default function ConfiguracionPage() {
                     {/* Barra superior de WhatsApp */}
                     <div className="bg-[#075E54] dark:bg-[#1F2C34] text-white px-4 py-3 flex items-center justify-between shadow-xs">
                       <div className="flex items-center gap-2.5">
-                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-700 text-white font-bold text-xs">
-                          C5
+                        <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full overflow-hidden bg-white/20 p-0.5 ring-2 ring-white/30 shadow-xs">
+                          <Image
+                            src="/logo-club5.png"
+                            alt="Club 5 Logo"
+                            width={36}
+                            height={36}
+                            className="h-full w-full object-contain rounded-full"
+                            priority
+                          />
                         </div>
                         <div>
                           <p className="text-xs font-bold leading-tight">{config.pagoMovil.nombre_cantina}</p>
