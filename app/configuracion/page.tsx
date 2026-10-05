@@ -418,16 +418,17 @@ export default function ConfiguracionPage() {
               <Menu className="h-5 w-5" />
             </button>
 
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-100 dark:border-indigo-900/50 text-indigo-700 dark:text-indigo-400 shadow-xs">
+            {/* Icono de Ajustes: oculto en pantallas pequeñas para dar espacio libre al título */}
+            <div className="hidden sm:flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-100 dark:border-indigo-900/50 text-indigo-700 dark:text-indigo-400 shadow-xs">
               <Settings className="h-5 w-5" />
             </div>
 
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <h1 className="text-sm sm:text-lg font-bold tracking-tight text-gray-900 dark:text-white truncate">
-                  Configuración del Sistema
+                  Configuración <span className="hidden sm:inline">del Sistema</span>
                 </h1>
-                <span className="rounded-full border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/60 px-2 py-0.5 text-[10px] font-semibold text-indigo-700 dark:text-indigo-300">
+                <span className="hidden sm:inline-flex rounded-full border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/60 px-2 py-0.5 text-[10px] font-semibold text-indigo-700 dark:text-indigo-300">
                   Club 5
                 </span>
               </div>
@@ -438,11 +439,11 @@ export default function ConfiguracionPage() {
           </div>
 
           {/* Botón Guardar Cambios */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
               onClick={handleGuardar}
-              className={`flex items-center gap-2 rounded-xl sm:rounded-2xl px-4 py-2 text-xs font-bold shadow-xs transition active:scale-95 ${
+              className={`flex items-center gap-1.5 sm:gap-2 rounded-xl sm:rounded-2xl px-3 sm:px-4 py-2 text-xs font-bold shadow-xs transition active:scale-95 shrink-0 ${
                 guardado
                   ? 'bg-emerald-600 text-white'
                   : 'bg-indigo-600 text-white hover:bg-indigo-700'
@@ -467,46 +468,49 @@ export default function ConfiguracionPage() {
       </header>
 
       {/* Contenido Principal */}
-      <main className="mx-auto w-full max-w-7xl flex-1 px-3 sm:px-6 lg:px-8 py-5">
-        {/* Navegación por Pestañas */}
-        <div className="flex items-center gap-1.5 sm:gap-2 border-b border-gray-200 dark:border-slate-800 pb-3 mb-6 overflow-x-auto no-scrollbar">
+      <main className="mx-auto w-full max-w-7xl flex-1 px-3 sm:px-6 lg:px-8 py-4 sm:py-5">
+        {/* Navegación por Pestañas Adaptable (Sin arrastrar en móviles) */}
+        <div className="grid grid-cols-3 gap-1.5 sm:flex sm:items-center sm:gap-2 border-b border-gray-200 dark:border-slate-800 pb-3 mb-6 w-full">
           <button
             type="button"
             onClick={() => setTabActiva('whatsapp')}
-            className={`flex items-center gap-2 rounded-xl sm:rounded-2xl px-3.5 py-2 text-xs font-bold transition whitespace-nowrap ${
+            className={`flex items-center justify-center gap-1.5 sm:gap-2 rounded-xl sm:rounded-2xl px-2 sm:px-3.5 py-2.5 sm:py-2 text-[11px] sm:text-xs font-bold transition text-center w-full sm:w-auto ${
               tabActiva === 'whatsapp'
                 ? 'bg-emerald-600 text-white shadow-xs'
                 : 'text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-slate-800'
             }`}
           >
-            <MessageCircle className="h-4 w-4" />
-            <span>Mensajes de WhatsApp</span>
+            <MessageCircle className="h-4 w-4 shrink-0" />
+            <span className="sm:hidden truncate">WhatsApp</span>
+            <span className="hidden sm:inline">Mensajes de WhatsApp</span>
           </button>
 
           <button
             type="button"
             onClick={() => setTabActiva('pagomovil')}
-            className={`flex items-center gap-2 rounded-xl sm:rounded-2xl px-3.5 py-2 text-xs font-bold transition whitespace-nowrap ${
+            className={`flex items-center justify-center gap-1.5 sm:gap-2 rounded-xl sm:rounded-2xl px-2 sm:px-3.5 py-2.5 sm:py-2 text-[11px] sm:text-xs font-bold transition text-center w-full sm:w-auto ${
               tabActiva === 'pagomovil'
                 ? 'bg-indigo-600 text-white shadow-xs'
                 : 'text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-slate-800'
             }`}
           >
-            <CreditCard className="h-4 w-4" />
-            <span>Datos de Pago Móvil & Negocio</span>
+            <CreditCard className="h-4 w-4 shrink-0" />
+            <span className="sm:hidden truncate">Pago Móvil</span>
+            <span className="hidden sm:inline">Datos de Pago Móvil & Negocio</span>
           </button>
 
           <button
             type="button"
             onClick={() => setTabActiva('sistema')}
-            className={`flex items-center gap-2 rounded-xl sm:rounded-2xl px-3.5 py-2 text-xs font-bold transition whitespace-nowrap ${
+            className={`flex items-center justify-center gap-1.5 sm:gap-2 rounded-xl sm:rounded-2xl px-2 sm:px-3.5 py-2.5 sm:py-2 text-[11px] sm:text-xs font-bold transition text-center w-full sm:w-auto ${
               tabActiva === 'sistema'
                 ? 'bg-purple-600 text-white shadow-xs'
                 : 'text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-slate-800'
             }`}
           >
-            <Sliders className="h-4 w-4" />
-            <span>Ajustes & Respaldo</span>
+            <Sliders className="h-4 w-4 shrink-0" />
+            <span className="sm:hidden truncate">Ajustes</span>
+            <span className="hidden sm:inline">Ajustes & Respaldo</span>
           </button>
         </div>
 
@@ -526,44 +530,47 @@ export default function ConfiguracionPage() {
                   </p>
                 </div>
 
-                <div className="flex items-center gap-1.5 p-1 rounded-xl bg-gray-100 dark:bg-slate-900 border border-gray-200 dark:border-slate-800">
+                <div className="grid grid-cols-3 gap-1 sm:flex sm:items-center sm:gap-1.5 p-1 rounded-xl bg-gray-100 dark:bg-slate-900 border border-gray-200 dark:border-slate-800 w-full sm:w-auto">
                   <button
                     type="button"
                     onClick={() => setTipoPlantilla('individual')}
-                    className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${
+                    className={`flex items-center justify-center gap-1 sm:gap-1.5 rounded-lg px-2 sm:px-2.5 py-2 sm:py-1.5 text-[11px] sm:text-xs font-semibold transition text-center ${
                       tipoPlantilla === 'individual'
                         ? 'bg-white dark:bg-[#111726] text-emerald-700 dark:text-emerald-400 shadow-2xs font-bold'
                         : 'text-gray-600 dark:text-slate-400 hover:text-gray-900'
                     }`}
                   >
-                    <User className="h-3.5 w-3.5" />
-                    <span>Cobro Individual</span>
+                    <User className="h-3.5 w-3.5 shrink-0" />
+                    <span className="sm:hidden truncate">Individual</span>
+                    <span className="hidden sm:inline">Cobro Individual</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setTipoPlantilla('familiar')}
-                    className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${
+                    className={`flex items-center justify-center gap-1 sm:gap-1.5 rounded-lg px-2 sm:px-2.5 py-2 sm:py-1.5 text-[11px] sm:text-xs font-semibold transition text-center ${
                       tipoPlantilla === 'familiar'
                         ? 'bg-white dark:bg-[#111726] text-purple-700 dark:text-purple-400 shadow-2xs font-bold'
                         : 'text-gray-600 dark:text-slate-400 hover:text-gray-900'
                     }`}
                   >
-                    <Users className="h-3.5 w-3.5" />
-                    <span>Cobro Familiar</span>
+                    <Users className="h-3.5 w-3.5 shrink-0" />
+                    <span className="sm:hidden truncate">Familiar</span>
+                    <span className="hidden sm:inline">Cobro Familiar</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setTipoPlantilla('estudiante')}
-                    className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${
+                    className={`flex items-center justify-center gap-1 sm:gap-1.5 rounded-lg px-2 sm:px-2.5 py-2 sm:py-1.5 text-[11px] sm:text-xs font-semibold transition text-center ${
                       tipoPlantilla === 'estudiante'
                         ? 'bg-white dark:bg-[#111726] text-indigo-700 dark:text-indigo-400 shadow-2xs font-bold'
                         : 'text-gray-600 dark:text-slate-400 hover:text-gray-900'
                     }`}
                   >
-                    <FileText className="h-3.5 w-3.5" />
-                    <span>Aviso Directorio</span>
+                    <FileText className="h-3.5 w-3.5 shrink-0" />
+                    <span className="sm:hidden truncate">Directorio</span>
+                    <span className="hidden sm:inline">Aviso Directorio</span>
                   </button>
                 </div>
               </div>
