@@ -23,6 +23,7 @@ import {
   Star,
   Sparkles,
   History,
+  Settings,
 } from 'lucide-react';
 import { formatBs } from '@/lib/utils';
 import { supabase } from '@/lib/supabaseClient';
@@ -75,6 +76,12 @@ const NAV_ITEMS: NavItem[] = [
     href: '/estudiantes',
     icono: Users,
     descripcion: 'Directorio y representantes',
+  },
+  {
+    nombre: 'Configuración',
+    href: '/configuracion',
+    icono: Settings,
+    descripcion: 'Mensajes, pago móvil y sistema',
   },
 ];
 

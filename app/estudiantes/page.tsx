@@ -89,6 +89,12 @@ import {
   parseConsumoAudit,
   ResumenSaldoCliente,
 } from '@/lib/clientBalance';
+import {
+  generarMensajeAvisoEstudiante,
+  obtenerConfiguracion,
+  EVENTO_CONFIG_ACTUALIZADA,
+  SistemaConfig,
+} from '@/lib/whatsappConfig';
 
 export default function EstudiantesPage() {
   const router = useRouter();
@@ -98,6 +104,21 @@ export default function EstudiantesPage() {
   // Tasa BCV
   const [tasaBcv, setTasaBcv] = useState<number>(TASA_BCV_FALLBACK_DEFAULT);
   const [cargandoTasa, setCargandoTasa] = useState<boolean>(true);
+
+  // Configuración del sistema (plantillas de WhatsApp y datos de Pago Móvil)
+  const [configuracionSistema, setConfiguracionSistema] = useState<SistemaConfig>(obtenerConfiguracion);
+
+  useEffect(() => {
+    setConfiguracionSistema(obtenerConfiguracion());
+    const handler = (e: Event) => {
+      const custom = e as CustomEvent<SistemaConfig>;
+      if (custom.detail) {
+        setConfiguracionSistema(custom.detail);
+      }
+    };
+    window.addEventListener(EVENTO_CONFIG_ACTUALIZADA, handler);
+    return () => window.removeEventListener(EVENTO_CONFIG_ACTUALIZADA, handler);
+  }, []);
 
   // 2. Clientes y Paginación en Servidor (.range)
   const TAMANO_PAGINA_ESTUDIANTES = 24;
@@ -1027,23 +1048,15 @@ export default function EstudiantesPage() {
       : `el estudiante *${c.nombre_estudiante}* (${c.grado_seccion || 'Cantina'})`;
     const s = c.saldo !== undefined && c.saldo !== null ? Number(c.saldo) : (saldosClientes[c.id]?.saldoNetoUsd || 0);
 
-    let textoDeuda = 'Actualmente su cuenta se encuentra completamente al dia y solvente ($0.00).';
-    if (s < 0) {
-      const deuda = Math.abs(s);
-      const bs = calcularConversionBs(deuda, tasaBcv);
-      textoDeuda = `Le recordamos amablemente que presenta un saldo pendiente de ${formatUSD(deuda)} (${formatBs(bs)} a tasa oficial BCV: ${formatBs(tasaBcv)}).`;
-    } else if (s > 0) {
-      const bs = calcularConversionBs(s, tasaBcv);
-      textoDeuda = `Le informamos cordialmente que cuenta con un saldo a favor disponible de +${formatUSD(s)} (+${formatBs(bs)} a tasa oficial BCV).`;
-    }
-
-    const mensaje = `Hola, *${destinatario}*.
-Le escribimos cordialmente de *Club 5 Cantina Escolar* con relacion a ${sujeto}.
-
-${textoDeuda}
-
-Cualquier consulta o para gestionar su pedido en la cantina, estamos a su completa disposicion.
-¡Que tenga un excelente dia!`;
+    const mensaje = generarMensajeAvisoEstudiante({
+      destinatario,
+      sujeto,
+      estudiante: c.nombre_estudiante,
+      grado: c.grado_seccion,
+      saldo: s,
+      tasaBcv,
+      config: configuracionSistema,
+    });
 
     let telLimpio = (c.telefono_whatsapp || '').replace(/\D/g, '');
     if (telLimpio.startsWith('0')) {

@@ -66,6 +66,13 @@ import {
   procesarAbonoCliente,
   ResumenSaldoCliente,
 } from '@/lib/clientBalance';
+import {
+  generarMensajeCobroIndividual,
+  generarMensajeCobroFamiliar,
+  obtenerConfiguracion,
+  EVENTO_CONFIG_ACTUALIZADA,
+  SistemaConfig,
+} from '@/lib/whatsappConfig';
 
 interface ConsumoDetalleExtendido {
   id: string;
@@ -275,6 +282,21 @@ export default function DeudasPage() {
   // Notificación toast
   const [notificacion, setNotificacion] = useState<{ tipo: 'exito' | 'info'; texto: string } | null>(null);
   const [creandoDeudaMuestra, setCreandoDeudaMuestra] = useState<boolean>(false);
+
+  // Configuración del sistema (plantillas de WhatsApp y datos de Pago Móvil)
+  const [configuracionSistema, setConfiguracionSistema] = useState<SistemaConfig>(obtenerConfiguracion);
+
+  useEffect(() => {
+    setConfiguracionSistema(obtenerConfiguracion());
+    const handler = (e: Event) => {
+      const custom = e as CustomEvent<SistemaConfig>;
+      if (custom.detail) {
+        setConfiguracionSistema(custom.detail);
+      }
+    };
+    window.addEventListener(EVENTO_CONFIG_ACTUALIZADA, handler);
+    return () => window.removeEventListener(EVENTO_CONFIG_ACTUALIZADA, handler);
+  }, []);
 
   // Cargar Tasa BCV
   const cargarTasa = useCallback(async () => {
@@ -923,145 +945,30 @@ export default function DeudasPage() {
         const estudiante = cuenta.cliente?.nombre_estudiante || 'el estudiante';
         const rep = nombreRepresentante || cuenta.cliente?.nombre_representante || 'Estimado(a) Representante';
         const grado = cuenta.cliente?.grado_seccion ? `(${cuenta.cliente.grado_seccion})` : '';
-        const montoUsd = cuenta.totalDeudaUsd;
-        const montoBs = cuenta.totalDeudaBs;
-
-        const detalleConsumos = cuenta.consumos
-          .map((c, index) => {
-            let fTexto = 'Fecha';
-            try {
-              fTexto = new Date(c.fecha).toLocaleDateString('es-VE', {
-                day: '2-digit',
-                month: 'short',
-              });
-            } catch {
-              fTexto = c.fecha;
-            }
-
-            let productosTexto = '';
-            if (c.consumo_detalles && c.consumo_detalles.length > 0) {
-              productosTexto = c.consumo_detalles
-                .map(
-                  (d) =>
-                    `    - ${d.cantidad}x ${d.productos?.nombre || 'Producto'} (${formatUSD(d.precio_unitario_usd * d.cantidad)})`
-                )
-                .join('\n');
-            } else {
-              productosTexto = '    - Consumo en cantina escolar';
-            }
-
-            return `*Consumo #${index + 1} (${fTexto})* - ${formatUSD(c.monto_total_usd)}:\n${productosTexto}`;
-          })
-          .join('\n\n');
-
         const esProf = esProfesorOPersonal(cuenta.cliente?.grado_seccion);
-        const encabezado = esProf
-          ? `Hola, estimado(a) *Prof./Personal ${cuenta.cliente?.nombre_estudiante}* (${cuenta.cliente?.grado_seccion}).\nLe escribimos cordialmente de *Club 5 Cantina Escolar*.\n\nLe compartimos el estado de cuenta pendiente:`
-          : `Hola, *${rep}*.\nLe escribimos cordialmente de *Club 5 Cantina Escolar*.\n\nLe compartimos el estado de cuenta pendiente de *${estudiante}* ${grado}:`;
 
-        return `${encabezado}
-
-*Detalle de consumos (${cuenta.consumos.length}):*
-${detalleConsumos}
-
----------------------------------
-*TOTAL A PAGAR:* ${formatUSD(montoUsd)}
-*Equivalente en Bolívares:* ${formatBs(montoBs)}
-(Tasa oficial BCV del día: ${formatBs(tasaBcvActual)})
----------------------------------
-
-*Datos para realizar el Pago Móvil:*
-- Banco: BNC (Banco Nacional de Crédito - 0191)
-- Cédula: 14953511
-- Teléfono Pago Móvil: 04125404830
-- Efectivo: Directamente en caja de cantina ($ o Bs.)
-
-*Reporte de Referencia:*
-Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123588848*
-
-¡Muchas gracias y que tenga un excelente día!`;
+        return generarMensajeCobroIndividual({
+          representante: rep,
+          estudiante: estudiante,
+          grado: grado,
+          esProfesorOPersonal: esProf,
+          consumos: cuenta.consumos,
+          totalUsd: cuenta.totalDeudaUsd,
+          totalBs: cuenta.totalDeudaBs,
+          tasaBcv: tasaBcvActual,
+          config: configuracionSistema,
+        });
       }
 
       // Caso familiar consolidado (2 o más estudiantes)
-      const granTotalUsd = cuentas.reduce((acc, c) => acc + c.totalDeudaUsd, 0);
-      const granTotalBs = calcularConversionBs(granTotalUsd, tasaBcvActual);
-
-      // Resumen claro: - Pedro (3er Año): $4.00, - Sofía (1er Año): $3.50
-      const resumenFamiliar = cuentas
-        .map((c) => {
-          const nombre = c.cliente?.nombre_estudiante || 'Estudiante';
-          const seccion = c.cliente?.grado_seccion ? `(${c.cliente.grado_seccion})` : '';
-          return `- ${nombre} ${seccion}: ${formatUSD(c.totalDeudaUsd)} (${formatBs(c.totalDeudaBs)})`;
-        })
-        .join('\n');
-
-      // Desglose detallado de consumos por cada estudiante
-      const desgloseEstudiantes = cuentas
-        .map((c) => {
-          const nombre = c.cliente?.nombre_estudiante || 'Estudiante';
-          const seccion = c.cliente?.grado_seccion ? `(${c.cliente.grado_seccion})` : '';
-          const cantConsumos = c.consumos.length;
-
-          const detalleConsumos = c.consumos
-            .map((cons, index) => {
-              let fTexto = 'Fecha';
-              try {
-                fTexto = new Date(cons.fecha).toLocaleDateString('es-VE', {
-                  day: '2-digit',
-                  month: 'short',
-                });
-              } catch {
-                fTexto = cons.fecha;
-              }
-
-              let itemsTexto = '';
-              if (cons.consumo_detalles && cons.consumo_detalles.length > 0) {
-                itemsTexto = cons.consumo_detalles
-                  .map(
-                    (d) =>
-                      `    - ${d.cantidad}x ${d.productos?.nombre || 'Producto'} (${formatUSD(d.precio_unitario_usd * d.cantidad)})`
-                  )
-                  .join('\n');
-              } else {
-                itemsTexto = '    - Consumo en cantina escolar';
-              }
-
-              return `  • *Consumo #${index + 1} (${fTexto})* - ${formatUSD(cons.monto_total_usd)}:\n${itemsTexto}`;
-            })
-            .join('\n\n');
-
-          return `*👤 ${nombre}* ${seccion} - *Total: ${formatUSD(c.totalDeudaUsd)}* (${cantConsumos} ${cantConsumos === 1 ? 'consumo' : 'consumos'}):\n${detalleConsumos}`;
-        })
-        .join('\n\n------------------\n\n');
-
-      const encabezado = `Hola, estimado(a) *${nombreRepresentante || 'Representante / Familia'}*.\nLe escribimos cordialmente de *Club 5 Cantina Escolar*.\n\nLe compartimos el estado de cuenta pendiente consolidado familiar de sus representados:`;
-
-      return `${encabezado}
-
-*Resumen de Cuentas:*
-${resumenFamiliar}
-
-*Detalle de Consumos por Estudiante:*
-${desgloseEstudiantes}
-
----------------------------------
-*GRAN TOTAL A PAGAR:* ${formatUSD(granTotalUsd)}
-*Equivalente en Bolívares:* ${formatBs(granTotalBs)}
-(Tasa oficial BCV del día: ${formatBs(tasaBcvActual)})
----------------------------------
-
-*Datos para realizar el Pago Móvil:*
-- Banco: BNC (Banco Nacional de Crédito - 0191)
-- Cédula: 14953511
-- Teléfono Pago Móvil: 04125404830
-- Efectivo: Directamente en caja de cantina ($ o Bs.)
-
-*Reporte de Referencia:*
-Por favor enviar la captura de la transferencia o referencia al WhatsApp: *04123588848*
-
-¡Muchas gracias y que tenga un excelente día!`;
+      return generarMensajeCobroFamiliar({
+        representante: nombreRepresentante,
+        cuentas: cuentas,
+        tasaBcv: tasaBcvActual,
+        config: configuracionSistema,
+      });
     },
-    []
+    [configuracionSistema]
   );
 
   // Abrir modal unificado de WhatsApp (individual o consolidado familiar)
