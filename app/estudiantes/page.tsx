@@ -1681,7 +1681,7 @@ export default function EstudiantesPage() {
                                   Deuda / Cuenta por Cobrar
                                 </span>
                                 <span className="font-mono text-xs font-bold text-amber-950">
-                                  -{formatUSD(montoDeuda)} &bull;{' '}
+                                  -{formatUSD(montoDeuda)} •{' '}
                                   {formatBs(calcularConversionBs(montoDeuda, tasaBcv))}
                                 </span>
                               </div>
@@ -1698,7 +1698,7 @@ export default function EstudiantesPage() {
                           <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-2.5 flex items-center gap-2 text-emerald-800">
                             <ShieldCheck className="h-4 w-4 text-emerald-600 shrink-0" />
                             <span className="text-xs font-semibold">
-                              Solvente &bull; Sin deudas pendientes ($0.00)
+                              Solvente • Sin deudas pendientes ($0.00)
                             </span>
                           </div>
                         )}
@@ -2911,8 +2911,8 @@ export default function EstudiantesPage() {
                         <span>Ficha del Alumno / Cliente</span>
                       </Dialog.Title>
                       <Dialog.Description className="text-xs text-gray-500 dark:text-slate-400 mt-0.5">
-                        {cli.nombre_estudiante} &bull; {cli.grado_seccion || 'Sin sección'}
-                        {cli.nombre_representante ? ` &bull; Rep: ${cli.nombre_representante}` : ''}
+                        {cli.nombre_estudiante} • {cli.grado_seccion || 'Sin sección'}
+                        {cli.nombre_representante ? ` • Rep: ${cli.nombre_representante}` : ''}
                       </Dialog.Description>
                     </div>
 
@@ -2998,22 +2998,24 @@ export default function EstudiantesPage() {
                                     </span>
 
                                     <span
-                                      className={`rounded-full px-2 py-0.2 text-[9px] font-bold uppercase tracking-wider ${
-                                        audit.esAnulado
-                                          ? 'bg-rose-100 text-rose-800'
-                                          : audit.esPendiente
-                                          ? 'bg-amber-100 text-amber-800'
-                                          : 'bg-emerald-100 text-emerald-800'
-                                      }`}
+                                      className={`rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider ${audit.estadoBadge.color}`}
                                     >
                                       {audit.estadoBadge.texto}
                                     </span>
                                   </div>
 
                                   <span className="text-[10px] text-gray-400 mt-0.5 block">
-                                    {fecha} &bull; Método: {audit.nombreLegible}
+                                    {fecha} • Método: {audit.nombreLegible}
                                     {audit.referencia ? ` (#${audit.referencia})` : ''}
                                   </span>
+
+                                  {audit.esParcial && audit.saldoPendiente !== undefined && (
+                                    <div className="mt-1 flex items-center gap-2 text-[10px] font-mono text-amber-700 dark:text-amber-300 font-semibold bg-amber-50/80 dark:bg-amber-950/40 px-2 py-0.5 rounded-lg border border-amber-200/60 dark:border-amber-900/40 w-fit">
+                                      <span>Abonó: {formatUSD(audit.montoPagado || 0)}</span>
+                                      <span>•</span>
+                                      <span>Resta por pagar: {formatUSD(audit.saldoPendiente)}</span>
+                                    </div>
+                                  )}
                                 </div>
 
                                 {/* Botón Anular Venta si no está anulada */}

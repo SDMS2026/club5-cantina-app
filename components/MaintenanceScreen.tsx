@@ -144,7 +144,7 @@ export function MaintenanceScreen() {
 
         {/* Footer branding */}
         <p className="mt-6 text-center text-xs text-gray-400 font-medium">
-          Club 5 Cantina Escolar &bull; Desarrollado por SyncLogic
+          Club 5 Cantina Escolar • Desarrollado por SyncLogic
         </p>
       </motion.div>
     </div>

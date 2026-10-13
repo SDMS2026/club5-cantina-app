@@ -104,7 +104,7 @@ export function Cart({
                       </h4>
                       <div className="flex items-center gap-1.5 text-[11px] text-gray-500">
                         <span>{formatUSD(item.producto.precio_usd)} c/u</span>
-                        <span>&bull;</span>
+                        <span>•</span>
                         <span className="font-mono">{formatBs(subtotalItemBs)}</span>
                       </div>
                     </div>

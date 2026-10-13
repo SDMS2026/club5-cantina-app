@@ -266,7 +266,7 @@ export async function procesarAbonoCliente({
     try {
       const { data: consumosPendientes } = await supabase
         .from('consumos')
-        .select('id, monto_total_usd')
+        .select('id, monto_total_usd, metodo_pago, pagado')
         .eq('cliente_id', clienteId)
         .eq('pagado', false)
         .order('fecha', { ascending: true });
@@ -275,13 +275,27 @@ export async function procesarAbonoCliente({
         let disponible = montoUsd;
         for (const cp of consumosPendientes) {
           if (disponible <= 0) break;
-          const m = Number(cp.monto_total_usd || 0);
-          if (disponible >= m) {
+          const deudaCp = obtenerSaldoPendienteConsumo(cp);
+          if (deudaCp <= 0) {
             await supabase.from('consumos').update({ pagado: true }).eq('id', cp.id);
-            disponible = Math.round((disponible - m) * 100) / 100;
+            continue;
+          }
+
+          const auditCp = parseConsumoAudit(cp);
+          if (disponible >= deudaCp) {
+            // Liquidado por completo
+            await supabase.from('consumos').update({
+              pagado: true,
+              metodo_pago: auditCp.metodoBase,
+            }).eq('id', cp.id);
+            disponible = Math.round((disponible - deudaCp) * 100) / 100;
           } else {
-            const restante = Math.round((m - disponible) * 100) / 100;
-            await supabase.from('consumos').update({ monto_total_usd: restante }).eq('id', cp.id);
+            // Se abona una parte del saldo pendiente sin destruir monto_total_usd
+            const restante = Math.round((deudaCp - disponible) * 100) / 100;
+            const nuevoAbonado = Math.round((Number(cp.monto_total_usd || 0) - restante) * 100) / 100;
+            await supabase.from('consumos').update({
+              metodo_pago: `${auditCp.metodoBase}#parcial:pagado=${nuevoAbonado.toFixed(2)},debe=${restante.toFixed(2)}`,
+            }).eq('id', cp.id);
             disponible = 0;
             break;
           }
@@ -342,6 +356,9 @@ export interface ConsumoInfoAudit {
   esAnulado: boolean;
   esPendiente: boolean;
   esMixto: boolean;
+  esParcial: boolean;
+  montoPagado?: number;
+  saldoPendiente?: number;
   estadoBadge: {
     texto: string;
     color: 'emerald' | 'amber' | 'rose' | 'indigo' | 'gray';
@@ -350,11 +367,12 @@ export interface ConsumoInfoAudit {
 
 /**
  * Parsea el método de pago y estado de una transacción para auditoría contable.
- * Extrae referencias bancarias, banderas de anulación y clasifica el método.
+ * Extrae referencias bancarias, banderas de anulación, pagos parciales y saldos pendientes.
  */
 export function parseConsumoAudit(consumo: {
   metodo_pago?: string | null;
   pagado?: boolean | null;
+  monto_total_usd?: number | null;
 }): ConsumoInfoAudit {
   const raw = consumo.metodo_pago || '';
   const esAnulado = raw.toLowerCase().startsWith('anulado');
@@ -371,7 +389,32 @@ export function parseConsumoAudit(consumo: {
     limpio = limpio.replace(/\(Ref:[^)]+\)/i, '').trim();
   }
 
-  const esPendiente = !esAnulado && (consumo.pagado === false || limpio === 'pendiente');
+  // Detección de pago parcial explícito: #parcial:pagado=1.00,debe=0.50
+  let esParcial = false;
+  let montoPagado: number | undefined = undefined;
+  let saldoPendiente: number | undefined = undefined;
+
+  if (limpio.includes('#parcial:') || limpio.includes('parcial:')) {
+    const matchPagado = limpio.match(/pagado=([0-9.]+)/i);
+    const matchDebe = limpio.match(/debe=([0-9.]+)/i);
+    if (matchDebe) {
+      saldoPendiente = parseFloat(matchDebe[1]) || 0;
+      montoPagado = matchPagado ? parseFloat(matchPagado[1]) || 0 : 0;
+      esParcial = true;
+    }
+    limpio = limpio.replace(/#?parcial:[^#]+/i, '').trim();
+    limpio = limpio.replace(/^#|#$/g, '').trim();
+  }
+
+  const montoTotalUsd = Number(consumo.monto_total_usd || 0);
+
+  // Si no se codificó #parcial pero pagado es false y no está anulado
+  if (!esAnulado && consumo.pagado === false && !esParcial && montoTotalUsd > 0) {
+    saldoPendiente = montoTotalUsd;
+    montoPagado = 0;
+  }
+
+  const esPendiente = !esAnulado && (consumo.pagado === false || limpio === 'pendiente' || (saldoPendiente !== undefined && saldoPendiente > 0));
   const esMixto = limpio.startsWith('mixto:');
 
   let metodoBase = limpio;
@@ -414,9 +457,15 @@ export function parseConsumoAudit(consumo: {
     nombreLegible = limpio;
   }
 
+  if (esParcial && montoPagado !== undefined && saldoPendiente !== undefined) {
+    nombreLegible = `${nombreLegible} • Parcial (Abonó $${montoPagado.toFixed(2)} • Debe $${saldoPendiente.toFixed(2)})`;
+  }
+
   let estadoBadge: ConsumoInfoAudit['estadoBadge'];
   if (esAnulado) {
     estadoBadge = { texto: 'Anulada', color: 'rose' };
+  } else if (esParcial && saldoPendiente !== undefined) {
+    estadoBadge = { texto: `Parcial (Debe $${saldoPendiente.toFixed(2)})`, color: 'amber' };
   } else if (esPendiente) {
     estadoBadge = { texto: 'Por Cobrar', color: 'amber' };
   } else {
@@ -430,8 +479,48 @@ export function parseConsumoAudit(consumo: {
     esAnulado,
     esPendiente,
     esMixto,
+    esParcial,
+    montoPagado,
+    saldoPendiente,
     estadoBadge,
   };
+}
+
+/**
+ * Retorna el saldo adeudado real de un consumo:
+ * - Si está pagado: 0
+ * - Si es parcial: saldoPendiente
+ * - Si es fiado completo: monto_total_usd
+ */
+export function obtenerSaldoPendienteConsumo(consumo: {
+  monto_total_usd?: number | null;
+  metodo_pago?: string | null;
+  pagado?: boolean | null;
+}): number {
+  if (consumo.pagado === true) return 0;
+  const audit = parseConsumoAudit(consumo);
+  if (audit.esAnulado) return 0;
+  if (audit.esParcial && audit.saldoPendiente !== undefined) {
+    return audit.saldoPendiente;
+  }
+  return Number(consumo.monto_total_usd || 0);
+}
+
+/**
+ * Retorna el monto efectivamente pagado/abonado en un consumo
+ */
+export function obtenerMontoPagadoConsumo(consumo: {
+  monto_total_usd?: number | null;
+  metodo_pago?: string | null;
+  pagado?: boolean | null;
+}): number {
+  const audit = parseConsumoAudit(consumo);
+  if (audit.esAnulado) return 0;
+  if (consumo.pagado === true) return Number(consumo.monto_total_usd || 0);
+  if (audit.esParcial && audit.montoPagado !== undefined) {
+    return audit.montoPagado;
+  }
+  return 0;
 }
 
 export interface ResultadoAnulacionConsumo {
@@ -486,8 +575,17 @@ export async function anularConsumo({
   const montoTotalUsd = Number(consumo.monto_total_usd || 0);
   let reajusteSaldo = 0;
 
+  const auditOriginal = parseConsumoAudit({
+    metodo_pago: metodoOriginal,
+    pagado: consumo.pagado,
+    monto_total_usd: montoTotalUsd,
+  });
+
   // 3. Determinar reajuste al saldo unificado (clientes.saldo)
-  if (metodoOriginal === 'pendiente') {
+  if (auditOriginal.esParcial && auditOriginal.saldoPendiente !== undefined) {
+    // Si fue venta con pago parcial: revertir solo la deuda generada (+saldoPendiente)
+    reajusteSaldo = auditOriginal.saldoPendiente;
+  } else if (metodoOriginal === 'pendiente' || auditOriginal.metodoBase === 'pendiente') {
     // Fiado: el cliente acumuló deuda (-monto). Al anular, se reversa la deuda (+monto).
     reajusteSaldo = montoTotalUsd;
   } else if (metodoOriginal === 'saldo_favor') {
@@ -577,19 +675,21 @@ export interface ResultadoEdicionConsumo {
 }
 
 /**
- * Modifica los ítems, cantidades y monto total de un consumo/ticket previamente registrado.
+ * Modifica los ítems, cantidades, monto total y monto pagado/pendiente de un ticket previamente registrado.
  * - Sincroniza las filas en consumo_detalles.
- * - Actualiza consumos.monto_total_usd.
+ * - Actualiza consumos.monto_total_usd, consumos.pagado y consumos.metodo_pago.
  * - Ajusta existencias en productos (si la columna stock existe).
- * - Ajusta clientes.saldo si el consumo fue fiado ('pendiente') o pagado con saldo_favor.
+ * - Ajusta clientes.saldo calculando el saldo pendiente real.
  */
 export async function editarConsumoPedido({
   consumoId,
   nuevosItems,
+  montoPagadoUsd,
   motivo,
 }: {
   consumoId: string;
   nuevosItems: ItemEdicionConsumo[];
+  montoPagadoUsd?: number;
   motivo?: string;
 }): Promise<ResultadoEdicionConsumo> {
   if (!consumoId) throw new Error('ID de consumo requerido para editar el pedido.');
@@ -628,6 +728,20 @@ export async function editarConsumoPedido({
 
   const metodoOriginal = consumo.metodo_pago || '';
   const montoAnteriorUsd = Number(consumo.monto_total_usd || 0);
+
+  const auditOriginal = parseConsumoAudit({
+    metodo_pago: metodoOriginal,
+    pagado: consumo.pagado,
+    monto_total_usd: montoAnteriorUsd,
+  });
+
+  // Deuda anterior acumulada en este consumo
+  let deudaAnterior = 0;
+  if (auditOriginal.esParcial && auditOriginal.saldoPendiente !== undefined) {
+    deudaAnterior = auditOriginal.saldoPendiente;
+  } else if (consumo.pagado === false || metodoOriginal === 'pendiente' || auditOriginal.metodoBase === 'pendiente') {
+    deudaAnterior = montoAnteriorUsd;
+  }
 
   // 3. Obtener los detalles originales para cálculo de diferencias de stock
   const { data: detallesOriginales, error: errDetalles } = await supabase
@@ -686,33 +800,62 @@ export async function editarConsumoPedido({
   ) / 100;
   const diferenciaUsd = Math.round((nuevoTotalUsd - montoAnteriorUsd) * 100) / 100;
 
+  // Determinar nuevo monto pagado y nuevo saldo pendiente
+  let nuevoPagado = consumo.pagado;
+  let nuevoMetodoPago = metodoOriginal;
+  let deudaNueva = deudaAnterior;
+
+  if (montoPagadoUsd !== undefined) {
+    const pagadoLimpio = Math.max(0, Math.round(montoPagadoUsd * 100) / 100);
+    const saldoPendienteNuevo = Math.max(0, Math.round((nuevoTotalUsd - pagadoLimpio) * 100) / 100);
+    deudaNueva = saldoPendienteNuevo;
+
+    if (saldoPendienteNuevo > 0) {
+      nuevoPagado = false;
+      const base = auditOriginal.metodoBase || 'efectivo_usd';
+      nuevoMetodoPago = `${base}#parcial:pagado=${pagadoLimpio.toFixed(2)},debe=${saldoPendienteNuevo.toFixed(2)}`;
+    } else {
+      nuevoPagado = true;
+      nuevoMetodoPago = auditOriginal.metodoBase || 'efectivo_usd';
+    }
+  } else {
+    // Si no se especificó montoPagadoUsd pero el consumo era fiado:
+    if (metodoOriginal === 'pendiente' || auditOriginal.metodoBase === 'pendiente' || consumo.pagado === false) {
+      deudaNueva = Math.max(0, deudaAnterior + diferenciaUsd);
+      if (auditOriginal.esParcial && auditOriginal.montoPagado !== undefined) {
+        nuevoMetodoPago = `${auditOriginal.metodoBase}#parcial:pagado=${auditOriginal.montoPagado.toFixed(2)},debe=${deudaNueva.toFixed(2)}`;
+      }
+    }
+  }
+
   // 5. Ajustar saldo del cliente en clientes.saldo
   let nuevoSaldoCliente: number | undefined = undefined;
 
-  if (
-    consumo.cliente_id &&
-    (metodoOriginal === 'pendiente' ||
-      metodoOriginal === 'saldo_favor' ||
-      metodoOriginal.startsWith('mixto:'))
-  ) {
-    const { data: clienteActual, error: errCliente } = await supabase
-      .from('clientes')
-      .select('saldo')
-      .eq('id', consumo.cliente_id)
-      .single();
+  if (consumo.cliente_id) {
+    const deltaDeuda = Math.round((deudaNueva - deudaAnterior) * 100) / 100;
+    const esSaldoFavor = metodoOriginal === 'saldo_favor' || metodoOriginal.startsWith('mixto:');
+    const montoAjuste = esSaldoFavor ? diferenciaUsd : deltaDeuda;
 
-    if (!errCliente && clienteActual) {
-      const saldoPrevio = Number(clienteActual.saldo || 0);
-      nuevoSaldoCliente = Math.round((saldoPrevio - diferenciaUsd) * 100) / 100;
-
-      const { error: errUpdateCliente } = await supabase
+    if (montoAjuste !== 0) {
+      const { data: clienteActual, error: errCliente } = await supabase
         .from('clientes')
-        .update({ saldo: nuevoSaldoCliente })
-        .eq('id', consumo.cliente_id);
+        .select('saldo')
+        .eq('id', consumo.cliente_id)
+        .single();
 
-      if (errUpdateCliente) {
-        console.error('Error actualizando saldo de cliente al editar consumo:', errUpdateCliente);
-        throw new Error('Error al actualizar el saldo de la cuenta corriente del cliente.');
+      if (!errCliente && clienteActual) {
+        const saldoPrevio = Number(clienteActual.saldo || 0);
+        nuevoSaldoCliente = Math.round((saldoPrevio - montoAjuste) * 100) / 100;
+
+        const { error: errUpdateCliente } = await supabase
+          .from('clientes')
+          .update({ saldo: nuevoSaldoCliente })
+          .eq('id', consumo.cliente_id);
+
+        if (errUpdateCliente) {
+          console.error('Error actualizando saldo de cliente al editar consumo:', errUpdateCliente);
+          throw new Error('Error al actualizar el saldo de la cuenta corriente del cliente.');
+        }
       }
     }
   }
@@ -749,6 +892,8 @@ export async function editarConsumoPedido({
     .from('consumos')
     .update({
       monto_total_usd: nuevoTotalUsd,
+      pagado: nuevoPagado,
+      metodo_pago: nuevoMetodoPago,
     })
     .eq('id', consumoId);
 

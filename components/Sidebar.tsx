@@ -438,7 +438,7 @@ export function Sidebar() {
                 </span>
               </div>
               <p className="text-[10px] text-gray-500 dark:text-slate-400 leading-snug">
-                Supabase conectado &bull; Facturación bimoneda lista.
+                Supabase conectado • Facturación bimoneda lista.
               </p>
             </motion.div>
 

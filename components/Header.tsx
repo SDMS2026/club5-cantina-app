@@ -90,7 +90,7 @@ export function Header({
                 </span>
               </div>
               <p className="text-[10px] sm:text-xs text-gray-500 dark:text-slate-400 hidden sm:block">
-                Punto de Venta &bull; Facturación Bimoneda
+                Punto de Venta • Facturación Bimoneda
               </p>
             </div>
           </Link>

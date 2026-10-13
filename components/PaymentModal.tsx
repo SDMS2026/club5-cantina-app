@@ -146,6 +146,10 @@ export function PaymentModal({
   const [guardarVueltoComoSaldo, setGuardarVueltoComoSaldo] = useState<boolean>(false);
   const [vueltoAcreditadoExito, setVueltoAcreditadoExito] = useState<number | null>(null);
 
+  // Abono inicial opcional para compras a crédito / fiado
+  const [montoAbonoFiadoInput, setMontoAbonoFiadoInput] = useState<string>('');
+  const [monedaAbonoFiado, setMonedaAbonoFiado] = useState<'USD' | 'Bs'>('USD');
+
   // Deslizamiento vertical y arrastre (drag-to-scroll) para móviles y emuladores con Body Scroll Lock
   const dragScrollPago = useModalDragScroll({
     isOpen: abierto,
@@ -203,6 +207,8 @@ export function PaymentModal({
       setNumeroReferenciaMixto('');
       setMontoUsdMixtoInput('');
       setMontoBsMixtoEntregadoInput('');
+      setMontoAbonoFiadoInput('');
+      setMonedaAbonoFiado('USD');
       setSubMetodoMixto('efectivo_bs');
       setEsPagoFamiliar(false);
       setProcesando(false);
@@ -264,6 +270,48 @@ export function PaymentModal({
     }
   }
 
+  // Abono inicial opcional en compras fiadas
+  const montoAbonoFiadoNum = parseFloat(montoAbonoFiadoInput.replace(',', '.')) || 0;
+  const montoAbonoFiadoUsd =
+    monedaAbonoFiado === 'USD'
+      ? montoAbonoFiadoNum
+      : (montoAbonoFiadoNum > 0 && tasaBcv > 0 ? Math.round((montoAbonoFiadoNum / tasaBcv) * 100) / 100 : 0);
+
+  // Detección consolidada de Pago Parcial y Saldo Pendiente
+  let esPagoParcial = false;
+  let montoPagadoUsd = totalUsd;
+  let saldoPendienteUsd = 0;
+
+  if (metodoSeleccionado === 'pendiente') {
+    if (montoAbonoFiadoUsd > 0) {
+      montoPagadoUsd = Math.min(totalUsd, montoAbonoFiadoUsd);
+      saldoPendienteUsd = Math.max(0, Math.round((totalUsd - montoPagadoUsd) * 100) / 100);
+      esPagoParcial = saldoPendienteUsd > 0 && montoPagadoUsd > 0;
+    } else {
+      montoPagadoUsd = 0;
+      saldoPendienteUsd = totalUsd;
+      esPagoParcial = false;
+    }
+  } else if (
+    metodoSeleccionado === 'efectivo_usd' ||
+    metodoSeleccionado === 'efectivo_bs' ||
+    metodoSeleccionado === 'pago_movil' ||
+    metodoSeleccionado === 'punto_debito'
+  ) {
+    if (montoEntregadoNum > 0 && montoEntregadoUsdEquiv < totalUsd) {
+      montoPagadoUsd = montoEntregadoUsdEquiv;
+      saldoPendienteUsd = Math.max(0, Math.round((totalUsd - montoPagadoUsd) * 100) / 100);
+      esPagoParcial = true;
+    } else {
+      montoPagadoUsd = totalUsd;
+      saldoPendienteUsd = 0;
+      esPagoParcial = false;
+    }
+  }
+
+  const saldoPendienteBs = calcularConversionBs(saldoPendienteUsd, tasaBcv);
+  const montoPagadoBs = calcularConversionBs(montoPagadoUsd, tasaBcv);
+
   // Vuelto efectivo consolidado a considerar para abono a cuenta corriente
   const vueltoEfectivoUsd =
     metodoSeleccionado === 'pago_mixto'
@@ -301,9 +349,18 @@ export function PaymentModal({
       }
     }
 
+    // Validación de Saldo Pendiente (Fiado / Pago Parcial)
+    if (saldoPendienteUsd > 0 && !cliente) {
+      setErrorMensaje(
+        `Para registrar un saldo pendiente (${formatUSD(saldoPendienteUsd)} / ${formatBs(saldoPendienteBs)}), debes seleccionar un estudiante o cliente registrado.`
+      );
+      setProcesando(false);
+      return;
+    }
+
     try {
       let metodoPagoFinal = metodoSeleccionado as string;
-      const pagado = metodoSeleccionado !== 'pendiente';
+      const pagado = saldoPendienteUsd <= 0;
 
       // Si es Pago Móvil y se ingresó número de referencia, codificarla para auditoría bancaria
       if (metodoSeleccionado === 'pago_movil' && numeroReferencia.trim()) {
@@ -345,8 +402,19 @@ export function PaymentModal({
         }
       }
 
+      // Si queda saldo pendiente (fiado / pago parcial)
+      if (saldoPendienteUsd > 0) {
+        if (metodoSeleccionado === 'pendiente') {
+          metodoPagoFinal = montoPagadoUsd > 0
+            ? `pendiente#parcial:pagado=${montoPagadoUsd.toFixed(2)},debe=${saldoPendienteUsd.toFixed(2)}`
+            : 'pendiente';
+        } else {
+          metodoPagoFinal = `${metodoPagoFinal}#parcial:pagado=${montoPagadoUsd.toFixed(2)},debe=${saldoPendienteUsd.toFixed(2)}`;
+        }
+      }
+
       // Determinar monto a descontar del campo clientes.saldo:
-      // "Al hacer una Venta/Consumo: Resta el monto total del carrito del campo clientes.saldo (ya sea que pague con su saldo a favor o que quede debiendo/fiado)."
+      // "Al hacer una Venta/Consumo: Resta el monto total del carrito o el saldo pendiente del campo clientes.saldo."
       let montoADescontarSaldo = 0;
       if (metodoSeleccionado === 'saldo_favor') {
         if (saldoDisponible >= totalUsd) {
@@ -360,9 +428,9 @@ export function PaymentModal({
           metodoPagoFinal = `mixto:saldo_favor=${saldoUsado.toFixed(2)},${subMetodoDiferencia}=${diferencia.toFixed(2)}`;
           montoADescontarSaldo = saldoUsado;
         }
-      } else if (metodoSeleccionado === 'pendiente') {
-        // Venta a cuenta / Fiado
-        montoADescontarSaldo = totalUsd;
+      } else if (saldoPendienteUsd > 0) {
+        // Venta a cuenta / Fiado o Pago Parcial: se debita el saldo pendiente
+        montoADescontarSaldo = saldoPendienteUsd;
       }
 
       // 1. Insertar consumo cabecera
@@ -485,6 +553,8 @@ export function PaymentModal({
         setNumeroReferenciaMixto('');
         setMontoUsdMixtoInput('');
         setMontoBsMixtoEntregadoInput('');
+        setMontoAbonoFiadoInput('');
+        setMonedaAbonoFiado('USD');
         setEsPagoFamiliar(false);
         setMetodoSeleccionado(null);
       }, 300);
@@ -519,11 +589,25 @@ export function PaymentModal({
 
           {exito ? (
             <div className="flex flex-col items-center justify-center py-6 text-center">
-              <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-100 dark:bg-emerald-950/70 text-emerald-600 dark:text-emerald-400 mb-4 animate-in zoom-in border border-emerald-200/60 dark:border-emerald-800/60">
-                <CheckCircle2 className="h-10 w-10" />
+              <div
+                className={`flex h-16 w-16 items-center justify-center rounded-2xl mb-4 animate-in zoom-in border ${
+                  saldoPendienteUsd > 0
+                    ? 'bg-amber-100 dark:bg-amber-950/70 text-amber-600 dark:text-amber-400 border-amber-200/60 dark:border-amber-800/60'
+                    : 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-600 dark:text-emerald-400 border-emerald-200/60 dark:border-emerald-800/60'
+                }`}
+              >
+                {saldoPendienteUsd > 0 ? (
+                  <Clock className="h-10 w-10" />
+                ) : (
+                  <CheckCircle2 className="h-10 w-10" />
+                )}
               </div>
               <Dialog.Title className="text-xl font-bold text-gray-900 dark:text-white">
-                ¡Venta Registrada Exitosamente!
+                {saldoPendienteUsd > 0
+                  ? esPagoParcial
+                    ? '¡Venta Registrada con Pago Parcial!'
+                    : '¡Venta a Crédito Registrada!'
+                  : '¡Venta Registrada Exitosamente!'}
               </Dialog.Title>
               <Dialog.Description className="mt-1 text-sm text-gray-500 dark:text-slate-400">
                 El consumo fue guardado en Supabase bajo el ID{' '}
@@ -541,10 +625,32 @@ export function PaymentModal({
                   <span>Equivalente Bs. (Tasa {formatBs(tasaBcv)}):</span>
                   <span className="font-mono font-bold text-gray-900 dark:text-white">{formatBs(totalBs)}</span>
                 </div>
+
+                {saldoPendienteUsd > 0 && (
+                  <>
+                    <div className="flex justify-between text-xs text-gray-600 dark:text-slate-400">
+                      <span>Abonado / Pagado hoy:</span>
+                      <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400">
+                        +{formatUSD(montoPagadoUsd)} ({formatBs(montoPagadoBs)})
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-xs font-bold text-amber-800 dark:text-amber-300 border-t border-amber-200/80 dark:border-amber-800/80 pt-1.5">
+                      <span>Saldo Pendiente (Deuda asignada):</span>
+                      <span className="font-mono font-black text-sm">
+                        -{formatUSD(saldoPendienteUsd)} (-{formatBs(saldoPendienteBs)})
+                      </span>
+                    </div>
+                  </>
+                )}
+
                 <div className="flex justify-between text-xs text-gray-600 dark:text-slate-400">
-                  <span>Método de Pago:</span>
+                  <span>Método / Estado:</span>
                   <span className="font-medium text-gray-900 dark:text-slate-200">
-                    {metodoSeleccionado === 'saldo_favor'
+                    {saldoPendienteUsd > 0
+                      ? esPagoParcial
+                        ? `Parcial (${METODOS_PAGO.find((m) => m.id === metodoSeleccionado)?.nombre || 'Caja'})`
+                        : 'Por Cobrar (Fiado escolar)'
+                      : metodoSeleccionado === 'saldo_favor'
                       ? esSaldoSuficiente
                         ? 'Saldo a Favor (Total)'
                         : `Pago Mixto (Saldo a Favor $${saldoDisponible.toFixed(2)} + ${subMetodoDiferencia})`
@@ -553,7 +659,7 @@ export function PaymentModal({
                 </div>
                 {cliente && (
                   <div className="flex justify-between text-xs text-gray-600 dark:text-slate-400 border-t border-gray-200/60 dark:border-slate-800 pt-2">
-                    <span>Estudiante:</span>
+                    <span>Estudiante / Ficha:</span>
                     <span className="font-medium text-indigo-700 dark:text-indigo-400">
                       {cliente.nombre_estudiante} ({cliente.grado_seccion || 'General'})
                     </span>
@@ -1227,6 +1333,99 @@ export function PaymentModal({
                 </div>
               )}
 
+              {/* Panel para Fiado / Cuenta por Cobrar con opción de Abono Inicial */}
+              {metodoSeleccionado === 'pendiente' && (
+                <div className="mt-3 rounded-2xl border border-amber-200 dark:border-amber-900/60 bg-amber-50/60 dark:bg-amber-950/40 p-3.5 text-xs text-amber-900 dark:text-amber-200 animate-in fade-in space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 font-bold text-amber-900 dark:text-amber-200">
+                      <Clock className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                      <span>Fiado / Cuenta por Cobrar</span>
+                    </div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-amber-800 dark:text-amber-300 bg-amber-100/90 dark:bg-amber-900/60 px-2.5 py-0.5 rounded-full border border-amber-200 dark:border-amber-800">
+                      Crédito Escolar
+                    </span>
+                  </div>
+
+                  {cliente ? (
+                    <>
+                      <p className="text-[11px] text-amber-800 dark:text-amber-300">
+                        Cargar a la cuenta corriente de <strong>{cliente.nombre_estudiante}</strong> ({cliente.grado_seccion || 'General'}).
+                      </p>
+
+                      {/* Abono inicial opcional */}
+                      <div className="rounded-xl bg-white dark:bg-[#111726] border border-amber-200/90 dark:border-amber-900/60 p-2.5 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <label className="text-[11px] font-bold text-gray-700 dark:text-slate-300 flex items-center gap-1">
+                            <DollarSign className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+                            <span>Abono inicial entregado hoy (Opcional):</span>
+                          </label>
+                          {/* Selector USD / Bs */}
+                          <div className="flex items-center rounded-lg bg-gray-100 dark:bg-slate-800 p-0.5 text-[10px] font-bold">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setMonedaAbonoFiado('USD');
+                                setMontoAbonoFiadoInput('');
+                              }}
+                              className={`px-1.5 py-0.5 rounded ${
+                                monedaAbonoFiado === 'USD'
+                                  ? 'bg-white dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 shadow-2xs'
+                                  : 'text-gray-500 hover:text-gray-900'
+                              }`}
+                            >
+                              $ USD
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setMonedaAbonoFiado('Bs');
+                                setMontoAbonoFiadoInput('');
+                              }}
+                              className={`px-1.5 py-0.5 rounded ${
+                                monedaAbonoFiado === 'Bs'
+                                  ? 'bg-white dark:bg-amber-950 text-amber-800 dark:text-amber-300 shadow-2xs'
+                                  : 'text-gray-500 hover:text-gray-900'
+                              }`}
+                            >
+                              Bs.
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-emerald-600 dark:text-emerald-400 font-mono">
+                            {monedaAbonoFiado === 'USD' ? '$' : 'Bs.'}
+                          </span>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={montoAbonoFiadoInput}
+                            onKeyDown={(e) => handleDecimalKeyDown(e, montoAbonoFiadoInput)}
+                            onChange={(e) => setMontoAbonoFiadoInput(sanitizeDecimalInput(e.target.value))}
+                            placeholder="0.00 (Dejar vacío si no entrega abono hoy)"
+                            className="w-full rounded-xl border border-amber-200 dark:border-amber-800 bg-gray-50/50 dark:bg-slate-900 py-1.5 pl-8 pr-8 text-xs font-mono font-bold text-gray-900 dark:text-slate-100 placeholder:text-gray-400 focus:border-amber-500 focus:outline-none"
+                          />
+                          {montoAbonoFiadoInput && (
+                            <button
+                              type="button"
+                              onClick={() => setMontoAbonoFiadoInput('')}
+                              className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-lg p-1 text-gray-400 hover:text-gray-600 transition"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="rounded-xl border border-rose-200 dark:border-rose-900 bg-rose-50/80 dark:bg-rose-950/60 p-2.5 text-rose-800 dark:text-rose-300 font-bold text-[11px] flex items-center gap-2">
+                      <AlertCircle className="h-4 w-4 shrink-0" />
+                      <span>Para fiar o cargar a crédito, debes seleccionar a un estudiante o cliente en la barra superior.</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Calculadora de Vuelto Multimoneda (Efectivo USD, Efectivo Bs, Pago Móvil o Punto) */}
               {(metodoSeleccionado === 'efectivo_usd' ||
                 metodoSeleccionado === 'efectivo_bs' ||
@@ -1385,12 +1584,30 @@ export function PaymentModal({
                           )}
                         </>
                       ) : montoEntregadoUsdEquiv < totalUsd ? (
-                        <div className="flex items-center justify-between text-xs text-amber-700 dark:text-amber-400">
-                          <span className="font-medium">Monto pendiente por cobrar:</span>
-                          <span className="font-mono font-bold">
-                            {formatUSD(Math.max(0, Math.round((totalUsd - montoEntregadoUsdEquiv) * 100) / 100))} (
-                            {formatBs(Math.max(0, Math.round((totalBs - montoEntregadoBsEquiv) * 100) / 100))})
-                          </span>
+                        <div className="space-y-1.5 py-1">
+                          <div className="flex items-center justify-between text-xs text-amber-700 dark:text-amber-400">
+                            <span className="font-semibold">Monto pendiente por cobrar:</span>
+                            <span className="font-mono font-bold">
+                              {formatUSD(Math.max(0, Math.round((totalUsd - montoEntregadoUsdEquiv) * 100) / 100))} (
+                              {formatBs(Math.max(0, Math.round((totalBs - montoEntregadoBsEquiv) * 100) / 100))})
+                            </span>
+                          </div>
+                          {cliente ? (
+                            <p className="text-[10px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/50 rounded-lg p-1.5 flex items-center gap-1 font-medium">
+                              <span>⚠️</span>
+                              <span>
+                                La diferencia adeudada ({formatUSD(saldoPendienteUsd)}) se cargará al saldo pendiente de{' '}
+                                <strong>{cliente.nombre_estudiante}</strong>.
+                              </span>
+                            </p>
+                          ) : (
+                            <p className="text-[10px] text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/50 rounded-lg p-1.5 font-semibold flex items-center gap-1">
+                              <span>⚠️</span>
+                              <span>
+                                Para registrar una venta con saldo pendiente / parcial, debes seleccionar un cliente en el panel principal.
+                              </span>
+                            </p>
+                          )}
                         </div>
                       ) : (
                         <div className="text-center text-xs text-emerald-700 dark:text-emerald-400 font-bold py-1">
@@ -1421,14 +1638,18 @@ export function PaymentModal({
                     procesando ||
                     !metodoSeleccionado ||
                     (metodoSeleccionado === 'saldo_favor' && (!cliente || saldoDisponible <= 0)) ||
-                    (metodoSeleccionado === 'pago_mixto' && montoUsdMixtoNum <= 0)
+                    (metodoSeleccionado === 'pago_mixto' && montoUsdMixtoNum <= 0) ||
+                    (saldoPendienteUsd > 0 && !cliente)
                   }
                   className={`flex min-h-[44px] items-center justify-center gap-2 rounded-2xl px-5 py-2.5 text-xs font-bold transition active:scale-95 ${
                     procesando ||
                     !metodoSeleccionado ||
                     (metodoSeleccionado === 'saldo_favor' && (!cliente || saldoDisponible <= 0)) ||
-                    (metodoSeleccionado === 'pago_mixto' && montoUsdMixtoNum <= 0)
+                    (metodoSeleccionado === 'pago_mixto' && montoUsdMixtoNum <= 0) ||
+                    (saldoPendienteUsd > 0 && !cliente)
                       ? 'bg-gray-200 dark:bg-slate-800 text-gray-400 dark:text-slate-500 cursor-not-allowed opacity-60'
+                      : saldoPendienteUsd > 0
+                      ? 'bg-amber-600 hover:bg-amber-700 text-white shadow-xs'
                       : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs'
                   }`}
                 >
@@ -1441,6 +1662,18 @@ export function PaymentModal({
                     <span>Selecciona un método de pago</span>
                   ) : metodoSeleccionado === 'pago_mixto' && montoUsdMixtoNum <= 0 ? (
                     <span>Ingresa los $ en efectivo</span>
+                  ) : saldoPendienteUsd > 0 && !cliente ? (
+                    <span>Selecciona un cliente para fiar</span>
+                  ) : saldoPendienteUsd > 0 ? (
+                    esPagoParcial ? (
+                      <span>
+                        Confirmar Pago Parcial (Abona {formatUSD(montoPagadoUsd)} • Fía {formatUSD(saldoPendienteUsd)})
+                      </span>
+                    ) : (
+                      <span>
+                        Confirmar Venta Fiada ({formatUSD(saldoPendienteUsd)})
+                      </span>
+                    )
                   ) : (
                     <span>Confirmar Transacción</span>
                   )}

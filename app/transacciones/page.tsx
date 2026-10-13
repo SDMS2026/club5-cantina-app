@@ -57,6 +57,8 @@ import {
   parseConsumoAudit,
   anularConsumo,
   editarConsumoPedido,
+  obtenerMontoPagadoConsumo,
+  obtenerSaldoPendienteConsumo,
   ItemEdicionConsumo,
   ConsumoInfoAudit,
 } from '@/lib/clientBalance';
@@ -485,6 +487,8 @@ export default function TransaccionesPage() {
       imagen_url?: string | null;
     }>;
     productoSeleccionadoId: string;
+    montoPagadoInput: string;
+    monedaPago: 'USD' | 'Bs';
     procesando: boolean;
     error: string | null;
   }>({
@@ -492,6 +496,8 @@ export default function TransaccionesPage() {
     transaccion: null,
     items: [],
     productoSeleccionadoId: '',
+    montoPagadoInput: '',
+    monedaPago: 'USD',
     procesando: false,
     error: null,
   });
@@ -895,12 +901,15 @@ export default function TransaccionesPage() {
       imagen_url: det.productos?.imagen_url || null,
     }));
 
+    const montoPagadoInicial = obtenerMontoPagadoConsumo(transaccion);
     setBusquedaProductoEditar('');
     setModalEditar({
       abierto: true,
       transaccion,
       items,
       productoSeleccionadoId: prods.length > 0 ? prods[0].id : '',
+      montoPagadoInput: montoPagadoInicial > 0 ? montoPagadoInicial.toFixed(2) : (transaccion.pagado ? Number(transaccion.monto_total_usd).toFixed(2) : ''),
+      monedaPago: 'USD',
       procesando: false,
       error: null,
     });
@@ -984,9 +993,19 @@ export default function TransaccionesPage() {
         precio_unitario_usd: it.precio_unitario_usd,
       }));
 
+      let montoPagadoUsdCalculado: number | undefined = undefined;
+      if (modalEditar.montoPagadoInput.trim() !== '') {
+        const montoPagadoNum = parseFloat(modalEditar.montoPagadoInput.replace(',', '.')) || 0;
+        const tasa = modalEditar.transaccion.tasa_bcv_historica || tasaBcv;
+        montoPagadoUsdCalculado = modalEditar.monedaPago === 'USD'
+          ? montoPagadoNum
+          : (montoPagadoNum > 0 && tasa > 0 ? Math.round((montoPagadoNum / tasa) * 100) / 100 : 0);
+      }
+
       const res = await editarConsumoPedido({
         consumoId: modalEditar.transaccion.id,
         nuevosItems: nuevosItemsPayload,
+        montoPagadoUsd: montoPagadoUsdCalculado,
       });
 
       mostrarNotificacion('exito', res.mensaje);
@@ -995,6 +1014,8 @@ export default function TransaccionesPage() {
         transaccion: null,
         items: [],
         productoSeleccionadoId: '',
+        montoPagadoInput: '',
+        monedaPago: 'USD',
         procesando: false,
         error: null,
       });
@@ -2458,18 +2479,12 @@ export default function TransaccionesPage() {
                         <span>Comprobante de Venta</span>
                       </Dialog.Title>
                       <Dialog.Description className="text-xs text-gray-500 dark:text-slate-400 mt-0.5">
-                        Transacción #{t.id.slice(0, 8)} &bull; {fechaObj.fecha} {fechaObj.hora}
+                        Transacción #{t.id.slice(0, 8)} • {fechaObj.fecha} {fechaObj.hora}
                       </Dialog.Description>
                     </div>
 
                     <span
-                      className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
-                        audit.esAnulado
-                          ? 'bg-rose-100 text-rose-800'
-                          : audit.esPendiente
-                          ? 'bg-amber-100 text-amber-800'
-                          : 'bg-emerald-100 text-emerald-800'
-                      }`}
+                      className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${audit.estadoBadge.color}`}
                     >
                       {audit.estadoBadge.texto}
                     </span>
@@ -2549,6 +2564,19 @@ export default function TransaccionesPage() {
                         <span className="font-mono font-black text-sky-900 dark:text-sky-200 text-xs">
                           {audit.referencia}
                         </span>
+                      </div>
+                    )}
+
+                    {audit.esParcial && audit.saldoPendiente !== undefined && (
+                      <div className="flex items-center justify-between bg-amber-50 dark:bg-amber-950/40 p-2.5 rounded-xl border border-amber-200/60 dark:border-amber-900/40 text-xs">
+                        <span className="text-amber-800 dark:text-amber-300 font-bold">
+                          Desglose Pago Parcial:
+                        </span>
+                        <div className="text-right font-mono font-bold text-amber-900 dark:text-amber-200">
+                          <span>Abonado: {formatUSD(audit.montoPagado || 0)}</span>
+                          <span className="mx-1">•</span>
+                          <span>Debe: {formatUSD(audit.saldoPendiente)}</span>
+                        </div>
                       </div>
                     )}
 
@@ -2781,7 +2809,7 @@ export default function TransaccionesPage() {
                 <Dialog.Description className="text-xs text-gray-500 dark:text-slate-400 truncate">
                   {modalEditar.transaccion ? (
                     <>
-                      Ticket #{modalEditar.transaccion.id.slice(0, 8)} &bull;{' '}
+                      Ticket #{modalEditar.transaccion.id.slice(0, 8)} •{' '}
                       {modalEditar.transaccion.clientes?.nombre_estudiante || 'Público General / Caja'}
                     </>
                   ) : (
@@ -2989,6 +3017,109 @@ export default function TransaccionesPage() {
                         </p>
                       )}
                     </div>
+                  </div>
+
+                  {/* Ajuste de Pago Recibido y Saldo Pendiente (Pagos Parciales) */}
+                  <div className="rounded-2xl border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#111726] p-3 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-gray-800 dark:text-slate-200 flex items-center gap-1.5">
+                        <Wallet className="h-4 w-4 text-indigo-600" />
+                        <span>Monto Pagado / Recibido:</span>
+                      </span>
+                      <div className="flex items-center bg-gray-100 dark:bg-slate-800 rounded-lg p-0.5 text-[11px] font-bold">
+                        <button
+                          type="button"
+                          onClick={() => setModalEditar((prev) => ({ ...prev, monedaPago: 'USD' }))}
+                          className={`px-2 py-0.5 rounded-md transition ${
+                            modalEditar.monedaPago === 'USD'
+                              ? 'bg-white dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 shadow-2xs'
+                              : 'text-gray-500 hover:text-gray-900'
+                          }`}
+                        >
+                          💵 USD
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setModalEditar((prev) => ({ ...prev, monedaPago: 'Bs' }))}
+                          className={`px-2 py-0.5 rounded-md transition ${
+                            modalEditar.monedaPago === 'Bs'
+                              ? 'bg-white dark:bg-amber-950 text-amber-800 dark:text-amber-300 shadow-2xs'
+                              : 'text-gray-500 hover:text-gray-900'
+                          }`}
+                        >
+                          🇻🇪 Bs.
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-gray-400">
+                        {modalEditar.monedaPago === 'USD' ? '$' : 'Bs.'}
+                      </span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={modalEditar.montoPagadoInput}
+                        onChange={(e) => {
+                          const val = e.target.value.replace(/[^0-9.,]/g, '');
+                          setModalEditar((prev) => ({ ...prev, montoPagadoInput: val }));
+                        }}
+                        placeholder={
+                          modalEditar.monedaPago === 'USD'
+                            ? `Monto pagado en $ (Total: ${formatUSD(nuevoMontoUsd)})`
+                            : `Monto pagado en Bs. (Total: ${formatBs(nuevoMontoBs)})`
+                        }
+                        className="w-full rounded-xl border border-gray-200 dark:border-slate-800 bg-white dark:bg-[#0D111A] py-2 pl-9 pr-8 text-xs font-mono font-bold text-gray-900 dark:text-slate-100 placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none"
+                      />
+                      {modalEditar.montoPagadoInput && (
+                        <button
+                          type="button"
+                          onClick={() => setModalEditar((prev) => ({ ...prev, montoPagadoInput: '' }))}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-lg p-1 text-gray-400 hover:text-gray-600 transition"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Desglose en tiempo real de deuda y estado */}
+                    {(() => {
+                      const pagadoNum = parseFloat(modalEditar.montoPagadoInput.replace(',', '.')) || 0;
+                      const pagadoUsd = modalEditar.monedaPago === 'USD'
+                        ? pagadoNum
+                        : (pagadoNum > 0 && tasa > 0 ? Math.round((pagadoNum / tasa) * 100) / 100 : 0);
+                      const saldoPendienteUsd = Math.max(0, Math.round((nuevoMontoUsd - pagadoUsd) * 100) / 100);
+                      const saldoPendienteBs = calcularConversionBs(saldoPendienteUsd, tasa);
+
+                      if (modalEditar.montoPagadoInput.trim() !== '') {
+                        if (saldoPendienteUsd > 0) {
+                          return (
+                            <div className="rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/50 p-2.5 text-xs text-amber-800 dark:text-amber-300 space-y-1">
+                              <div className="flex items-center justify-between font-bold">
+                                <span>Saldo Pendiente (Deuda restante):</span>
+                                <span className="font-mono text-sm">
+                                  {formatUSD(saldoPendienteUsd)} ({formatBs(saldoPendienteBs)})
+                                </span>
+                              </div>
+                              <p className="text-[10px] text-amber-700 dark:text-amber-400">
+                                ⚠️ Estado del registro: <strong>PENDIENTE / PARCIAL</strong>. La diferencia adeudada se cargará a la ficha de{' '}
+                                <strong>{t.clientes?.nombre_estudiante || 'el cliente'}</strong>.
+                              </p>
+                            </div>
+                          );
+                        } else {
+                          return (
+                            <div className="rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/50 p-2 text-xs text-emerald-800 dark:text-emerald-300 font-bold flex items-center justify-between">
+                              <span>✓ Total cubierto ($0.00 pendiente):</span>
+                              <span className="uppercase text-[10px] bg-emerald-200/60 dark:bg-emerald-900 px-2 py-0.5 rounded-full">
+                                PAGADO / SOLVENTE
+                              </span>
+                            </div>
+                          );
+                        }
+                      }
+                      return null;
+                    })()}
                   </div>
 
                   {modalEditar.error && (

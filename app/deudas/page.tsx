@@ -64,6 +64,9 @@ import { useDraggableScroll } from '@/lib/useDraggableScroll';
 import {
   obtenerSaldosTodosClientes,
   procesarAbonoCliente,
+  obtenerSaldoPendienteConsumo,
+  obtenerMontoPagadoConsumo,
+  parseConsumoAudit,
   ResumenSaldoCliente,
 } from '@/lib/clientBalance';
 import {
@@ -620,11 +623,16 @@ export default function DeudasPage() {
       });
     } catch {}
 
+    const saldoPendiente = obtenerSaldoPendienteConsumo(deuda);
+    const audit = parseConsumoAudit({ metodo_pago: deuda.metodo_pago, pagado: deuda.pagado });
+
     setModalLiquidacion({
       abierto: true,
       titulo: 'Liquidar Consumo Individual',
-      subtitulo: `Pago del consumo del ${fechaTxt} correspondiente a ${nombreEstudiante}.`,
-      montoUsd: deuda.monto_total_usd,
+      subtitulo: audit.esParcial
+        ? `Pago del saldo pendiente (${formatUSD(saldoPendiente)} de ${formatUSD(deuda.monto_total_usd)}) del consumo del ${fechaTxt} de ${nombreEstudiante}.`
+        : `Pago del consumo del ${fechaTxt} correspondiente a ${nombreEstudiante}.`,
+      montoUsd: saldoPendiente,
       idsConsumos: [deuda.id],
       nombreEstudiante,
       clienteId: clienteId || deuda.cliente_id || null,
@@ -1706,13 +1714,21 @@ export default function DeudasPage() {
                             });
                           } catch {}
 
+                          const saldoPendienteUsd = obtenerSaldoPendienteConsumo(consumo);
+                          const montoPagadoUsd = obtenerMontoPagadoConsumo(consumo);
+                          const montoBsPendiente = calcularConversionBs(saldoPendienteUsd, tasaBcv);
+                          const audit = parseConsumoAudit({
+                            metodo_pago: consumo.metodo_pago,
+                            pagado: consumo.pagado,
+                          });
+
                           return (
                             <div
                               key={consumo.id}
                               className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border border-gray-100 bg-gray-50/60 p-3.5 hover:bg-gray-50 transition"
                             >
                               <div className="flex-1">
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 flex-wrap">
                                   <span className="text-xs font-bold text-gray-900">
                                     Consumo #{idx + 1}
                                   </span>
@@ -1720,6 +1736,11 @@ export default function DeudasPage() {
                                     <Calendar className="h-3 w-3" />
                                     {fechaConsumoTxt}
                                   </span>
+                                  {audit.esParcial && (
+                                    <span className="rounded-full bg-amber-100 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 px-2 py-0.5 text-[9px] font-bold text-amber-800 dark:text-amber-300 uppercase">
+                                      Parcial (Abonó {formatUSD(montoPagadoUsd)})
+                                    </span>
+                                  )}
                                 </div>
 
                                 <div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -1749,11 +1770,16 @@ export default function DeudasPage() {
                               <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0 border-gray-200/50">
                                 <div className="text-left sm:text-right">
                                   <div className="text-sm font-bold text-gray-900">
-                                    {formatUSD(consumo.monto_total_usd)}
+                                    {formatUSD(saldoPendienteUsd)}
                                   </div>
                                   <div className="text-[11px] font-mono text-amber-700 font-semibold">
-                                    {formatBs(montoBsConsumo)}
+                                    {formatBs(montoBsPendiente)}
                                   </div>
+                                  {audit.esParcial && (
+                                    <div className="text-[10px] text-gray-400 font-mono">
+                                      Total: {formatUSD(consumo.monto_total_usd)} • Abonó: {formatUSD(montoPagadoUsd)}
+                                    </div>
+                                  )}
                                 </div>
 
                                 <button
@@ -1766,9 +1792,9 @@ export default function DeudasPage() {
                                     )
                                   }
                                   className="flex items-center gap-1 rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-800 shadow-2xs hover:bg-gray-100 hover:border-gray-300 transition active:scale-95"
-                                  title="Liquidar únicamente este consumo"
+                                  title="Liquidar saldo pendiente de este consumo"
                                 >
-                                  <span>Pagar este</span>
+                                  <span>Pagar {formatUSD(saldoPendienteUsd)}</span>
                                 </button>
                               </div>
                             </div>
@@ -2847,7 +2873,7 @@ export default function DeudasPage() {
                         {esGrupoFamiliar ? 'Gran Total Familiar a Pagar:' : 'Total de la Cuenta a Pagar:'}
                       </span>
                       <span className="text-[11px] text-gray-500 dark:text-slate-400">
-                        {cuentasParaMensaje.length} {cuentasParaMensaje.length === 1 ? 'estudiante' : 'estudiantes'} &bull; Tasa BCV: {formatBs(tasaBcv)}
+                        {cuentasParaMensaje.length} {cuentasParaMensaje.length === 1 ? 'estudiante' : 'estudiantes'} • Tasa BCV: {formatBs(tasaBcv)}
                       </span>
                     </div>
                     <div className="text-right">

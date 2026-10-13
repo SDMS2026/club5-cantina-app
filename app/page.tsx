@@ -443,7 +443,7 @@ export default function PosPage() {
                 <h1 className="text-lg font-bold tracking-tight text-gray-900 dark:text-white">
                   Club 5 Cantina Escolar
                 </h1>
-                <p className="text-xs text-gray-500 dark:text-slate-400">Punto de Venta &bull; Facturación Bimoneda</p>
+                <p className="text-xs text-gray-500 dark:text-slate-400">Punto de Venta • Facturación Bimoneda</p>
               </div>
             </div>
             <div className="h-9 w-48 rounded-2xl bg-amber-50/80 dark:bg-amber-950/40 border border-amber-200/60 dark:border-amber-900/50 animate-pulse" />
@@ -668,7 +668,7 @@ export default function PosPage() {
                       {formatUSD(totalUsdCarrito)}
                     </span>
                     <span className="text-xs font-semibold text-amber-300 font-mono">
-                      &bull; {formatBs(totalBsCarrito)}
+                      • {formatBs(totalBsCarrito)}
                     </span>
                   </div>
                   <span className="text-[11px] text-gray-400 truncate max-w-[140px] sm:max-w-[220px]">
@@ -807,7 +807,7 @@ export default function PosPage() {
                         </h4>
                         <div className="flex items-center gap-1.5 text-[11px] text-gray-500">
                           <span>{formatUSD(item.producto.precio_usd)} c/u</span>
-                          <span>&bull;</span>
+                          <span>•</span>
                           <span className="font-mono text-amber-700">{formatBs(subtotalBs)}</span>
                         </div>
                       </div>

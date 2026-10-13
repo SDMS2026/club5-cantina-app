@@ -696,7 +696,7 @@ export default function ProductosPage() {
               </div>
             </div>
             <p className="mt-1 text-xs text-gray-400">
-              {metricas.activos} activos en POS &bull; {metricas.inactivos} pausados
+              {metricas.activos} activos en POS • {metricas.inactivos} pausados
             </p>
           </div>
 

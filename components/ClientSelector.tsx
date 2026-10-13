@@ -591,7 +591,7 @@ export function ClientSelector({
                   )}
                   {clienteSeleccionado.nombre_representante && (
                     <span className="text-gray-500 truncate">
-                      &bull; {esProfesorOPersonal(clienteSeleccionado.grado_seccion) ? 'Área: ' : 'Rep: '}
+                      • {esProfesorOPersonal(clienteSeleccionado.grado_seccion) ? 'Área: ' : 'Rep: '}
                       {clienteSeleccionado.nombre_representante}
                     </span>
                   )}
@@ -935,7 +935,7 @@ export function ClientSelector({
 
                             {cliente.nombre_representante && (
                               <span className="text-gray-400 truncate hidden sm:inline">
-                                &bull; {esProfItem ? 'Área: ' : 'Rep: '}
+                                • {esProfItem ? 'Área: ' : 'Rep: '}
                                 {cliente.nombre_representante}
                               </span>
                             )}
