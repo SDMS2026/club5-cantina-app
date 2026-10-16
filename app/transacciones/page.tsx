@@ -43,6 +43,7 @@ import {
   CreditCard,
   PiggyBank,
   Users,
+  Coins,
 } from 'lucide-react';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { supabase } from '@/lib/supabaseClient';
@@ -61,7 +62,9 @@ import {
   obtenerSaldoPendienteConsumo,
   ItemEdicionConsumo,
   ConsumoInfoAudit,
+  ResultadoEdicionAbono,
 } from '@/lib/clientBalance';
+import { ModalEditarAbono } from '@/components/ModalEditarAbono';
 
 interface TransaccionCliente {
   id: string;
@@ -131,7 +134,7 @@ const formatearFechaHora = (fechaIso?: string): { fecha: string; hora: string; e
   return { fecha: fechaStr, hora: horaStr, esHoy };
 };
 
-export interface GrupoDiaConsumos {
+interface GrupoDiaConsumos {
   diaKey: string;
   etiquetaDia: string;
   totalDiaUsd: number;
@@ -140,7 +143,7 @@ export interface GrupoDiaConsumos {
   transacciones: TransaccionRegistro[];
 }
 
-export interface GrupoMesConsumos {
+interface GrupoMesConsumos {
   mesKey: string;
   etiquetaMes: string;
   totalMesUsd: number;
@@ -149,7 +152,7 @@ export interface GrupoMesConsumos {
   dias: GrupoDiaConsumos[];
 }
 
-export interface GrupoAnoConsumos {
+interface GrupoAnoConsumos {
   anoKey: string;
   etiquetaAno: string;
   totalAnoUsd: number;
@@ -448,6 +451,17 @@ export default function TransaccionesPage() {
     transaccion: null,
     procesando: false,
     error: null,
+  });
+
+  // Modal Editar / Revertir Abono
+  const [modalEditarAbono, setModalEditarAbono] = useState<{
+    abierto: boolean;
+    consumo: TransaccionRegistro | null;
+    cliente: TransaccionCliente | null;
+  }>({
+    abierto: false,
+    consumo: null,
+    cliente: null,
   });
 
   // 6. Notificación Toast
@@ -872,6 +886,19 @@ export default function TransaccionesPage() {
       const msg = err instanceof Error ? err.message : 'Error al anular la transacción.';
       setModalAnular((prev) => ({ ...prev, procesando: false, error: msg }));
     }
+  };
+
+  const handleExitoEdicionAbono = async (res: ResultadoEdicionAbono) => {
+    mostrarNotificacion('exito', res.mensaje);
+    if (modalDetalle.abierto) {
+      setModalDetalle({ abierto: false, transaccion: null });
+    }
+    await ejecutarMiniRecarga({
+      router,
+      recargarDatosLocales: async () => {
+        await Promise.all([cargarTransacciones(), cargarMetricasResumen(), cargarLiquidaciones()]);
+      },
+    });
   };
 
   // Manejo de la acción de editar pedido registrado
@@ -1730,6 +1757,24 @@ export default function TransaccionesPage() {
                                                             </button>
                                                           )}
 
+                                                          {!audit.esAnulado && t.cliente_id && (
+                                                            <button
+                                                              type="button"
+                                                              onClick={() =>
+                                                                setModalEditarAbono({
+                                                                  abierto: true,
+                                                                  consumo: t,
+                                                                  cliente: t.clientes || null,
+                                                                })
+                                                              }
+                                                              className="rounded-xl border border-indigo-200 dark:border-indigo-900 bg-indigo-50 dark:bg-indigo-950/40 px-2 py-1.5 text-xs font-bold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 transition active:scale-95 flex items-center gap-1 shrink-0"
+                                                              title="Modificar o revertir abono"
+                                                            >
+                                                              <Coins className="h-3 w-3" />
+                                                              <span>Abono</span>
+                                                            </button>
+                                                          )}
+
                                                           {!audit.esAnulado && (
                                                             <button
                                                               type="button"
@@ -1883,14 +1928,33 @@ export default function TransaccionesPage() {
                                                                   title="Modificar productos o cantidades del ticket"
                                                                 >
                                                                   <Pencil className="h-3 w-3" />
-                                                                  <span>Editar</span>
-                                                                </button>
-                                                              )}
-                                                              {!audit.esAnulado && (
-                                                                <button
-                                                                  type="button"
-                                                                  onClick={() =>
-                                                                    setModalAnular({
+                                                                    <span>Editar</span>
+                                                                  </button>
+                                                                )}
+
+                                                                {!audit.esAnulado && t.cliente_id && (
+                                                                  <button
+                                                                    type="button"
+                                                                    onClick={() =>
+                                                                      setModalEditarAbono({
+                                                                        abierto: true,
+                                                                        consumo: t,
+                                                                        cliente: t.clientes || null,
+                                                                      })
+                                                                    }
+                                                                    className="rounded-xl border border-indigo-200 dark:border-indigo-900 bg-indigo-50 dark:bg-indigo-950/40 px-2 py-1 text-xs font-bold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 transition active:scale-95 flex items-center gap-1"
+                                                                    title="Modificar o revertir abono"
+                                                                  >
+                                                                    <Coins className="h-3 w-3" />
+                                                                    <span>Abono</span>
+                                                                  </button>
+                                                                )}
+
+                                                                {!audit.esAnulado && (
+                                                                  <button
+                                                                    type="button"
+                                                                    onClick={() =>
+                                                                      setModalAnular({
                                                                       abierto: true,
                                                                       transaccion: t,
                                                                       procesando: false,
@@ -2622,6 +2686,25 @@ export default function TransaccionesPage() {
                       </button>
                     )}
 
+                    {!audit.esAnulado && t.cliente_id && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setModalDetalle({ abierto: false, transaccion: null });
+                          setModalEditarAbono({
+                            abierto: true,
+                            consumo: t,
+                            cliente: t.clientes || null,
+                          });
+                        }}
+                        className="flex items-center gap-1.5 rounded-2xl border border-indigo-200 dark:border-indigo-900 bg-indigo-50 dark:bg-indigo-950/40 px-3 py-2.5 text-xs font-bold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 transition shadow-xs"
+                        title="Modificar o revertir abono de este consumo"
+                      >
+                        <Coins className="h-3.5 w-3.5" />
+                        <span>Editar Abono</span>
+                      </button>
+                    )}
+
                     {!audit.esAnulado && (
                       <button
                         type="button"
@@ -3163,6 +3246,21 @@ export default function TransaccionesPage() {
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
+          {/* Modal Editar / Revertir Abono */}
+      <ModalEditarAbono
+        abierto={modalEditarAbono.abierto}
+        onOpenChange={(abierto) =>
+          setModalEditarAbono((prev) => ({
+            ...prev,
+            abierto,
+            ...(!abierto ? { consumo: null, cliente: null } : {}),
+          }))
+        }
+        consumo={modalEditarAbono.consumo}
+        cliente={modalEditarAbono.cliente}
+        tasaBcv={tasaBcv}
+        onExito={handleExitoEdicionAbono}
+      />
     </div>
   </ErrorBoundary>
   );

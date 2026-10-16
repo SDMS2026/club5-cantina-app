@@ -41,6 +41,7 @@ import {
   Sparkles,
   Banknote,
   Users,
+  Coins,
 } from 'lucide-react';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { obtenerTasaBCV, TASA_BCV_FALLBACK_DEFAULT } from '@/lib/dolarApi';
@@ -68,7 +69,9 @@ import {
   obtenerMontoPagadoConsumo,
   parseConsumoAudit,
   ResumenSaldoCliente,
+  ResultadoEdicionAbono,
 } from '@/lib/clientBalance';
+import { ModalEditarAbono } from '@/components/ModalEditarAbono';
 import {
   generarMensajeCobroIndividual,
   generarMensajeCobroFamiliar,
@@ -280,6 +283,17 @@ export default function DeudasPage() {
   const dragScrollWhatsApp = useModalDragScroll({
     isOpen: modalWhatsAppFamiliar.abierto,
     onDismiss: () => setModalWhatsAppFamiliar((prev) => ({ ...prev, abierto: false })),
+  });
+
+  // Modal Editar / Revertir Abono
+  const [modalEditarAbono, setModalEditarAbono] = useState<{
+    abierto: boolean;
+    consumo: any | null;
+    cliente: Cliente | null;
+  }>({
+    abierto: false,
+    consumo: null,
+    cliente: null,
   });
 
   // Notificación toast
@@ -822,6 +836,20 @@ export default function DeudasPage() {
   };
 
   // Abrir Modal de Abono / Anticipo
+  const handleExitoEdicionAbono = async (res: ResultadoEdicionAbono) => {
+    setNotificacion({
+      tipo: 'exito',
+      texto: res.mensaje,
+    });
+    setTimeout(() => setNotificacion(null), 4500);
+    await ejecutarMiniRecarga({
+      router,
+      recargarDatosLocales: async () => {
+        await cargarDeudas();
+      },
+    });
+  };
+
   const handleAbrirAbono = (c: Cliente | null) => {
     setModalAbono({
       abierto: true,
@@ -1783,19 +1811,35 @@ export default function DeudasPage() {
                                 </div>
 
                                 <button
-                                  type="button"
-                                  onClick={() =>
-                                    handleAbrirPagoConsumoIndividual(
-                                      consumo,
-                                      estudiante,
-                                      cuenta.cliente?.id
-                                    )
-                                  }
-                                  className="flex items-center gap-1 rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-800 shadow-2xs hover:bg-gray-100 hover:border-gray-300 transition active:scale-95"
-                                  title="Liquidar saldo pendiente de este consumo"
-                                >
-                                  <span>Pagar {formatUSD(saldoPendienteUsd)}</span>
-                                </button>
+                                   type="button"
+                                   onClick={() =>
+                                     setModalEditarAbono({
+                                       abierto: true,
+                                       consumo,
+                                       cliente: cuenta.cliente || null,
+                                     })
+                                   }
+                                   className="flex items-center gap-1 rounded-xl border border-indigo-200 dark:border-indigo-900 bg-indigo-50 dark:bg-indigo-950/40 px-2.5 py-1.5 text-xs font-bold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 transition active:scale-95 shrink-0"
+                                   title="Modificar o revertir abono de este consumo"
+                                 >
+                                   <Coins className="h-3 w-3" />
+                                   <span>Editar Abono</span>
+                                 </button>
+
+                                 <button
+                                   type="button"
+                                   onClick={() =>
+                                     handleAbrirPagoConsumoIndividual(
+                                       consumo,
+                                       estudiante,
+                                       cuenta.cliente?.id
+                                     )
+                                   }
+                                   className="flex items-center gap-1 rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-800 shadow-2xs hover:bg-gray-100 hover:border-gray-300 transition active:scale-95"
+                                   title="Liquidar saldo pendiente de este consumo"
+                                 >
+                                   <span>Pagar {formatUSD(saldoPendienteUsd)}</span>
+                                 </button>
                               </div>
                             </div>
                           );
@@ -2959,6 +3003,21 @@ export default function DeudasPage() {
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
+          {/* Modal Editar / Revertir Abono */}
+      <ModalEditarAbono
+        abierto={modalEditarAbono.abierto}
+        onOpenChange={(abierto) =>
+          setModalEditarAbono((prev) => ({
+            ...prev,
+            abierto,
+            ...(!abierto ? { consumo: null, cliente: null } : {}),
+          }))
+        }
+        consumo={modalEditarAbono.consumo}
+        cliente={modalEditarAbono.cliente}
+        tasaBcv={tasaBcv}
+        onExito={handleExitoEdicionAbono}
+      />
     </div>
   </ErrorBoundary>
   );

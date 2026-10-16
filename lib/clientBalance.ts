@@ -926,3 +926,175 @@ export async function editarConsumoPedido({
   };
 }
 
+export interface ParametrosEdicionAbono {
+  consumoId: string;
+  nuevoMontoAbonadoUsd: number;
+  motivo?: string;
+}
+
+export interface ResultadoEdicionAbono {
+  exito: boolean;
+  mensaje: string;
+  clienteId?: string | null;
+  montoTotalUsd: number;
+  montoAbonadoAnterior: number;
+  nuevoMontoAbonado: number;
+  saldoPendienteAnterior: number;
+  nuevoSaldoPendiente: number;
+  deltaDeuda: number;
+  nuevoSaldoCliente?: number;
+}
+
+/**
+ * Modifica o revierte exclusivamente el abono de una venta registrada sin anular el pedido.
+ * - Preserva la fecha original, los ítems en consumo_detalles y el monto_total_usd intactos.
+ * - Recalcula el saldo pendiente: Saldo Pendiente = Monto Total - Nuevo Monto Abonado.
+ * - Actualiza consumos.metodo_pago y consumos.pagado.
+ * - Ajusta automáticamente el saldo_deudor en clientes.saldo sumando o restando la diferencia.
+ */
+export async function editarAbonoConsumo({
+  consumoId,
+  nuevoMontoAbonadoUsd,
+  motivo,
+}: ParametrosEdicionAbono): Promise<ResultadoEdicionAbono> {
+  if (!consumoId) throw new Error('ID de consumo requerido para editar el abono.');
+
+  // 1. Obtener la transacción original de Supabase
+  const { data: consumo, error: errConsumo } = await supabase
+    .from('consumos')
+    .select(`
+      id,
+      cliente_id,
+      monto_total_usd,
+      tasa_bcv_historica,
+      metodo_pago,
+      pagado,
+      fecha
+    `)
+    .eq('id', consumoId)
+    .single();
+
+  if (errConsumo || !consumo) {
+    throw new Error(errConsumo?.message || 'No se encontró la transacción de venta especificada.');
+  }
+
+  // 2. Verificar que no esté anulada
+  if (consumo.metodo_pago?.toLowerCase().startsWith('anulado')) {
+    throw new Error('No es posible editar el abono de una venta que ya se encuentra anulada.');
+  }
+
+  const montoTotalUsd = Number(consumo.monto_total_usd || 0);
+  const auditOriginal = parseConsumoAudit({
+    metodo_pago: consumo.metodo_pago,
+    pagado: consumo.pagado,
+    monto_total_usd: montoTotalUsd,
+  });
+
+  const montoAbonadoAnterior = obtenerMontoPagadoConsumo(consumo);
+  const saldoPendienteAnterior = obtenerSaldoPendienteConsumo(consumo);
+  const deudaAnterior = saldoPendienteAnterior;
+
+  // 3. Calcular nuevo abono y nuevo saldo pendiente
+  const nuevoMontoAbonado = Math.max(
+    0,
+    Math.min(montoTotalUsd, Math.round(nuevoMontoAbonadoUsd * 100) / 100)
+  );
+  const nuevoSaldoPendiente = Math.max(
+    0,
+    Math.round((montoTotalUsd - nuevoMontoAbonado) * 100) / 100
+  );
+  const deudaNueva = nuevoSaldoPendiente;
+  const deltaDeuda = Math.round((deudaNueva - deudaAnterior) * 100) / 100;
+
+  // 4. Determinar nuevo pagado y nuevo metodo_pago
+  let nuevoPagado = false;
+  let nuevoMetodoPago = '';
+
+  const base =
+    auditOriginal.metodoBase && auditOriginal.metodoBase !== 'pendiente'
+      ? auditOriginal.metodoBase
+      : 'efectivo_usd';
+
+  if (nuevoSaldoPendiente <= 0) {
+    // 100% Pagado
+    nuevoPagado = true;
+    nuevoMetodoPago = base;
+  } else if (nuevoMontoAbonado <= 0) {
+    // 0% Abonado, 100% Fiado / Por Cobrar
+    nuevoPagado = false;
+    nuevoMetodoPago = 'pendiente';
+  } else {
+    // Pago Parcial
+    nuevoPagado = false;
+    const metodoPrefijo = auditOriginal.metodoBase === 'pendiente' ? 'pendiente' : base;
+    nuevoMetodoPago = `${metodoPrefijo}#parcial:pagado=${nuevoMontoAbonado.toFixed(2)},debe=${nuevoSaldoPendiente.toFixed(2)}`;
+  }
+
+  // 5. Actualizar la cabecera en consumos
+  const { error: errUpdateConsumo } = await supabase
+    .from('consumos')
+    .update({
+      pagado: nuevoPagado,
+      metodo_pago: nuevoMetodoPago,
+    })
+    .eq('id', consumoId);
+
+  if (errUpdateConsumo) {
+    console.error('Error actualizando abono en consumos:', errUpdateConsumo);
+    throw new Error('Error al actualizar el abono en consumos: ' + errUpdateConsumo.message);
+  }
+
+  // 6. Actualizar clientes.saldo si corresponde
+  let nuevoSaldoCliente: number | undefined = undefined;
+
+  if (consumo.cliente_id && deltaDeuda !== 0) {
+    const { data: clienteActual, error: errCliente } = await supabase
+      .from('clientes')
+      .select('saldo')
+      .eq('id', consumo.cliente_id)
+      .single();
+
+    if (!errCliente && clienteActual) {
+      const saldoPrevio = Number(clienteActual.saldo || 0);
+      nuevoSaldoCliente = Math.round((saldoPrevio - deltaDeuda) * 100) / 100;
+
+      const { error: errUpdateCliente } = await supabase
+        .from('clientes')
+        .update({ saldo: nuevoSaldoCliente })
+        .eq('id', consumo.cliente_id);
+
+      if (errUpdateCliente) {
+        console.error('Error actualizando saldo de cliente al editar abono:', errUpdateCliente);
+        throw new Error('Error al actualizar el saldo de la cuenta corriente del cliente.');
+      }
+    }
+  }
+
+  // 7. Notificar actualización en tiempo real
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('club5:actualizar-notificaciones'));
+  }
+
+  let mensaje = '';
+  if (nuevoSaldoPendiente === 0) {
+    mensaje = `Abono actualizado: consumo #${consumoId.slice(0, 8)} marcado como PAGADO en su totalidad ($${montoTotalUsd.toFixed(2)}).`;
+  } else if (nuevoMontoAbonado === 0) {
+    mensaje = `Abono revertido: consumo #${consumoId.slice(0, 8)} restablecido a PENDIENTE por el total ($${montoTotalUsd.toFixed(2)}).`;
+  } else {
+    mensaje = `Abono modificado a $${nuevoMontoAbonado.toFixed(2)}. Saldo pendiente por cobrar: $${nuevoSaldoPendiente.toFixed(2)}.`;
+  }
+
+  return {
+    exito: true,
+    mensaje,
+    clienteId: consumo.cliente_id || null,
+    montoTotalUsd,
+    montoAbonadoAnterior,
+    nuevoMontoAbonado,
+    saldoPendienteAnterior,
+    nuevoSaldoPendiente,
+    deltaDeuda,
+    nuevoSaldoCliente,
+  };
+}
+

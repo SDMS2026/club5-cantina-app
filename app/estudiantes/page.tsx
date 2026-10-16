@@ -88,7 +88,9 @@ import {
   anularConsumo,
   parseConsumoAudit,
   ResumenSaldoCliente,
+  ResultadoEdicionAbono,
 } from '@/lib/clientBalance';
+import { ModalEditarAbono } from '@/components/ModalEditarAbono';
 import {
   generarMensajeAvisoEstudiante,
   obtenerConfiguracion,
@@ -354,6 +356,17 @@ export default function EstudiantesPage() {
     isOpen: modalAnular.abierto,
     onDismiss: () =>
       !modalAnular.procesando && setModalAnular((prev) => ({ ...prev, abierto: false })),
+  });
+
+  // Modal Editar / Revertir Abono desde la Ficha
+  const [modalEditarAbono, setModalEditarAbono] = useState<{
+    abierto: boolean;
+    consumo: any | null;
+    cliente: Cliente | null;
+  }>({
+    abierto: false,
+    consumo: null,
+    cliente: null,
   });
 
   // 1. Cargar Tasa BCV
@@ -741,6 +754,50 @@ export default function EstudiantesPage() {
       console.error('Error anulando consumo desde ficha:', err);
       const msg = err instanceof Error ? err.message : 'Error al anular la transacción.';
       setModalAnular((prev) => ({ ...prev, procesando: false, error: msg }));
+    }
+  };
+
+  const handleExitoEdicionAbono = async (res: ResultadoEdicionAbono) => {
+    setNotificacion({
+      tipo: 'exito',
+      texto: res.mensaje,
+    });
+    setTimeout(() => setNotificacion(null), 4000);
+
+    // Recargar datos y directorio general
+    await cargarDatos();
+
+    // Refrescar consumos y saldo del cliente en la ficha abierta
+    if (modalFicha.cliente && modalFicha.cliente.id === res.clienteId) {
+      setModalFicha((prev) => ({
+        ...prev,
+        cliente: prev.cliente ? { ...prev.cliente, saldo: res.nuevoSaldoCliente } : null,
+      }));
+
+      const { data } = await supabase
+        .from('consumos')
+        .select(`
+          id,
+          cliente_id,
+          monto_total_usd,
+          tasa_bcv_historica,
+          metodo_pago,
+          pagado,
+          fecha,
+          consumo_detalles (
+            id,
+            cantidad,
+            precio_unitario_usd,
+            productos (
+              id,
+              nombre
+            )
+          )
+        `)
+        .eq('cliente_id', res.clienteId)
+        .order('fecha', { ascending: false });
+
+      setModalFicha((prev) => ({ ...prev, consumos: data || [] }));
     }
   };
 
@@ -3018,24 +3075,42 @@ export default function EstudiantesPage() {
                                   )}
                                 </div>
 
-                                {/* Botón Anular Venta si no está anulada */}
+                                {/* Botones de Acción del Consumo */}
                                 {!audit.esAnulado && (
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setModalAnular({
-                                        abierto: true,
-                                        consumo: c,
-                                        procesando: false,
-                                        error: null,
-                                      })
-                                    }
-                                    className="flex items-center gap-1 rounded-xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/40 px-2.5 py-1 text-[11px] font-bold text-rose-700 dark:text-rose-300 hover:bg-rose-100 transition active:scale-95 shrink-0"
-                                    title="Anular venta y revertir deuda o saldo"
-                                  >
-                                    <RotateCcw className="h-3 w-3" />
-                                    <span>Anular Venta</span>
-                                  </button>
+                                  <div className="flex items-center gap-1.5 shrink-0 flex-wrap sm:flex-nowrap">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setModalEditarAbono({
+                                          abierto: true,
+                                          consumo: c,
+                                          cliente: cli,
+                                        })
+                                      }
+                                      className="flex items-center gap-1 rounded-xl border border-indigo-200 dark:border-indigo-900 bg-indigo-50 dark:bg-indigo-950/40 px-2.5 py-1 text-[11px] font-bold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 transition active:scale-95 shrink-0"
+                                      title="Modificar o revertir abono de este consumo"
+                                    >
+                                      <Coins className="h-3 w-3" />
+                                      <span>Editar Abono</span>
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setModalAnular({
+                                          abierto: true,
+                                          consumo: c,
+                                          procesando: false,
+                                          error: null,
+                                        })
+                                      }
+                                      className="flex items-center gap-1 rounded-xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/40 px-2.5 py-1 text-[11px] font-bold text-rose-700 dark:text-rose-300 hover:bg-rose-100 transition active:scale-95 shrink-0"
+                                      title="Anular venta y revertir deuda o saldo"
+                                    >
+                                      <RotateCcw className="h-3 w-3" />
+                                      <span>Anular Venta</span>
+                                    </button>
+                                  </div>
                                 )}
                               </div>
 
@@ -3197,6 +3272,22 @@ export default function EstudiantesPage() {
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
+
+      {/* Modal Editar / Revertir Abono */}
+      <ModalEditarAbono
+        abierto={modalEditarAbono.abierto}
+        onOpenChange={(abierto) =>
+          setModalEditarAbono((prev) => ({
+            ...prev,
+            abierto,
+            ...(!abierto ? { consumo: null, cliente: null } : {}),
+          }))
+        }
+        consumo={modalEditarAbono.consumo}
+        cliente={modalEditarAbono.cliente}
+        tasaBcv={tasaBcv}
+        onExito={handleExitoEdicionAbono}
+      />
     </div>
   );
 }

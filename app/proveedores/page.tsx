@@ -121,7 +121,7 @@ const CATEGORIAS_PROVEEDORES = [
 ];
 
 // Helper: Cálculo de tiempo exacto y días restantes de vencimiento por factura (sin emojis)
-export interface InfoVencimiento {
+interface InfoVencimiento {
   estado: 'pagado' | 'vencida' | 'hoy' | 'proxima' | 'al_dia';
   diffDays: number;
   diasAbsolutos: number;
@@ -130,7 +130,7 @@ export interface InfoVencimiento {
   colorTema: 'emerald' | 'rose' | 'amber' | 'indigo';
 }
 
-export function calcularDetalleVencimiento(fechaVencimientoStr: string, pagado: boolean): InfoVencimiento {
+function calcularDetalleVencimiento(fechaVencimientoStr: string, pagado: boolean): InfoVencimiento {
   if (pagado) {
     return {
       estado: 'pagado',
@@ -202,7 +202,7 @@ export function calcularDetalleVencimiento(fechaVencimientoStr: string, pagado: 
 }
 
 // Renderizador unificado de Badge de Estado con Iconos Lucide React (sin emojis)
-export function renderBadgeEstado(
+function renderBadgeEstado(
   estado: 'vencido' | 'proximo' | 'al_dia' | 'solvente' | 'pagado' | 'vencida' | 'hoy' | 'proxima',
   texto: string,
   extraClass?: string
