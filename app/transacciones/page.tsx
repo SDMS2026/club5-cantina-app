@@ -48,7 +48,13 @@ import {
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { supabase } from '@/lib/supabaseClient';
 import { obtenerTasaBCV, TASA_BCV_FALLBACK_DEFAULT } from '@/lib/dolarApi';
-import { formatUSD, formatBs, calcularConversionBs } from '@/lib/utils';
+import {
+  formatUSD,
+  formatBs,
+  calcularConversionBs,
+  normalizarTexto,
+  construirPatronRegexBusqueda,
+} from '@/lib/utils';
 import { Producto } from '@/types/pos';
 import { NotificationBell } from '@/components/NotificationBell';
 import { refrescarNotificacionesGlobales } from '@/components/NotificationsContext';
@@ -687,28 +693,29 @@ export default function TransaccionesPage() {
         query = query.or('metodo_pago.ilike.saldo_favor%,metodo_pago.ilike.mixto%');
       }
 
-      // 3. Filtro en Base de Datos por Término de Búsqueda (.ilike en DB)
+      // 3. Filtro en Base de Datos por Término de Búsqueda insensible a mayúsculas y tildes
       const term = busquedaDebounced.trim();
       if (term) {
+        const pat = construirPatronRegexBusqueda(term);
         const [resClientes, resDetalles] = await Promise.all([
           supabase
             .from('clientes')
             .select('id')
             .or(
-              `nombre_estudiante.ilike.%${term}%,nombre_representante.ilike.%${term}%,grado_seccion.ilike.%${term}%`
+              `nombre_estudiante.imatch.${pat},nombre_representante.imatch.${pat},grado_seccion.imatch.${pat}`
             )
-            .limit(80),
+            .limit(100),
           supabase
             .from('consumo_detalles')
             .select('consumo_id, productos!inner(nombre)')
-            .ilike('productos.nombre', `%${term}%`)
-            .limit(80),
+            .filter('productos.nombre', 'imatch', pat)
+            .limit(100),
         ]);
 
         const clientIds = (resClientes.data || []).map((c) => c.id).filter(Boolean);
         const consumoIds = (resDetalles.data || []).map((d) => d.consumo_id).filter(Boolean);
 
-        const orClauses: string[] = [`metodo_pago.ilike.%${term}%`];
+        const orClauses: string[] = [`metodo_pago.imatch.${pat}`];
         if (clientIds.length > 0) {
           orClauses.push(`cliente_id.in.(${clientIds.join(',')})`);
         }

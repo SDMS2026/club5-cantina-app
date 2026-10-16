@@ -58,6 +58,8 @@ import {
   calcularConversionUSD,
   sanitizeDecimalInput,
   handleDecimalKeyDown,
+  normalizarTexto,
+  construirPatronRegexBusqueda,
 } from '@/lib/utils';
 import { NotificationBell } from '@/components/NotificationBell';
 import { refrescarNotificacionesGlobales } from '@/components/NotificationsContext';
@@ -455,11 +457,12 @@ export default function EstudiantesPage() {
           .from('clientes')
           .select('*', { count: 'exact' });
 
-        // 1. Filtro en Base de Datos por Búsqueda (.ilike en DB)
+        // 1. Filtro en Base de Datos por Búsqueda insensible a mayúsculas, minúsculas y tildes (imatch en DB)
         const term = busquedaDebounced.trim();
         if (term) {
+          const pat = construirPatronRegexBusqueda(term);
           q = q.or(
-            `nombre_estudiante.ilike.%${term}%,nombre_representante.ilike.%${term}%,grado_seccion.ilike.%${term}%,telefono_whatsapp.ilike.%${term}%`
+            `nombre_estudiante.imatch.${pat},nombre_representante.imatch.${pat},grado_seccion.imatch.${pat},telefono_whatsapp.imatch.${pat}`
           );
         }
 
@@ -945,18 +948,12 @@ export default function EstudiantesPage() {
       // Validación de duplicados (Nombre + Apellido + Sección):
       // Consulta en Supabase si ya existe un registro donde coincidan al mismo tiempo nombre_estudiante Y grado_seccion.
       // Permite alumnos con el mismo nombre y apellido SI están en secciones/grados distintos,
-      // pero bloquea el registro si coinciden en la misma sección.
-      const normalizarTexto = (str: string | null | undefined) =>
-        (str || '')
-          .trim()
-          .toLowerCase()
-          .normalize('NFD')
-          .replace(/[\u0300-\u036f]/g, '');
-
+      // pero bloquea el registro si coinciden en la misma sección (insensible a tildes y mayúsculas).
+      const patExacto = '^' + construirPatronRegexBusqueda(nombreLimpio).slice(2, -2) + '$';
       let queryDuplicados = supabase
         .from('clientes')
         .select('id, nombre_estudiante, grado_seccion')
-        .ilike('nombre_estudiante', nombreLimpio);
+        .filter('nombre_estudiante', 'imatch', patExacto);
 
       if (modalForm.modo === 'editar' && modalForm.id) {
         queryDuplicados = queryDuplicados.neq('id', modalForm.id);

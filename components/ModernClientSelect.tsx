@@ -4,7 +4,7 @@ import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Search, ChevronDown, User, Check, X, UserCheck, AlertCircle } from 'lucide-react';
 import { Cliente } from '@/types/pos';
 import { ResumenSaldoCliente } from '@/lib/clientBalance';
-import { formatUSD } from '@/lib/utils';
+import { formatUSD, normalizarTexto } from '@/lib/utils';
 
 interface ModernClientSelectProps {
   clientes: Cliente[];
@@ -46,8 +46,14 @@ export function ModernClientSelect({
     }
   }, [abierto]);
 
-  const normalizarBusqueda = (s?: string | null) =>
-    (s || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  // Limpiar término de búsqueda si se resetea o limpia el cliente
+  useEffect(() => {
+    if (!clienteSeleccionado) {
+      setBusqueda('');
+    }
+  }, [clienteSeleccionado]);
+
+  const normalizarBusqueda = normalizarTexto;
 
   const clientesFiltrados = useMemo(() => {
     if (!busqueda.trim()) return clientes;

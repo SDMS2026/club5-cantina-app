@@ -85,3 +85,61 @@ export function handleDecimalKeyDown(
     e.preventDefault();
   }
 }
+
+/**
+ * Normaliza una cadena de texto para búsquedas insensibles a mayúsculas, minúsculas,
+ * tildes y diacríticos (ej: "Martínez" -> "martinez", "TEQUEÑOS" -> "tequenos").
+ */
+export function normalizarTexto(texto?: string | null): string {
+  if (!texto) return '';
+  return texto
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+/**
+ * Comprueba si un texto contiene un término de búsqueda ignorando mayúsculas y acentos.
+ */
+export function coincideBusqueda(texto?: string | null, termino?: string | null): boolean {
+  if (!termino || !termino.trim()) return true;
+  if (!texto) return false;
+  return normalizarTexto(texto).includes(normalizarTexto(termino));
+}
+
+/**
+ * Genera un patrón regex compatible con PostgreSQL / PostgREST (imatch)
+ * que empareja una palabra sin importar si tiene tildes o no en la base de datos
+ * (ej: "Gomez" o "Gómez" generarán el patrón que busca ambas grafías indistintamente).
+ */
+export function construirPatronRegexBusqueda(termino?: string | null): string {
+  const limpio = (termino || '').trim();
+  if (!limpio) return '';
+
+  const mapa: Record<string, string> = {
+    a: '[aáàäâãAÁÀÄÂÃ]',
+    e: '[eéèëêEÉÈËÊ]',
+    i: '[iíìïîIÍÌÏÎ]',
+    o: '[oóòöôõOÓÒÖÔÕ]',
+    u: '[uúùüûUÚÙÜÛ]',
+    n: '[nñNÑ]',
+    c: '[cçCÇ]',
+  };
+
+  let regexStr = '';
+  for (const ch of limpio) {
+    if (/[.*+?^${}()|[\]\\]/.test(ch)) {
+      regexStr += '\\' + ch;
+      continue;
+    }
+    const unaccented = ch.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    if (mapa[unaccented]) {
+      regexStr += mapa[unaccented];
+    } else {
+      regexStr += ch;
+    }
+  }
+
+  return '.*' + regexStr + '.*';
+}

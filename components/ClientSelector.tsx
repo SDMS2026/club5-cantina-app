@@ -38,7 +38,7 @@ import {
   obtenerCategoriaDeGrado,
   encontrarVinculosCliente,
 } from '@/lib/constants';
-import { formatUSD } from '@/lib/utils';
+import { formatUSD, normalizarTexto } from '@/lib/utils';
 import { ResumenSaldoCliente } from '@/lib/clientBalance';
 import { ejecutarMiniRecarga } from '@/lib/syncUtils';
 
@@ -114,6 +114,14 @@ export function ClientSelector({
       setFiltroRapido('todos');
     }
   }, [abierto]);
+
+  // Limpiar campos de búsqueda interna cuando se resetea o deselecciona el cliente
+  React.useEffect(() => {
+    if (!clienteSeleccionado) {
+      setBusqueda('');
+      setFiltroRapido('todos');
+    }
+  }, [clienteSeleccionado]);
 
   // Manejo de deslizamiento (drag-to-scroll), rueda y flechas para los chips de filtro rápido
   const chipsScrollRef = React.useRef<HTMLDivElement>(null);
@@ -229,12 +237,7 @@ export function ClientSelector({
     return 0;
   };
 
-  const normalizarBusqueda = (str?: string | null) =>
-    (str || '')
-      .trim()
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '');
+  const normalizarBusqueda = normalizarTexto;
 
   // Helper para iniciales de avatar
   const getIniciales = (nombre?: string | null): string => {

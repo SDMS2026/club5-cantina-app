@@ -95,6 +95,7 @@ export default function PosPage() {
   const [metodoPagoSugerido, setMetodoPagoSugerido] = useState<MetodoPagoId | null>(null);
   const [notificacion, setNotificacion] = useState<{ tipo: 'exito' | 'info' | 'advertencia' | 'error'; texto: string } | null>(null);
   const [sembrandoDatos, setSembrandoDatos] = useState<boolean>(false);
+  const [formResetKey, setFormResetKey] = useState<number>(0);
 
   // 1. Cargar Tasa BCV
   const cargarTasa = useCallback(async () => {
@@ -293,7 +294,18 @@ export default function PosPage() {
     });
   };
 
+  // Limpiar y resetear el Punto de Venta al 100% para el siguiente pedido
+  const handleResetearPuntoVenta = useCallback(() => {
+    setClienteSeleccionado(null);
+    setItemsCarrito([]);
+    setModalPagoAbierto(false);
+    setModalOrdenMovilAbierto(false);
+    setMetodoPagoSugerido('efectivo_usd');
+    setFormResetKey((prev) => prev + 1);
+  }, []);
+
   const handleVentaExitosaPorVoz = (mensaje: string) => {
+    handleResetearPuntoVenta();
     setNotificacion({
       tipo: 'exito',
       texto: mensaje,
@@ -312,6 +324,7 @@ export default function PosPage() {
   };
 
   const handleVentaFiadaPorVoz = (mensaje: string) => {
+    handleResetearPuntoVenta();
     setNotificacion({
       tipo: 'exito',
       texto: mensaje,
@@ -354,12 +367,9 @@ export default function PosPage() {
     setTimeout(() => setNotificacion(null), 5000);
   };
 
-  // Finalizar transacción exitosa
+  // Finalizar transacción exitosa y auto-resetear el Punto de Venta
   const handleTransaccionExitosa = () => {
-    setItemsCarrito([]);
-    setModalPagoAbierto(false);
-    setModalOrdenMovilAbierto(false);
-    setMetodoPagoSugerido('efectivo_usd');
+    handleResetearPuntoVenta();
     setNotificacion({
       tipo: 'exito',
       texto: '¡Venta registrada con éxito en Supabase!',
@@ -604,6 +614,7 @@ export default function PosPage() {
                 onAgregarProducto={handleAgregarProducto}
                 onDisminuirProducto={(id) => handleModificarCantidad(id, -1)}
                 cargando={cargandoProductos}
+                resetKey={formResetKey}
               />
             </div>
           </div>

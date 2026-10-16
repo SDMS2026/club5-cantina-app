@@ -36,7 +36,13 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import { obtenerTasaBCV, TASA_BCV_FALLBACK_DEFAULT } from '@/lib/dolarApi';
-import { formatUSD, formatBs, calcularConversionBs } from '@/lib/utils';
+import {
+  formatUSD,
+  formatBs,
+  calcularConversionBs,
+  normalizarTexto,
+  construirPatronRegexBusqueda,
+} from '@/lib/utils';
 import { Producto } from '@/types/pos';
 import { NotificationBell } from '@/components/NotificationBell';
 import { useSidebar } from '@/components/SidebarContext';
@@ -231,10 +237,11 @@ export default function ProductosPage() {
           .from('productos')
           .select('*', { count: 'exact' });
 
-        // 1. Filtro en Base de Datos por Búsqueda (.ilike en DB)
+        // 1. Filtro en Base de Datos por Búsqueda insensible a mayúsculas y tildes
         const term = busquedaDebounced.trim();
         if (term) {
-          q = q.ilike('nombre', `%${term}%`);
+          const pat = construirPatronRegexBusqueda(term);
+          q = q.filter('nombre', 'imatch', pat);
         }
 
         // 2. Filtro en Base de Datos por Categoría (.eq en DB)

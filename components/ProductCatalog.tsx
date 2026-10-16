@@ -1,11 +1,11 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import Image from 'next/image';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, Plus, Minus, Check, X, ShoppingBag, Utensils, Coffee, Cookie, Sparkles } from 'lucide-react';
 import { Producto, ItemCarrito } from '@/types/pos';
-import { formatUSD, formatBs, calcularConversionBs } from '@/lib/utils';
+import { formatUSD, formatBs, calcularConversionBs, normalizarTexto } from '@/lib/utils';
 import { esUrlImagen, CATEGORIAS_PRODUCTOS_SISTEMA } from '@/lib/productEmojis';
 import { useDraggableScroll } from '@/lib/useDraggableScroll';
 
@@ -16,6 +16,7 @@ interface ProductCatalogProps {
   onAgregarProducto: (producto: Producto) => void;
   onDisminuirProducto?: (productoId: string) => void;
   cargando?: boolean;
+  resetKey?: number;
 }
 
 // Icono o fallback visual según el nombre del producto
@@ -67,10 +68,19 @@ export function ProductCatalog({
   onAgregarProducto,
   onDisminuirProducto,
   cargando = false,
+  resetKey,
 }: ProductCatalogProps) {
   const [busqueda, setBusqueda] = useState('');
   const [categoriaSeleccionada, setCategoriaSeleccionada] = useState<string>('todos');
   const { ref: draggableRef, events: draggableEvents } = useDraggableScroll();
+
+  // Limpiar automáticamente búsqueda y filtros tras procesar una venta o reset
+  useEffect(() => {
+    if (resetKey !== undefined) {
+      setBusqueda('');
+      setCategoriaSeleccionada('todos');
+    }
+  }, [resetKey]);
 
   // Mapa de cantidades en carrito por ID de producto
   const cantidadesEnCarrito = useMemo(() => {
@@ -93,11 +103,14 @@ export function ProductCatalog({
   }, [productos]);
 
   const productosFiltrados = useMemo(() => {
+    const qNorm = normalizarTexto(busqueda);
+    const qNums = busqueda.trim();
     return productos.filter((p) => {
       if (!p.activo) return false;
       const coincideBusqueda =
-        p.nombre.toLowerCase().includes(busqueda.toLowerCase().trim()) ||
-        p.precio_usd.toString().includes(busqueda.trim());
+        !qNorm ||
+        normalizarTexto(p.nombre).includes(qNorm) ||
+        (qNums.length > 0 && p.precio_usd.toString().includes(qNums));
       const coincideCategoria = coincideConCategoria(p.categoria, categoriaSeleccionada);
       return coincideBusqueda && coincideCategoria;
     });

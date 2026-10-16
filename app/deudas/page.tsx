@@ -53,6 +53,7 @@ import {
   calcularConversionUSD,
   sanitizeDecimalInput,
   handleDecimalKeyDown,
+  normalizarTexto,
 } from '@/lib/utils';
 import { ModernClientSelect } from '@/components/ModernClientSelect';
 import { esProfesorOPersonal, normalizarTelefonoWhatsApp } from '@/lib/constants';
@@ -513,15 +514,21 @@ export default function DeudasPage() {
   const cuentasFiltradas = useMemo(() => {
     let lista = [...cuentasAgrupadas];
 
-    // Filtro por texto
+    // Filtro por texto insensible a mayúsculas y acentos
     if (busqueda.trim()) {
-      const q = busqueda.toLowerCase().trim();
+      const q = normalizarTexto(busqueda);
+      const qNums = busqueda.replace(/\D/g, '');
       lista = lista.filter((c) => {
-        const est = c.cliente?.nombre_estudiante?.toLowerCase() || 'venta ocasional';
-        const rep = c.cliente?.nombre_representante?.toLowerCase() || '';
-        const grado = c.cliente?.grado_seccion?.toLowerCase() || '';
-        const tel = c.cliente?.telefono_whatsapp || '';
-        return est.includes(q) || rep.includes(q) || grado.includes(q) || tel.includes(q);
+        const est = normalizarTexto(c.cliente?.nombre_estudiante || 'venta ocasional');
+        const rep = normalizarTexto(c.cliente?.nombre_representante);
+        const grado = normalizarTexto(c.cliente?.grado_seccion);
+        const telNums = (c.cliente?.telefono_whatsapp || '').replace(/\D/g, '');
+        return (
+          est.includes(q) ||
+          rep.includes(q) ||
+          grado.includes(q) ||
+          (qNums.length >= 3 && telNums.includes(qNums))
+        );
       });
     }
 
