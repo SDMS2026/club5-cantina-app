@@ -69,8 +69,10 @@ import {
   ItemEdicionConsumo,
   ConsumoInfoAudit,
   ResultadoEdicionAbono,
+  ResultadoReversionPago,
 } from '@/lib/clientBalance';
 import { ModalEditarAbono } from '@/components/ModalEditarAbono';
+import { ModalRevertirPago } from '@/components/ModalRevertirPago';
 
 interface TransaccionCliente {
   id: string;
@@ -461,6 +463,17 @@ export default function TransaccionesPage() {
 
   // Modal Editar / Revertir Abono
   const [modalEditarAbono, setModalEditarAbono] = useState<{
+    abierto: boolean;
+    consumo: TransaccionRegistro | null;
+    cliente: TransaccionCliente | null;
+  }>({
+    abierto: false,
+    consumo: null,
+    cliente: null,
+  });
+
+  // Modal Marcar como Pendiente / Revertir Pago
+  const [modalRevertirPago, setModalRevertirPago] = useState<{
     abierto: boolean;
     consumo: TransaccionRegistro | null;
     cliente: TransaccionCliente | null;
@@ -896,6 +909,19 @@ export default function TransaccionesPage() {
   };
 
   const handleExitoEdicionAbono = async (res: ResultadoEdicionAbono) => {
+    mostrarNotificacion('exito', res.mensaje);
+    if (modalDetalle.abierto) {
+      setModalDetalle({ abierto: false, transaccion: null });
+    }
+    await ejecutarMiniRecarga({
+      router,
+      recargarDatosLocales: async () => {
+        await Promise.all([cargarTransacciones(), cargarMetricasResumen(), cargarLiquidaciones()]);
+      },
+    });
+  };
+
+  const handleExitoReversionPago = async (res: ResultadoReversionPago) => {
     mostrarNotificacion('exito', res.mensaje);
     if (modalDetalle.abierto) {
       setModalDetalle({ abierto: false, transaccion: null });
@@ -1782,6 +1808,24 @@ export default function TransaccionesPage() {
                                                             </button>
                                                           )}
 
+                                                          {!audit.esAnulado && t.cliente_id && t.pagado === true && (
+                                                            <button
+                                                              type="button"
+                                                              onClick={() =>
+                                                                setModalRevertirPago({
+                                                                  abierto: true,
+                                                                  consumo: t,
+                                                                  cliente: t.clientes || null,
+                                                                })
+                                                              }
+                                                              className="rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-2 py-1.5 text-xs font-bold text-amber-700 dark:text-amber-300 hover:bg-amber-100 transition active:scale-95 flex items-center gap-1 shrink-0"
+                                                              title="Desmarcar pago y devolver esta cuenta a estado Pendiente"
+                                                            >
+                                                              <RotateCcw className="h-3 w-3" />
+                                                              <span>Pendiente</span>
+                                                            </button>
+                                                          )}
+
                                                           {!audit.esAnulado && (
                                                             <button
                                                               type="button"
@@ -1954,6 +1998,24 @@ export default function TransaccionesPage() {
                                                                   >
                                                                     <Coins className="h-3 w-3" />
                                                                     <span>Abono</span>
+                                                                  </button>
+                                                                )}
+
+                                                                {!audit.esAnulado && t.cliente_id && t.pagado === true && (
+                                                                  <button
+                                                                    type="button"
+                                                                    onClick={() =>
+                                                                      setModalRevertirPago({
+                                                                        abierto: true,
+                                                                        consumo: t,
+                                                                        cliente: t.clientes || null,
+                                                                      })
+                                                                    }
+                                                                    className="rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-2 py-1 text-xs font-bold text-amber-700 dark:text-amber-300 hover:bg-amber-100 transition active:scale-95 flex items-center gap-1"
+                                                                    title="Desmarcar pago y devolver esta cuenta a estado Pendiente"
+                                                                  >
+                                                                    <RotateCcw className="h-3 w-3" />
+                                                                    <span>Pendiente</span>
                                                                   </button>
                                                                 )}
 
@@ -2712,6 +2774,25 @@ export default function TransaccionesPage() {
                       </button>
                     )}
 
+                    {!audit.esAnulado && t.cliente_id && t.pagado === true && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setModalDetalle({ abierto: false, transaccion: null });
+                          setModalRevertirPago({
+                            abierto: true,
+                            consumo: t,
+                            cliente: t.clientes || null,
+                          });
+                        }}
+                        className="flex items-center gap-1.5 rounded-2xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-3 py-2.5 text-xs font-bold text-amber-700 dark:text-amber-300 hover:bg-amber-100 transition shadow-xs"
+                        title="Desmarcar pago y devolver esta cuenta a estado Pendiente"
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" />
+                        <span>Marcar como Pendiente</span>
+                      </button>
+                    )}
+
                     {!audit.esAnulado && (
                       <button
                         type="button"
@@ -3267,6 +3348,22 @@ export default function TransaccionesPage() {
         cliente={modalEditarAbono.cliente}
         tasaBcv={tasaBcv}
         onExito={handleExitoEdicionAbono}
+      />
+
+      {/* Modal Desmarcar Pago / Marcar como Pendiente */}
+      <ModalRevertirPago
+        abierto={modalRevertirPago.abierto}
+        onOpenChange={(abierto) =>
+          setModalRevertirPago((prev) => ({
+            ...prev,
+            abierto,
+            ...(!abierto ? { consumo: null, cliente: null } : {}),
+          }))
+        }
+        consumo={modalRevertirPago.consumo}
+        cliente={modalRevertirPago.cliente}
+        tasaBcv={tasaBcv}
+        onExito={handleExitoReversionPago}
       />
     </div>
   </ErrorBoundary>

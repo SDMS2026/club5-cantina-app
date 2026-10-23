@@ -91,8 +91,10 @@ import {
   parseConsumoAudit,
   ResumenSaldoCliente,
   ResultadoEdicionAbono,
+  ResultadoReversionPago,
 } from '@/lib/clientBalance';
 import { ModalEditarAbono } from '@/components/ModalEditarAbono';
+import { ModalRevertirPago } from '@/components/ModalRevertirPago';
 import {
   generarMensajeAvisoEstudiante,
   obtenerConfiguracion,
@@ -362,6 +364,17 @@ export default function EstudiantesPage() {
 
   // Modal Editar / Revertir Abono desde la Ficha
   const [modalEditarAbono, setModalEditarAbono] = useState<{
+    abierto: boolean;
+    consumo: any | null;
+    cliente: Cliente | null;
+  }>({
+    abierto: false,
+    consumo: null,
+    cliente: null,
+  });
+
+  // Modal Marcar como Pendiente / Revertir Pago desde la Ficha
+  const [modalRevertirPago, setModalRevertirPago] = useState<{
     abierto: boolean;
     consumo: any | null;
     cliente: Cliente | null;
@@ -761,6 +774,50 @@ export default function EstudiantesPage() {
   };
 
   const handleExitoEdicionAbono = async (res: ResultadoEdicionAbono) => {
+    setNotificacion({
+      tipo: 'exito',
+      texto: res.mensaje,
+    });
+    setTimeout(() => setNotificacion(null), 4000);
+
+    // Recargar datos y directorio general
+    await cargarDatos();
+
+    // Refrescar consumos y saldo del cliente en la ficha abierta
+    if (modalFicha.cliente && modalFicha.cliente.id === res.clienteId) {
+      setModalFicha((prev) => ({
+        ...prev,
+        cliente: prev.cliente ? { ...prev.cliente, saldo: res.nuevoSaldoCliente } : null,
+      }));
+
+      const { data } = await supabase
+        .from('consumos')
+        .select(`
+          id,
+          cliente_id,
+          monto_total_usd,
+          tasa_bcv_historica,
+          metodo_pago,
+          pagado,
+          fecha,
+          consumo_detalles (
+            id,
+            cantidad,
+            precio_unitario_usd,
+            productos (
+              id,
+              nombre
+            )
+          )
+        `)
+        .eq('cliente_id', res.clienteId)
+        .order('fecha', { ascending: false });
+
+      setModalFicha((prev) => ({ ...prev, consumos: data || [] }));
+    }
+  };
+
+  const handleExitoReversionPago = async (res: ResultadoReversionPago) => {
     setNotificacion({
       tipo: 'exito',
       texto: res.mensaje,
@@ -3091,6 +3148,24 @@ export default function EstudiantesPage() {
                                       <span>Editar Abono</span>
                                     </button>
 
+                                    {c.pagado === true && (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setModalRevertirPago({
+                                            abierto: true,
+                                            consumo: c,
+                                            cliente: cli,
+                                          })
+                                        }
+                                        className="flex items-center gap-1 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-2.5 py-1 text-[11px] font-bold text-amber-700 dark:text-amber-300 hover:bg-amber-100 transition active:scale-95 shrink-0"
+                                        title="Desmarcar pago y devolver esta cuenta a estado Pendiente"
+                                      >
+                                        <RotateCcw className="h-3 w-3" />
+                                        <span>Desmarcar Pago</span>
+                                      </button>
+                                    )}
+
                                     <button
                                       type="button"
                                       onClick={() =>
@@ -3284,6 +3359,22 @@ export default function EstudiantesPage() {
         cliente={modalEditarAbono.cliente}
         tasaBcv={tasaBcv}
         onExito={handleExitoEdicionAbono}
+      />
+
+      {/* Modal Desmarcar Pago / Marcar como Pendiente */}
+      <ModalRevertirPago
+        abierto={modalRevertirPago.abierto}
+        onOpenChange={(abierto) =>
+          setModalRevertirPago((prev) => ({
+            ...prev,
+            abierto,
+            ...(!abierto ? { consumo: null, cliente: null } : {}),
+          }))
+        }
+        consumo={modalRevertirPago.consumo}
+        cliente={modalRevertirPago.cliente}
+        tasaBcv={tasaBcv}
+        onExito={handleExitoReversionPago}
       />
     </div>
   );

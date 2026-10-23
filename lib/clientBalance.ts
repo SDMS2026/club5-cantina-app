@@ -1098,3 +1098,174 @@ export async function editarAbonoConsumo({
   };
 }
 
+export interface ParametrosReversionPago {
+  consumoId: string;
+  motivo?: string;
+}
+
+export interface ResultadoReversionPago {
+  exito: boolean;
+  mensaje: string;
+  consumoId: string;
+  clienteId?: string | null;
+  montoRevertidoUsd: number;
+  nuevoSaldoCliente?: number;
+}
+
+/**
+ * Revierte el estado de pago de una venta o consumo previamente marcada como PAGADA.
+ * - Pasa consumos.pagado a false.
+ * - Restablece consumos.metodo_pago a 'pendiente' (limpiando comprobantes, referencias y métodos previos).
+ * - Restablece la deuda en clientes.saldo sumando el saldo deudor de vuelta en tiempo real (saldo = saldo - montoRevertido).
+ * - Preserva la fecha original, los ítems en consumo_detalles y el monto_total_usd intactos.
+ */
+export async function revertirPagoConsumo({
+  consumoId,
+  motivo,
+}: ParametrosReversionPago): Promise<ResultadoReversionPago> {
+  if (!consumoId) throw new Error('ID de consumo requerido para revertir el pago.');
+
+  // 1. Consultar consumo en Supabase
+  const { data: consumo, error: errConsumo } = await supabase
+    .from('consumos')
+    .select(`
+      id,
+      cliente_id,
+      monto_total_usd,
+      tasa_bcv_historica,
+      metodo_pago,
+      pagado,
+      fecha
+    `)
+    .eq('id', consumoId)
+    .single();
+
+  if (errConsumo || !consumo) {
+    throw new Error(errConsumo?.message || 'No se encontró la transacción de venta especificada.');
+  }
+
+  // 2. Validar estado de la transacción
+  if (consumo.metodo_pago?.toLowerCase().startsWith('anulado')) {
+    throw new Error('No es posible revertir el pago de una transacción que se encuentra anulada.');
+  }
+
+  const montoTotalUsd = Number(consumo.monto_total_usd || 0);
+  const audit = parseConsumoAudit({
+    metodo_pago: consumo.metodo_pago,
+    pagado: consumo.pagado,
+    monto_total_usd: montoTotalUsd,
+  });
+
+  if (consumo.pagado === false && (!audit.esParcial || (audit.montoPagado || 0) <= 0)) {
+    throw new Error('Esta cuenta ya se encuentra en estado Pendiente / Por Cobrar.');
+  }
+
+  // 3. Determinar el monto pagado que debe volver a sumarse a la deuda
+  let montoRevertidoUsd = 0;
+  if (consumo.pagado === true) {
+    montoRevertidoUsd = montoTotalUsd;
+  } else if (audit.esParcial && audit.montoPagado !== undefined && audit.montoPagado > 0) {
+    montoRevertidoUsd = audit.montoPagado;
+  } else {
+    montoRevertidoUsd = montoTotalUsd;
+  }
+  montoRevertidoUsd = Math.round(montoRevertidoUsd * 100) / 100;
+
+  // 4. Actualizar estado en la tabla consumos: pagado: false, metodo_pago: 'pendiente'
+  const { error: errUpdateConsumo } = await supabase
+    .from('consumos')
+    .update({
+      pagado: false,
+      metodo_pago: 'pendiente',
+    })
+    .eq('id', consumoId);
+
+  if (errUpdateConsumo) {
+    console.error('Error al actualizar consumo a pendiente:', errUpdateConsumo);
+    throw new Error('Error al actualizar el estado de la venta en Supabase: ' + errUpdateConsumo.message);
+  }
+
+  // 5. Restablecer la deuda sumándola de vuelta al saldo deudor del cliente (saldo = saldo - montoRevertido)
+  let nuevoSaldoCliente: number | undefined = undefined;
+
+  if (consumo.cliente_id && montoRevertidoUsd > 0) {
+    const { data: clienteActual, error: errCliente } = await supabase
+      .from('clientes')
+      .select('saldo')
+      .eq('id', consumo.cliente_id)
+      .single();
+
+    if (!errCliente && clienteActual) {
+      const saldoPrevio = Number(clienteActual.saldo || 0);
+      nuevoSaldoCliente = Math.round((saldoPrevio - montoRevertidoUsd) * 100) / 100;
+
+      const { error: errUpdateCliente } = await supabase
+        .from('clientes')
+        .update({ saldo: nuevoSaldoCliente })
+        .eq('id', consumo.cliente_id);
+
+      if (errUpdateCliente) {
+        console.error('Error actualizando saldo deudor de cliente al revertir pago:', errUpdateCliente);
+        throw new Error('Error al actualizar el saldo deudor del cliente.');
+      }
+    }
+  }
+
+  // 6. Notificar en tiempo real
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('club5:actualizar-notificaciones'));
+  }
+
+  return {
+    exito: true,
+    mensaje: `Cuenta #${consumoId.slice(0, 8)} devuelta a estado PENDIENTE. Se sumaron +$${montoRevertidoUsd.toFixed(2)} al saldo deudor del cliente.`,
+    consumoId,
+    clienteId: consumo.cliente_id || null,
+    montoRevertidoUsd,
+    nuevoSaldoCliente,
+  };
+}
+
+/**
+ * Revierte el estado de pago de múltiples consumos a la vez.
+ */
+export async function revertirVariosPagosConsumos({
+  consumoIds,
+  motivo,
+}: {
+  consumoIds: string[];
+  motivo?: string;
+}): Promise<{
+  exito: boolean;
+  mensaje: string;
+  totalRevertidoUsd: number;
+  cantidadConsumos: number;
+}> {
+  if (!consumoIds || consumoIds.length === 0) {
+    throw new Error('Se requiere al menos un ID de consumo para revertir.');
+  }
+
+  let totalRevertidoUsd = 0;
+  let cantidadExitosa = 0;
+
+  for (const id of consumoIds) {
+    try {
+      const res = await revertirPagoConsumo({ consumoId: id, motivo });
+      if (res.exito) {
+        totalRevertidoUsd = Math.round((totalRevertidoUsd + res.montoRevertidoUsd) * 100) / 100;
+        cantidadExitosa++;
+      }
+    } catch (e) {
+      console.warn(`Error revirtiendo consumo ${id}:`, e);
+    }
+  }
+
+  return {
+    exito: cantidadExitosa > 0,
+    mensaje: `Se devolvieron ${cantidadExitosa} cuentas a estado PENDIENTE por un total de $${totalRevertidoUsd.toFixed(2)}.`,
+    totalRevertidoUsd,
+    cantidadConsumos: cantidadExitosa,
+  };
+}
+
+

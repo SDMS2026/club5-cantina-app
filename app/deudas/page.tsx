@@ -42,6 +42,7 @@ import {
   Banknote,
   Users,
   Coins,
+  RotateCcw,
 } from 'lucide-react';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { obtenerTasaBCV, TASA_BCV_FALLBACK_DEFAULT } from '@/lib/dolarApi';
@@ -71,8 +72,10 @@ import {
   parseConsumoAudit,
   ResumenSaldoCliente,
   ResultadoEdicionAbono,
+  ResultadoReversionPago,
 } from '@/lib/clientBalance';
 import { ModalEditarAbono } from '@/components/ModalEditarAbono';
+import { ModalRevertirPago } from '@/components/ModalRevertirPago';
 import {
   generarMensajeCobroIndividual,
   generarMensajeCobroFamiliar,
@@ -297,6 +300,21 @@ export default function DeudasPage() {
     cliente: null,
   });
 
+  // Modal Desmarcar Pago / Marcar como Pendiente
+  const [modalRevertirPago, setModalRevertirPago] = useState<{
+    abierto: boolean;
+    consumo: any | null;
+    cliente: Cliente | null;
+  }>({
+    abierto: false,
+    consumo: null,
+    cliente: null,
+  });
+
+  // Pestaña activa: 'pendientes' (Cuentas por cobrar) o 'pagados' (Solventados / Pagados recientes)
+  const [pestanaActiva, setPestanaActiva] = useState<'pendientes' | 'pagados'>('pendientes');
+  const [consumosPagados, setConsumosPagados] = useState<DeudaRegistro[]>([]);
+
   // Notificación toast
   const [notificacion, setNotificacion] = useState<{ tipo: 'exito' | 'info'; texto: string } | null>(null);
   const [creandoDeudaMuestra, setCreandoDeudaMuestra] = useState<boolean>(false);
@@ -334,7 +352,7 @@ export default function DeudasPage() {
   const cargarDeudas = useCallback(async () => {
     setCargandoDeudas(true);
     try {
-      const [{ data, error }, saldos, { data: clientesData }] = await Promise.all([
+      const [{ data, error }, saldos, { data: clientesData }, { data: dataPagados }] = await Promise.all([
         supabase
           .from('consumos')
           .select(`
@@ -350,7 +368,8 @@ export default function DeudasPage() {
               nombre_estudiante,
               grado_seccion,
               nombre_representante,
-              telefono_whatsapp
+              telefono_whatsapp,
+              saldo
             ),
             consumo_detalles (
               id,
@@ -369,6 +388,41 @@ export default function DeudasPage() {
           .order('fecha', { ascending: false }),
         obtenerSaldosTodosClientes(),
         supabase.from('clientes').select('*').order('nombre_estudiante', { ascending: true }),
+        supabase
+          .from('consumos')
+          .select(`
+            id,
+            cliente_id,
+            monto_total_usd,
+            tasa_bcv_historica,
+            fecha,
+            pagado,
+            metodo_pago,
+            clientes (
+              id,
+              nombre_estudiante,
+              grado_seccion,
+              nombre_representante,
+              telefono_whatsapp,
+              saldo
+            ),
+            consumo_detalles (
+              id,
+              cantidad,
+              precio_unitario_usd,
+              productos (
+                id,
+                nombre,
+                imagen_url,
+                precio_usd,
+                activo
+              )
+            )
+          `)
+          .eq('pagado', true)
+          .not('cliente_id', 'is', null)
+          .order('fecha', { ascending: false })
+          .limit(100),
       ]);
 
       if (error) {
@@ -387,6 +441,23 @@ export default function DeudasPage() {
         });
         setDeudas(registrosNormalizados);
       }
+
+      if (dataPagados) {
+        const pagadosNormalizados: DeudaRegistro[] = dataPagados
+          .filter((d: any) => !d.metodo_pago?.toLowerCase().startsWith('anulado'))
+          .map((d: any) => {
+            const cli = Array.isArray(d.clientes) ? d.clientes[0] || null : d.clientes || null;
+            return {
+              ...d,
+              clientes: cli,
+              monto_total_usd: Number(d.monto_total_usd) || 0,
+              fecha: d.fecha || new Date().toISOString(),
+              consumo_detalles: Array.isArray(d.consumo_detalles) ? d.consumo_detalles : [],
+            };
+          });
+        setConsumosPagados(pagadosNormalizados);
+      }
+
       setSaldosClientes(saldos || {});
       setTodosLosClientes(Array.isArray(clientesData) ? clientesData : []);
     } catch (e) {
@@ -577,6 +648,34 @@ export default function DeudasPage() {
     const inicio = (paginaActualDeudas - 1) * TAMANO_PAGINA_DEUDAS;
     return cuentasFiltradas.slice(inicio, inicio + TAMANO_PAGINA_DEUDAS);
   }, [cuentasFiltradas, paginaActualDeudas, TAMANO_PAGINA_DEUDAS]);
+
+  // Consumos solventados / pagados recientes filtrados
+  const consumosPagadosFiltrados = useMemo(() => {
+    let lista = [...consumosPagados];
+
+    if (busqueda.trim()) {
+      const q = normalizarTexto(busqueda);
+      const qNums = busqueda.replace(/\D/g, '');
+      lista = lista.filter((c) => {
+        const est = normalizarTexto(c.clientes?.nombre_estudiante || '');
+        const rep = normalizarTexto(c.clientes?.nombre_representante);
+        const grado = normalizarTexto(c.clientes?.grado_seccion);
+        const telNums = (c.clientes?.telefono_whatsapp || '').replace(/\D/g, '');
+        return (
+          est.includes(q) ||
+          rep.includes(q) ||
+          grado.includes(q) ||
+          (qNums.length >= 3 && telNums.includes(qNums))
+        );
+      });
+    }
+
+    if (filtroGrado !== 'todos') {
+      lista = lista.filter((c) => c.clientes?.grado_seccion === filtroGrado);
+    }
+
+    return lista;
+  }, [consumosPagados, busqueda, filtroGrado]);
 
   // Totales globales de deudas y saldos leyendo directamente clientes.saldo
   const granTotalUsd = useMemo(() => {
@@ -844,6 +943,20 @@ export default function DeudasPage() {
 
   // Abrir Modal de Abono / Anticipo
   const handleExitoEdicionAbono = async (res: ResultadoEdicionAbono) => {
+    setNotificacion({
+      tipo: 'exito',
+      texto: res.mensaje,
+    });
+    setTimeout(() => setNotificacion(null), 4500);
+    await ejecutarMiniRecarga({
+      router,
+      recargarDatosLocales: async () => {
+        await cargarDeudas();
+      },
+    });
+  };
+
+  const handleExitoReversionPago = async (res: ResultadoReversionPago) => {
     setNotificacion({
       tipo: 'exito',
       texto: res.mensaje,
@@ -1341,6 +1454,41 @@ export default function DeudasPage() {
           </div>
         </div>
 
+        {/* Selector de Pestañas: Cuentas Pendientes vs Solventados / Pagados Recientes */}
+        <div className="mb-4 flex items-center gap-1.5 p-1 rounded-2xl bg-gray-200/70 dark:bg-slate-900 border border-gray-200/90 dark:border-slate-800 w-fit">
+          <button
+            type="button"
+            onClick={() => setPestanaActiva('pendientes')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition active:scale-95 ${
+              pestanaActiva === 'pendientes'
+                ? 'bg-white dark:bg-[#111726] text-gray-900 dark:text-slate-100 shadow-xs'
+                : 'text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-slate-200'
+            }`}
+          >
+            <Receipt className="h-4 w-4 text-amber-600" />
+            <span>Cuentas por Cobrar (Pendientes)</span>
+            <span className="rounded-full bg-amber-100 dark:bg-amber-950/80 px-2 py-0.5 text-[10px] font-bold text-amber-800 dark:text-amber-300">
+              {cuentasAgrupadas.length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setPestanaActiva('pagados')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition active:scale-95 ${
+              pestanaActiva === 'pagados'
+                ? 'bg-white dark:bg-[#111726] text-gray-900 dark:text-slate-100 shadow-xs'
+                : 'text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-slate-200'
+            }`}
+          >
+            <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+            <span>Solventados / Pagados Recientes</span>
+            <span className="rounded-full bg-emerald-100 dark:bg-emerald-950/80 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:text-emerald-300">
+              {consumosPagados.length}
+            </span>
+          </button>
+        </div>
+
         {/* Barra de Filtros y Búsqueda Avanzada */}
         <div className="mb-6 flex flex-col gap-3 rounded-3xl border border-gray-200/80 bg-white p-4 shadow-xs lg:flex-row lg:items-center lg:justify-between">
           {/* Buscador de texto */}
@@ -1482,7 +1630,7 @@ export default function DeudasPage() {
           </div>
         </div>
 
-        {/* Listado de Cuentas Consolidadas por Estudiante */}
+        {/* Listado de Cuentas Consolidadas por Estudiante o Consumos Pagados */}
         {cargandoDeudas ? (
           <div className="space-y-3">
             {[1, 2, 3].map((n) => (
@@ -1492,6 +1640,121 @@ export default function DeudasPage() {
               />
             ))}
           </div>
+        ) : pestanaActiva === 'pagados' ? (
+          consumosPagadosFiltrados.length === 0 ? (
+            <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed border-gray-200 dark:border-slate-800 bg-white/70 dark:bg-[#111726]/40 py-16 text-center">
+              <div className="flex h-14 w-14 items-center justify-center rounded-3xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-100 dark:border-emerald-800/40 text-emerald-600 dark:text-emerald-400 mb-3 shadow-xs">
+                <CheckCircle2 className="h-7 w-7" />
+              </div>
+              <h3 className="text-base font-bold text-gray-900 dark:text-white">
+                {busqueda || filtroGrado !== 'todos'
+                  ? 'No se encontraron consumos pagados con los filtros aplicados'
+                  : 'No hay consumos pagados recientes para mostrar'}
+              </h3>
+              <p className="mt-1 text-xs text-gray-500 dark:text-slate-400 max-w-sm">
+                Los consumos solventados de estudiantes aparecerán aquí. Puedes revertir cualquier pago por error con el botón &quot;Desmarcar Pago&quot;.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {consumosPagadosFiltrados.map((p) => {
+                const audit = parseConsumoAudit({
+                  metodo_pago: p.metodo_pago,
+                  pagado: p.pagado,
+                  monto_total_usd: p.monto_total_usd,
+                });
+                const estudiante = p.clientes?.nombre_estudiante || 'Venta Cantina';
+                const grado = p.clientes?.grado_seccion || 'Sin sección';
+                let fechaTxt = p.fecha;
+                try {
+                  const d = new Date(p.fecha);
+                  fechaTxt = d.toLocaleDateString('es-VE', {
+                    day: '2-digit',
+                    month: 'short',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  });
+                } catch {}
+
+                const montoBs = calcularConversionBs(p.monto_total_usd, p.tasa_bcv_historica || tasaBcv);
+
+                return (
+                  <div
+                    key={p.id}
+                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 rounded-3xl border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#0D111A] p-4 sm:p-5 shadow-xs hover:border-gray-300 dark:hover:border-slate-700 transition"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-gray-900 dark:text-slate-100 text-sm">
+                          {estudiante}
+                        </span>
+                        <span className="rounded-full bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-100 dark:border-indigo-900/60 px-2.5 py-0.5 text-[10px] font-bold text-indigo-700 dark:text-indigo-300">
+                          {grado}
+                        </span>
+                        <span className="flex items-center gap-1 text-[11px] text-gray-400">
+                          <Calendar className="h-3 w-3" />
+                          {fechaTxt}
+                        </span>
+                        <span className="rounded-full bg-emerald-100 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 px-2 py-0.5 text-[9px] font-bold text-emerald-800 dark:text-emerald-300 uppercase">
+                          PAGADO
+                        </span>
+                      </div>
+
+                      {/* Artículos */}
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {p.consumo_detalles && p.consumo_detalles.length > 0 ? (
+                          p.consumo_detalles.map((det) => (
+                            <span
+                              key={det.id}
+                              className="inline-flex items-center gap-1 rounded-lg border border-gray-200/80 dark:border-slate-800 bg-gray-50 dark:bg-[#141C2E] px-2 py-0.5 text-[11px] text-gray-700 dark:text-slate-300"
+                            >
+                              <span className="font-bold">{det.cantidad}x</span>
+                              <span>{det.productos?.nombre || 'Producto'}</span>
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-xs text-gray-400">Consumo general</span>
+                        )}
+                      </div>
+
+                      <div className="mt-1 text-[11px] text-gray-500 dark:text-slate-400">
+                        Método registrado: <span className="font-semibold text-gray-700 dark:text-slate-300">{audit.nombreLegible}</span>
+                        {audit.referencia ? ` (Ref: #${audit.referencia})` : ''}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0 border-gray-100 dark:border-slate-800/80">
+                      <div className="text-left sm:text-right">
+                        <div className="text-base font-black text-gray-900 dark:text-slate-100">
+                          {formatUSD(p.monto_total_usd)}
+                        </div>
+                        <div className="text-[11px] font-mono text-emerald-700 dark:text-emerald-400 font-semibold">
+                          {formatBs(montoBs)}
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setModalRevertirPago({
+                            abierto: true,
+                            consumo: p,
+                            cliente: p.clientes || null,
+                          })
+                        }
+                        className="flex items-center gap-1.5 rounded-2xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-xs font-bold text-amber-800 dark:text-amber-300 hover:bg-amber-100 transition active:scale-95 shadow-2xs shrink-0"
+                        title="Desmarcar pago y devolver esta cuenta a estado Pendiente"
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" />
+                        <span>Desmarcar Pago</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )
         ) : cuentasFiltradas.length === 0 ? (
           <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed border-gray-200 dark:border-slate-800 bg-white/70 dark:bg-[#111726]/40 py-16 text-center">
             <div className="flex h-14 w-14 items-center justify-center rounded-3xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-100 dark:border-emerald-800/40 text-emerald-600 dark:text-emerald-400 mb-3 shadow-xs">
@@ -1832,6 +2095,24 @@ export default function DeudasPage() {
                                    <Coins className="h-3 w-3" />
                                    <span>Editar Abono</span>
                                  </button>
+
+                                {(consumo.pagado === true || (audit.esParcial && montoPagadoUsd > 0)) && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setModalRevertirPago({
+                                        abierto: true,
+                                        consumo,
+                                        cliente: cuenta.cliente || null,
+                                      })
+                                    }
+                                    className="flex items-center gap-1 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-2.5 py-1.5 text-xs font-bold text-amber-700 dark:text-amber-300 hover:bg-amber-100 transition active:scale-95 shrink-0"
+                                    title="Desmarcar pago y restablecer saldo pendiente"
+                                  >
+                                    <RotateCcw className="h-3 w-3" />
+                                    <span>Desmarcar Pago</span>
+                                  </button>
+                                )}
 
                                  <button
                                    type="button"
@@ -3024,6 +3305,22 @@ export default function DeudasPage() {
         cliente={modalEditarAbono.cliente}
         tasaBcv={tasaBcv}
         onExito={handleExitoEdicionAbono}
+      />
+
+      {/* Modal Desmarcar Pago / Marcar como Pendiente */}
+      <ModalRevertirPago
+        abierto={modalRevertirPago.abierto}
+        onOpenChange={(abierto) =>
+          setModalRevertirPago((prev) => ({
+            ...prev,
+            abierto,
+            ...(!abierto ? { consumo: null, cliente: null } : {}),
+          }))
+        }
+        consumo={modalRevertirPago.consumo}
+        cliente={modalRevertirPago.cliente}
+        tasaBcv={tasaBcv}
+        onExito={handleExitoReversionPago}
       />
     </div>
   </ErrorBoundary>
