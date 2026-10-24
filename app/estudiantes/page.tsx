@@ -3092,9 +3092,9 @@ export default function EstudiantesPage() {
                                   : 'border-gray-200/80 dark:border-slate-800 bg-white dark:bg-[#111726]'
                               }`}
                             >
-                              <div className="flex items-start justify-between gap-2">
-                                <div>
-                                  <div className="flex items-center gap-2">
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-2 flex-wrap">
                                     <span
                                       className={`font-mono font-black text-sm ${
                                         audit.esAnulado
@@ -3115,7 +3115,7 @@ export default function EstudiantesPage() {
                                     </span>
                                   </div>
 
-                                  <span className="text-[10px] text-gray-400 mt-0.5 block">
+                                  <span className="text-[10px] text-gray-400 mt-0.5 block truncate">
                                     {fecha} • Método: {audit.nombreLegible}
                                     {audit.referencia ? ` (#${audit.referencia})` : ''}
                                   </span>
@@ -3131,7 +3131,7 @@ export default function EstudiantesPage() {
 
                                 {/* Botones de Acción del Consumo */}
                                 {!audit.esAnulado && (
-                                  <div className="flex items-center gap-1.5 shrink-0 flex-wrap sm:flex-nowrap">
+                                  <div className="flex items-center gap-1.5 flex-wrap sm:flex-nowrap pt-2 sm:pt-0 border-t sm:border-t-0 border-gray-100 dark:border-slate-800/80">
                                     <button
                                       type="button"
                                       onClick={() =>
@@ -3141,10 +3141,10 @@ export default function EstudiantesPage() {
                                           cliente: cli,
                                         })
                                       }
-                                      className="flex items-center gap-1 rounded-xl border border-indigo-200 dark:border-indigo-900 bg-indigo-50 dark:bg-indigo-950/40 px-2.5 py-1 text-[11px] font-bold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 transition active:scale-95 shrink-0"
+                                      className="flex items-center gap-1 rounded-xl border border-indigo-200 dark:border-indigo-900 bg-indigo-50 dark:bg-indigo-950/40 px-2.5 py-1 text-[11px] font-bold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 transition active:scale-95"
                                       title="Modificar o revertir abono de este consumo"
                                     >
-                                      <Coins className="h-3 w-3" />
+                                      <Coins className="h-3 w-3 shrink-0" />
                                       <span>Editar Abono</span>
                                     </button>
 
@@ -3158,10 +3158,10 @@ export default function EstudiantesPage() {
                                             cliente: cli,
                                           })
                                         }
-                                        className="flex items-center gap-1 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-2.5 py-1 text-[11px] font-bold text-amber-700 dark:text-amber-300 hover:bg-amber-100 transition active:scale-95 shrink-0"
+                                        className="flex items-center gap-1 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-2.5 py-1 text-[11px] font-bold text-amber-700 dark:text-amber-300 hover:bg-amber-100 transition active:scale-95"
                                         title="Desmarcar pago y devolver esta cuenta a estado Pendiente"
                                       >
-                                        <RotateCcw className="h-3 w-3" />
+                                        <RotateCcw className="h-3 w-3 shrink-0" />
                                         <span>Desmarcar Pago</span>
                                       </button>
                                     )}
@@ -3176,10 +3176,10 @@ export default function EstudiantesPage() {
                                           error: null,
                                         })
                                       }
-                                      className="flex items-center gap-1 rounded-xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/40 px-2.5 py-1 text-[11px] font-bold text-rose-700 dark:text-rose-300 hover:bg-rose-100 transition active:scale-95 shrink-0"
+                                      className="flex items-center gap-1 rounded-xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/40 px-2.5 py-1 text-[11px] font-bold text-rose-700 dark:text-rose-300 hover:bg-rose-100 transition active:scale-95"
                                       title="Anular venta y revertir deuda o saldo"
                                     >
-                                      <RotateCcw className="h-3 w-3" />
+                                      <RotateCcw className="h-3 w-3 shrink-0" />
                                       <span>Anular Venta</span>
                                     </button>
                                   </div>

@@ -1769,11 +1769,11 @@ export default function TransaccionesPage() {
                                                         </div>
 
                                                         {/* Botones de Acción */}
-                                                        <div className="mt-2.5 flex items-center gap-2">
+                                                        <div className="mt-2.5 flex items-center gap-1.5 sm:gap-2 flex-wrap">
                                                           <button
                                                             type="button"
                                                             onClick={() => setModalDetalle({ abierto: true, transaccion: t })}
-                                                            className="flex-1 rounded-xl border border-gray-200 dark:border-slate-800 bg-white dark:bg-[#111726] py-1.5 text-xs font-bold text-gray-700 dark:text-slate-200 hover:bg-gray-50 transition active:scale-95 text-center"
+                                                            className="flex-1 min-w-[90px] rounded-xl border border-gray-200 dark:border-slate-800 bg-white dark:bg-[#111726] py-1.5 text-xs font-bold text-gray-700 dark:text-slate-200 hover:bg-gray-50 transition active:scale-95 text-center"
                                                           >
                                                             Ver Ticket
                                                           </button>
