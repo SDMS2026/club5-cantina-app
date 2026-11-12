@@ -46,7 +46,7 @@ import {
   Coins,
 } from 'lucide-react';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
-import { supabase } from '@/lib/supabaseClient';
+import { supabase, fetchEnLotes } from '@/lib/supabaseClient';
 import { obtenerTasaBCV, TASA_BCV_FALLBACK_DEFAULT } from '@/lib/dolarApi';
 import {
   formatUSD,
@@ -574,28 +574,35 @@ export default function TransaccionesPage() {
 
   const cargarMetricasResumen = useCallback(async () => {
     try {
-      let q = supabase
-        .from('consumos')
-        .select('monto_total_usd, metodo_pago, pagado, fecha');
+      const qBuilder = () => {
+        let q = supabase
+          .from('consumos')
+          .select('monto_total_usd, metodo_pago, pagado, fecha');
 
-      if (filtroFecha === 'hoy') {
-        const hoy = new Date();
-        hoy.setHours(0, 0, 0, 0);
-        q = q.gte('fecha', hoy.toISOString());
-      } else if (filtroFecha === 'semana') {
-        const hace7 = new Date();
-        hace7.setDate(hace7.getDate() - 7);
-        hace7.setHours(0, 0, 0, 0);
-        q = q.gte('fecha', hace7.toISOString());
-      } else if (filtroFecha === 'mes') {
-        const hace30 = new Date();
-        hace30.setDate(hace30.getDate() - 30);
-        hace30.setHours(0, 0, 0, 0);
-        q = q.gte('fecha', hace30.toISOString());
-      }
+        if (filtroFecha === 'hoy') {
+          const hoy = new Date();
+          hoy.setHours(0, 0, 0, 0);
+          q = q.gte('fecha', hoy.toISOString());
+        } else if (filtroFecha === 'semana') {
+          const hace7 = new Date();
+          hace7.setDate(hace7.getDate() - 7);
+          hace7.setHours(0, 0, 0, 0);
+          q = q.gte('fecha', hace7.toISOString());
+        } else if (filtroFecha === 'mes') {
+          const hace30 = new Date();
+          hace30.setDate(hace30.getDate() - 30);
+          hace30.setHours(0, 0, 0, 0);
+          q = q.gte('fecha', hace30.toISOString());
+        }
+        return q;
+      };
 
-      const { data, error } = await q;
-      if (error || !data) return;
+      const data = await fetchEnLotes<{
+        monto_total_usd: number;
+        metodo_pago: string;
+        pagado: boolean;
+        fecha: string;
+      }>(qBuilder);
 
       let totalVentasUsd = 0;
       let pagadasCajaUsd = 0;
@@ -638,76 +645,69 @@ export default function TransaccionesPage() {
   // Tamaño máximo de transacciones por página adentro de cada día abierto
   const TAMANO_PAGINA_JERARQUIA = 20;
 
-  // Cargar transacciones desde Supabase (sin corte a 25 para permitir agrupar todos los días 1-31)
+  // Cargar transacciones desde Supabase (en lotes completos para agrupar todos los meses y días sin límite de 1000)
   const cargarTransacciones = useCallback(async () => {
     setCargandoTransacciones(true);
     try {
-      let query = supabase
-        .from('consumos')
-        .select(
-          `
-          id,
-          cliente_id,
-          monto_total_usd,
-          tasa_bcv_historica,
-          metodo_pago,
-          pagado,
-          fecha,
-          clientes (
+      const construirQueryConsumos = () => {
+        let query = supabase
+          .from('consumos')
+          .select(
+            `
             id,
-            nombre_estudiante,
-            grado_seccion,
-            nombre_representante,
-            telefono_whatsapp,
-            saldo
-          ),
-          consumo_detalles (
-            id,
-            cantidad,
-            precio_unitario_usd,
-            producto_id,
-            productos (
+            cliente_id,
+            monto_total_usd,
+            tasa_bcv_historica,
+            metodo_pago,
+            pagado,
+            fecha,
+            clientes (
               id,
-              nombre,
-              precio_usd,
-              imagen_url
+              nombre_estudiante,
+              grado_seccion,
+              nombre_representante,
+              telefono_whatsapp,
+              saldo
             )
-          )
-        `
-        );
+          `
+          );
 
-      // 1. Filtro en Base de Datos por Rango de Fecha (.gte)
-      if (filtroFecha === 'hoy') {
-        const hoy = new Date();
-        hoy.setHours(0, 0, 0, 0);
-        query = query.gte('fecha', hoy.toISOString());
-      } else if (filtroFecha === 'semana') {
-        const hace7 = new Date();
-        hace7.setDate(hace7.getDate() - 7);
-        hace7.setHours(0, 0, 0, 0);
-        query = query.gte('fecha', hace7.toISOString());
-      } else if (filtroFecha === 'mes') {
-        const hace30 = new Date();
-        hace30.setDate(hace30.getDate() - 30);
-        hace30.setHours(0, 0, 0, 0);
-        query = query.gte('fecha', hace30.toISOString());
-      }
+        // 1. Filtro en Base de Datos por Rango de Fecha (.gte)
+        if (filtroFecha === 'hoy') {
+          const hoy = new Date();
+          hoy.setHours(0, 0, 0, 0);
+          query = query.gte('fecha', hoy.toISOString());
+        } else if (filtroFecha === 'semana') {
+          const hace7 = new Date();
+          hace7.setDate(hace7.getDate() - 7);
+          hace7.setHours(0, 0, 0, 0);
+          query = query.gte('fecha', hace7.toISOString());
+        } else if (filtroFecha === 'mes') {
+          const hace30 = new Date();
+          hace30.setDate(hace30.getDate() - 30);
+          hace30.setHours(0, 0, 0, 0);
+          query = query.gte('fecha', hace30.toISOString());
+        }
 
-      // 2. Filtro en Base de Datos por Método de Pago / Estado
-      if (filtroMetodo === 'anuladas') {
-        query = query.ilike('metodo_pago', 'anulado%');
-      } else if (filtroMetodo === 'pendientes') {
-        query = query.eq('pagado', false).not('metodo_pago', 'ilike', 'anulado%');
-      } else if (filtroMetodo === 'pago_movil') {
-        query = query.ilike('metodo_pago', 'pago_movil%');
-      } else if (filtroMetodo === 'efectivo') {
-        query = query.or('metodo_pago.ilike.efectivo_usd%,metodo_pago.ilike.efectivo_bs%');
-      } else if (filtroMetodo === 'saldo_favor') {
-        query = query.or('metodo_pago.ilike.saldo_favor%,metodo_pago.ilike.mixto%');
-      }
+        // 2. Filtro en Base de Datos por Método de Pago / Estado
+        if (filtroMetodo === 'anuladas') {
+          query = query.ilike('metodo_pago', 'anulado%');
+        } else if (filtroMetodo === 'pendientes') {
+          query = query.eq('pagado', false).not('metodo_pago', 'ilike', 'anulado%');
+        } else if (filtroMetodo === 'pago_movil') {
+          query = query.ilike('metodo_pago', 'pago_movil%');
+        } else if (filtroMetodo === 'efectivo') {
+          query = query.or('metodo_pago.ilike.efectivo_usd%,metodo_pago.ilike.efectivo_bs%');
+        } else if (filtroMetodo === 'saldo_favor') {
+          query = query.or('metodo_pago.ilike.saldo_favor%,metodo_pago.ilike.mixto%');
+        }
+
+        return query;
+      };
 
       // 3. Filtro en Base de Datos por Término de Búsqueda insensible a mayúsculas y tildes
       const term = busquedaDebounced.trim();
+      let orSearchClauses: string[] | null = null;
       if (term) {
         const pat = construirPatronRegexBusqueda(term);
         const [resClientes, resDetalles] = await Promise.all([
@@ -735,23 +735,90 @@ export default function TransaccionesPage() {
         if (consumoIds.length > 0) {
           orClauses.push(`id.in.(${consumoIds.join(',')})`);
         }
-        query = query.or(orClauses.join(','));
+        orSearchClauses = orClauses;
       }
 
-      // 4. Traer transacciones ordenadas descendente (hasta 2500 para agrupar año -> mes -> días 1 al 31)
-      query = query.order('fecha', { ascending: false }).limit(2500);
+      const esConsultaTotal = !term && filtroFecha === 'todas' && filtroMetodo === 'todas';
 
-      const { data, error } = await query;
+      let consumosRaw: any[] = [];
+      let detallesRaw: any[] = [];
 
-      if (error) {
-        console.error('Error consultando historial de transacciones:', error);
-        mostrarNotificacion('error', 'Error al consultar historial.');
+      if (esConsultaTotal) {
+        // Cargar en paralelo todos los consumos y todos los detalles en lotes de 1000
+        const [cData, dData] = await Promise.all([
+          fetchEnLotes(() =>
+            construirQueryConsumos().order('fecha', { ascending: false })
+          ),
+          fetchEnLotes(() =>
+            supabase
+              .from('consumo_detalles')
+              .select(
+                'id, consumo_id, cantidad, precio_unitario_usd, producto_id, productos (id, nombre, precio_usd, imagen_url)'
+              )
+              .order('id', { ascending: true })
+          ),
+        ]);
+        consumosRaw = cData;
+        detallesRaw = dData;
       } else {
-        const items = (data as unknown as TransaccionRegistro[]) || [];
-        setTransacciones(items);
+        consumosRaw = await fetchEnLotes(() => {
+          let q = construirQueryConsumos();
+          if (orSearchClauses && orSearchClauses.length > 0) {
+            q = q.or(orSearchClauses.join(','));
+          }
+          return q.order('fecha', { ascending: false });
+        });
+
+        const consumoIds = consumosRaw.map((c) => c.id).filter(Boolean);
+        if (consumoIds.length > 0) {
+          if (consumoIds.length <= 150) {
+            const { data: dData, error: dError } = await supabase
+              .from('consumo_detalles')
+              .select(
+                'id, consumo_id, cantidad, precio_unitario_usd, producto_id, productos (id, nombre, precio_usd, imagen_url)'
+              )
+              .in('consumo_id', consumoIds);
+            if (dError) {
+              console.error('Error cargando detalles filtrados:', dError);
+            } else {
+              detallesRaw = dData || [];
+            }
+          } else {
+            detallesRaw = await fetchEnLotes(() =>
+              supabase
+                .from('consumo_detalles')
+                .select(
+                  'id, consumo_id, cantidad, precio_unitario_usd, producto_id, productos (id, nombre, precio_usd, imagen_url)'
+                )
+                .order('id', { ascending: true })
+            );
+          }
+        }
       }
+
+      // Mapear consumo_detalles a cada consumo por consumo_id
+      const mapaDetalles = new Map<string, TransaccionDetalleItem[]>();
+      for (const d of detallesRaw) {
+        if (!d.consumo_id) continue;
+        let list = mapaDetalles.get(d.consumo_id);
+        if (!list) {
+          list = [];
+          mapaDetalles.set(d.consumo_id, list);
+        }
+        list.push(d);
+      }
+
+      const items: TransaccionRegistro[] = (consumosRaw || []).map((d: any) => ({
+        ...d,
+        clientes: Array.isArray(d.clientes) ? d.clientes[0] || null : d.clientes || null,
+        monto_total_usd: Number(d.monto_total_usd) || 0,
+        consumo_detalles: mapaDetalles.get(d.id) || [],
+      }));
+
+      setTransacciones(items);
     } catch (err) {
       console.error('Error inesperado cargando transacciones:', err);
+      mostrarNotificacion('error', 'Error al consultar historial.');
     } finally {
       setCargandoTransacciones(false);
     }
@@ -763,57 +830,42 @@ export default function TransaccionesPage() {
     cargarTasa();
   }, [cargarTasa]);
 
-  // Cargar historial de liquidaciones y abonos para auditoría contable (hasta 2500 registros)
+  // Cargar historial de liquidaciones y abonos para auditoría contable (en lotes completos sin límite de 1000)
   const cargarLiquidaciones = useCallback(async () => {
     setCargandoLiquidaciones(true);
     try {
-      const { data, error } = await supabase
-        .from('consumos')
-        .select(`
-          id,
-          cliente_id,
-          monto_total_usd,
-          tasa_bcv_historica,
-          metodo_pago,
-          pagado,
-          fecha,
-          clientes (
+      const data = await fetchEnLotes<any>(() =>
+        supabase
+          .from('consumos')
+          .select(`
             id,
-            nombre_estudiante,
-            grado_seccion,
-            nombre_representante,
-            telefono_whatsapp,
-            saldo
-          ),
-          consumo_detalles (
-            id,
-            cantidad,
-            precio_unitario_usd,
-            producto_id,
-            productos (
+            cliente_id,
+            monto_total_usd,
+            tasa_bcv_historica,
+            metodo_pago,
+            pagado,
+            fecha,
+            clientes (
               id,
-              nombre,
-              precio_usd,
-              imagen_url
+              nombre_estudiante,
+              grado_seccion,
+              nombre_representante,
+              telefono_whatsapp,
+              saldo
             )
-          )
-        `)
-        .eq('pagado', true)
-        .not('metodo_pago', 'ilike', 'anulado%')
-        .order('fecha', { ascending: false })
-        .limit(2500);
+          `)
+          .eq('pagado', true)
+          .not('metodo_pago', 'ilike', 'anulado%')
+          .order('fecha', { ascending: false })
+      );
 
-      if (error) {
-        console.error('Error cargando liquidaciones en Supabase:', error);
-      } else {
-        const normalizados: TransaccionRegistro[] = (data || []).map((d: any) => ({
-          ...d,
-          clientes: Array.isArray(d.clientes) ? d.clientes[0] || null : d.clientes || null,
-          monto_total_usd: Number(d.monto_total_usd) || 0,
-          consumo_detalles: Array.isArray(d.consumo_detalles) ? d.consumo_detalles : [],
-        }));
-        setLiquidaciones(normalizados);
-      }
+      const normalizados: TransaccionRegistro[] = (data || []).map((d: any) => ({
+        ...d,
+        clientes: Array.isArray(d.clientes) ? d.clientes[0] || null : d.clientes || null,
+        monto_total_usd: Number(d.monto_total_usd) || 0,
+        consumo_detalles: [],
+      }));
+      setLiquidaciones(normalizados);
     } catch (e) {
       console.error('Excepción cargando historial de liquidaciones:', e);
     } finally {

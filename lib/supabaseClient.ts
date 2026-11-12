@@ -115,4 +115,29 @@ export const supabase =
 
 export const createClientComponentClient = () => supabase;
 
+/**
+ * Helper para paginar y recuperar todos los registros de una consulta en Supabase,
+ * superando la restricción predeterminada de max-rows (1000) por petición de PostgREST.
+ * Ejecuta peticiones secuenciales en lotes usando .range(offset, offset + batchSize - 1).
+ */
+export async function fetchEnLotes<T = any>(
+  queryBuilderFn: () => any,
+  batchSize: number = 1000
+): Promise<T[]> {
+  let offset = 0;
+  const resultados: T[] = [];
+  while (true) {
+    const { data, error } = await queryBuilderFn().range(offset, offset + batchSize - 1);
+    if (error) {
+      console.error('Error en fetchEnLotes:', error);
+      throw error;
+    }
+    if (!data || data.length === 0) break;
+    resultados.push(...data);
+    if (data.length < batchSize) break;
+    offset += batchSize;
+  }
+  return resultados;
+}
+
 export default supabase;
