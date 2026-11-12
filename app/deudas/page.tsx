@@ -43,6 +43,7 @@ import {
   Users,
   Coins,
   RotateCcw,
+  AlertTriangle,
 } from 'lucide-react';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { obtenerTasaBCV, TASA_BCV_FALLBACK_DEFAULT } from '@/lib/dolarApi';
@@ -70,6 +71,7 @@ import {
   obtenerSaldoPendienteConsumo,
   obtenerMontoPagadoConsumo,
   parseConsumoAudit,
+  anularConsumo,
   ResumenSaldoCliente,
   ResultadoEdicionAbono,
   ResultadoReversionPago,
@@ -309,6 +311,27 @@ export default function DeudasPage() {
     abierto: false,
     consumo: null,
     cliente: null,
+  });
+
+  // Modal Confirmar Anulación de Venta
+  const [modalAnular, setModalAnular] = useState<{
+    abierto: boolean;
+    consumo: any | null;
+    cliente: Cliente | null;
+    procesando: boolean;
+    error: string | null;
+  }>({
+    abierto: false,
+    consumo: null,
+    cliente: null,
+    procesando: false,
+    error: null,
+  });
+
+  const dragScrollAnular = useModalDragScroll({
+    isOpen: modalAnular.abierto,
+    onDismiss: () =>
+      !modalAnular.procesando && setModalAnular((prev) => ({ ...prev, abierto: false })),
   });
 
   // Pestaña activa: 'pendientes' (Cuentas por cobrar) o 'pagados' (Solventados / Pagados recientes)
@@ -968,6 +991,43 @@ export default function DeudasPage() {
         await cargarDeudas();
       },
     });
+  };
+
+  // Confirmar Anulación de Venta desde Cuentas por Cobrar
+  const handleConfirmarAnulacion = async () => {
+    if (!modalAnular.consumo) return;
+    setModalAnular((prev) => ({ ...prev, procesando: true, error: null }));
+
+    try {
+      const res = await anularConsumo({
+        consumoId: modalAnular.consumo.id,
+      });
+
+      setNotificacion({
+        tipo: 'exito',
+        texto: res.mensaje || 'Venta anulada exitosamente.',
+      });
+      setTimeout(() => setNotificacion(null), 4500);
+
+      setModalAnular({
+        abierto: false,
+        consumo: null,
+        cliente: null,
+        procesando: false,
+        error: null,
+      });
+
+      await ejecutarMiniRecarga({
+        router,
+        recargarDatosLocales: async () => {
+          await cargarDeudas();
+        },
+      });
+    } catch (err: unknown) {
+      console.error('Error anulando consumo en Cuentas por Cobrar:', err);
+      const msg = err instanceof Error ? err.message : 'Error al anular la transacción.';
+      setModalAnular((prev) => ({ ...prev, procesando: false, error: msg }));
+    }
   };
 
   const handleAbrirAbono = (c: Cliente | null) => {
@@ -1724,7 +1784,7 @@ export default function DeudasPage() {
                       </div>
                     </div>
 
-                    <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0 border-gray-100 dark:border-slate-800/80">
+                    <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0 border-gray-100 dark:border-slate-800/80 flex-wrap">
                       <div className="text-left sm:text-right">
                         <div className="text-base font-black text-gray-900 dark:text-slate-100">
                           {formatUSD(p.monto_total_usd)}
@@ -1734,21 +1794,41 @@ export default function DeudasPage() {
                         </div>
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setModalRevertirPago({
-                            abierto: true,
-                            consumo: p,
-                            cliente: p.clientes || null,
-                          })
-                        }
-                        className="flex items-center gap-1.5 rounded-2xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-xs font-bold text-amber-800 dark:text-amber-300 hover:bg-amber-100 transition active:scale-95 shadow-2xs shrink-0"
-                        title="Desmarcar pago y devolver esta cuenta a estado Pendiente"
-                      >
-                        <RotateCcw className="h-3.5 w-3.5" />
-                        <span>Desmarcar Pago</span>
-                      </button>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setModalRevertirPago({
+                              abierto: true,
+                              consumo: p,
+                              cliente: p.clientes || null,
+                            })
+                          }
+                          className="flex items-center gap-1.5 rounded-2xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-xs font-bold text-amber-800 dark:text-amber-300 hover:bg-amber-100 transition active:scale-95 shadow-2xs shrink-0"
+                          title="Desmarcar pago y devolver esta cuenta a estado Pendiente"
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" />
+                          <span>Desmarcar Pago</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setModalAnular({
+                              abierto: true,
+                              consumo: p,
+                              cliente: p.clientes || null,
+                              procesando: false,
+                              error: null,
+                            })
+                          }
+                          className="flex items-center gap-1.5 rounded-2xl border border-rose-300 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-xs font-bold text-rose-700 dark:text-rose-300 hover:bg-rose-100 transition active:scale-95 shadow-2xs shrink-0"
+                          title="Anular venta y cancelar consumo"
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" />
+                          <span>Anular Venta</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
                 );
@@ -1950,15 +2030,55 @@ export default function DeudasPage() {
                             <span>Abonar</span>
                           </button>
 
-                          {/* Botón Liquidar Cuenta Total */}
+                          {/* Botón Liquidar / Pagar */}
                           <button
                             type="button"
                             onClick={() => handleAbrirPagoTotalEstudiante(cuenta)}
                             className="flex items-center gap-1.5 rounded-2xl bg-gray-900 px-4 py-2 text-xs font-bold text-white shadow-xs hover:bg-black transition active:scale-95"
+                            title="Liquidar cuenta"
                           >
                             <CreditCard className="h-3.5 w-3.5" />
-                            <span>Liquidar Total</span>
+                            <span>{cuenta.consumos.length === 1 ? `Pagar ${formatUSD(cuenta.totalDeudaUsd)}` : 'Liquidar Total'}</span>
                           </button>
+
+                          {/* Si tiene exactamente 1 consumo, botones directos de acción rápida */}
+                          {cuenta.consumos.length === 1 && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setModalEditarAbono({
+                                    abierto: true,
+                                    consumo: cuenta.consumos[0],
+                                    cliente: cuenta.cliente || null,
+                                  })
+                                }
+                                className="flex items-center gap-1 rounded-2xl border border-indigo-200 dark:border-indigo-900 bg-indigo-50 dark:bg-indigo-950/40 px-3 py-2 text-xs font-bold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 transition active:scale-95 shadow-2xs"
+                                title="Modificar o revertir abono de este consumo"
+                              >
+                                <Coins className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
+                                <span>Editar Abono</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setModalAnular({
+                                    abierto: true,
+                                    consumo: cuenta.consumos[0],
+                                    cliente: cuenta.cliente || null,
+                                    procesando: false,
+                                    error: null,
+                                  })
+                                }
+                                className="flex items-center gap-1 rounded-2xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-xs font-bold text-rose-700 dark:text-rose-300 hover:bg-rose-100 transition active:scale-95 shadow-2xs"
+                                title="Anular venta y cancelar consumo"
+                              >
+                                <RotateCcw className="h-3.5 w-3.5 text-rose-600 dark:text-rose-400" />
+                                <span>Anular Venta</span>
+                              </button>
+                            </>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -2065,7 +2185,7 @@ export default function DeudasPage() {
                                 </div>
                               </div>
 
-                              <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0 border-gray-200/50">
+                              <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0 border-gray-200/50 flex-wrap">
                                 <div className="text-left sm:text-right">
                                   <div className="text-sm font-bold text-gray-900">
                                     {formatUSD(saldoPendienteUsd)}
@@ -2080,54 +2200,79 @@ export default function DeudasPage() {
                                   )}
                                 </div>
 
-                                <button
-                                   type="button"
-                                   onClick={() =>
-                                     setModalEditarAbono({
-                                       abierto: true,
-                                       consumo,
-                                       cliente: cuenta.cliente || null,
-                                     })
-                                   }
-                                   className="flex items-center gap-1 rounded-xl border border-indigo-200 dark:border-indigo-900 bg-indigo-50 dark:bg-indigo-950/40 px-2.5 py-1.5 text-xs font-bold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 transition active:scale-95 shrink-0"
-                                   title="Modificar o revertir abono de este consumo"
-                                 >
-                                   <Coins className="h-3 w-3" />
-                                   <span>Editar Abono</span>
-                                 </button>
-
-                                {(consumo.pagado === true || (audit.esParcial && montoPagadoUsd > 0)) && (
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  {/* 1. Pagar */}
                                   <button
                                     type="button"
                                     onClick={() =>
-                                      setModalRevertirPago({
+                                      handleAbrirPagoConsumoIndividual(
+                                        consumo,
+                                        estudiante,
+                                        cuenta.cliente?.id
+                                      )
+                                    }
+                                    className="flex items-center gap-1 rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-800 shadow-2xs hover:bg-gray-100 hover:border-gray-300 transition active:scale-95"
+                                    title="Liquidar saldo pendiente de este consumo"
+                                  >
+                                    <CreditCard className="h-3 w-3 text-gray-700" />
+                                    <span>Pagar {formatUSD(saldoPendienteUsd)}</span>
+                                  </button>
+
+                                  {/* 2. Editar Abono */}
+                                  <button
+                                     type="button"
+                                     onClick={() =>
+                                       setModalEditarAbono({
+                                         abierto: true,
+                                         consumo,
+                                         cliente: cuenta.cliente || null,
+                                       })
+                                     }
+                                     className="flex items-center gap-1 rounded-xl border border-indigo-200 dark:border-indigo-900 bg-indigo-50 dark:bg-indigo-950/40 px-2.5 py-1.5 text-xs font-bold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 transition active:scale-95 shrink-0"
+                                     title="Modificar o revertir abono de este consumo"
+                                   >
+                                     <Coins className="h-3 w-3" />
+                                     <span>Editar Abono</span>
+                                   </button>
+
+                                  {/* Desmarcar Pago si aplica */}
+                                  {(consumo.pagado === true || (audit.esParcial && montoPagadoUsd > 0)) && (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setModalRevertirPago({
+                                          abierto: true,
+                                          consumo,
+                                          cliente: cuenta.cliente || null,
+                                        })
+                                      }
+                                      className="flex items-center gap-1 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-2.5 py-1.5 text-xs font-bold text-amber-700 dark:text-amber-300 hover:bg-amber-100 transition active:scale-95 shrink-0"
+                                      title="Desmarcar pago y restablecer saldo pendiente"
+                                    >
+                                      <RotateCcw className="h-3 w-3" />
+                                      <span>Desmarcar Pago</span>
+                                    </button>
+                                  )}
+
+                                  {/* 3. Anular Venta */}
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setModalAnular({
                                         abierto: true,
                                         consumo,
                                         cliente: cuenta.cliente || null,
+                                        procesando: false,
+                                        error: null,
                                       })
                                     }
-                                    className="flex items-center gap-1 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-2.5 py-1.5 text-xs font-bold text-amber-700 dark:text-amber-300 hover:bg-amber-100 transition active:scale-95 shrink-0"
-                                    title="Desmarcar pago y restablecer saldo pendiente"
+                                    className="flex items-center gap-1 rounded-xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/40 px-2.5 py-1.5 text-xs font-bold text-rose-700 dark:text-rose-300 hover:bg-rose-100 transition active:scale-95 shrink-0"
+                                    title="Anular venta y cancelar deuda"
                                   >
                                     <RotateCcw className="h-3 w-3" />
-                                    <span>Desmarcar Pago</span>
+                                    <span>Anular Venta</span>
                                   </button>
-                                )}
-
-                                 <button
-                                   type="button"
-                                   onClick={() =>
-                                     handleAbrirPagoConsumoIndividual(
-                                       consumo,
-                                       estudiante,
-                                       cuenta.cliente?.id
-                                     )
-                                   }
-                                   className="flex items-center gap-1 rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-800 shadow-2xs hover:bg-gray-100 hover:border-gray-300 transition active:scale-95"
-                                   title="Liquidar saldo pendiente de este consumo"
-                                 >
-                                   <span>Pagar {formatUSD(saldoPendienteUsd)}</span>
-                                 </button>
+                                </div>
                               </div>
                             </div>
                           );
@@ -3322,6 +3467,151 @@ export default function DeudasPage() {
         tasaBcv={tasaBcv}
         onExito={handleExitoReversionPago}
       />
+
+      {/* Modal Confirmar Anulación de Venta (Radix UI Dialog) */}
+      <Dialog.Root
+        open={modalAnular.abierto}
+        onOpenChange={(abierto) =>
+          !modalAnular.procesando && setModalAnular((prev) => ({ ...prev, abierto }))
+        }
+      >
+        <Dialog.Portal>
+          <Dialog.Overlay
+            {...dragScrollAnular.overlayProps}
+            className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs transition-opacity animate-in fade-in"
+          />
+          <Dialog.Content
+            style={dragScrollAnular.style}
+            {...dragScrollAnular.dragProps}
+            className="fixed inset-x-0 bottom-0 z-50 max-h-[90dvh] overflow-y-auto overscroll-contain touch-scroll-ios rounded-t-3xl sm:rounded-3xl border-t sm:border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#0D111A] p-4 sm:p-6 pb-28 sm:pb-6 shadow-2xl outline-none duration-300 animate-in slide-in-from-bottom sm:slide-in-from-bottom-0 sm:fade-in-0 sm:zoom-in-95 sm:inset-auto sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:w-[95vw] sm:max-w-md cursor-grab active:cursor-grabbing"
+          >
+            {/* Manija táctil */}
+            <div className="mx-auto mb-3 -mt-1 flex h-6 w-full cursor-grab active:cursor-grabbing items-center justify-center sm:hidden touch-none">
+              <div className="h-1.5 w-12 rounded-full bg-gray-300 dark:bg-slate-700" />
+            </div>
+
+            <div className="flex items-center gap-3 text-rose-600 mb-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-rose-50 dark:bg-rose-950/50 border border-rose-100 dark:border-rose-900">
+                <AlertTriangle className="h-5 w-5" />
+              </div>
+              <div>
+                <Dialog.Title className="text-base font-bold text-gray-900 dark:text-slate-100">
+                  ¿Estás seguro de anular esta venta?
+                </Dialog.Title>
+                <Dialog.Description className="text-xs text-gray-500 dark:text-slate-400">
+                  Se eliminará el consumo y se descontará del saldo del cliente.
+                </Dialog.Description>
+              </div>
+            </div>
+
+            {modalAnular.consumo && (() => {
+              const c = modalAnular.consumo;
+              const cli = modalAnular.cliente || c.clientes;
+              const audit = parseConsumoAudit({ metodo_pago: c.metodo_pago, pagado: c.pagado });
+
+              return (
+                <div className="space-y-3 text-xs text-gray-600 dark:text-slate-300">
+                  {cli && (
+                    <div className="flex items-center justify-between rounded-xl bg-gray-50 dark:bg-[#111726] border border-gray-100 dark:border-slate-800 p-2.5">
+                      <div className="flex items-center gap-2">
+                        <User className="h-4 w-4 text-indigo-600" />
+                        <div>
+                          <span className="font-bold text-gray-900 dark:text-slate-100 block">
+                            {cli.nombre_estudiante}
+                          </span>
+                          {cli.grado_seccion && (
+                            <span className="text-[10px] text-gray-500">
+                              {cli.grado_seccion}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="rounded-2xl border border-rose-100 dark:border-rose-950 bg-rose-50/60 dark:bg-rose-950/30 p-3 space-y-1.5">
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-500">Monto:</span>
+                      <span className="font-mono font-black text-rose-700 dark:text-rose-400">
+                        {formatUSD(c.monto_total_usd)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-500">Método de Pago:</span>
+                      <span className="font-bold text-gray-800 dark:text-slate-200">
+                        {audit.nombreLegible}
+                      </span>
+                    </div>
+                  </div>
+
+                  {c.consumo_detalles && c.consumo_detalles.length > 0 && (
+                    <div className="rounded-2xl border border-gray-100 dark:border-slate-800 bg-gray-50/80 dark:bg-[#111726] p-2.5">
+                      <span className="text-[10px] font-bold uppercase text-gray-400 block mb-1">
+                        Productos a devolver a stock:
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {c.consumo_detalles.map((det: any, idx: number) => (
+                          <span
+                            key={det.id || idx}
+                            className="inline-flex items-center gap-1 rounded-lg border border-gray-200 dark:border-slate-700 bg-white dark:bg-[#141C2E] px-2 py-0.5 text-[11px] text-gray-700 dark:text-slate-200"
+                          >
+                            <span className="font-bold">{det.cantidad}x</span>
+                            <span>{det.productos?.nombre || 'Producto'}</span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="rounded-2xl border border-gray-100 dark:border-slate-800 bg-gray-50/80 dark:bg-[#111726] p-3 text-xs">
+                    <span className="font-bold text-gray-800 dark:text-slate-200 block mb-1">
+                      Efecto Contable:
+                    </span>
+                    <p className="text-amber-800 dark:text-amber-300">
+                      ✓ <strong>Se reversará la deuda</strong> de {formatUSD(c.monto_total_usd)}, descontándola del saldo deudor del cliente y actualizando Cuentas por Cobrar en tiempo real.
+                    </p>
+                  </div>
+
+                  {modalAnular.error && (
+                    <div className="rounded-2xl border border-rose-200 bg-rose-50 p-2.5 text-xs text-rose-800 font-medium">
+                      {modalAnular.error}
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-gray-100 dark:border-slate-800">
+                    <button
+                      type="button"
+                      disabled={modalAnular.procesando}
+                      onClick={() => setModalAnular((prev) => ({ ...prev, abierto: false }))}
+                      className="rounded-2xl border border-gray-200 dark:border-slate-800 bg-white dark:bg-[#111726] px-4 py-2 text-xs font-semibold text-gray-700 dark:text-slate-300 hover:bg-gray-50 transition active:scale-95"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      disabled={modalAnular.procesando}
+                      onClick={handleConfirmarAnulacion}
+                      className="flex items-center gap-1.5 rounded-2xl bg-rose-600 px-4 py-2 text-xs font-bold text-white shadow-xs hover:bg-rose-700 transition disabled:opacity-50 active:scale-95"
+                    >
+                      {modalAnular.procesando ? (
+                        <>
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          <span>Anulando...</span>
+                        </>
+                      ) : (
+                        <>
+                          <RotateCcw className="h-3.5 w-3.5" />
+                          <span>Confirmar Anulación</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
     </div>
   </ErrorBoundary>
   );

@@ -637,7 +637,37 @@ export async function anularConsumo({
     throw new Error('No se pudo marcar la transacción como anulada en la base de datos.');
   }
 
-  // 6. Notificar actualización en tiempo real
+  // 6. Restablecer existencias de productos en inventario (si la columna stock existe)
+  try {
+    const { data: detallesOriginales } = await supabase
+      .from('consumo_detalles')
+      .select('producto_id, cantidad')
+      .eq('consumo_id', consumoId);
+
+    if (detallesOriginales && detallesOriginales.length > 0) {
+      for (const d of detallesOriginales) {
+        if (d.producto_id && Number(d.cantidad) > 0) {
+          const { data: prodData } = await supabase
+            .from('productos')
+            .select('id, stock')
+            .eq('id', d.producto_id)
+            .single();
+
+          if (prodData && prodData.stock !== undefined && prodData.stock !== null) {
+            const nuevoStock = Number(prodData.stock) + Number(d.cantidad);
+            await supabase
+              .from('productos')
+              .update({ stock: nuevoStock })
+              .eq('id', d.producto_id);
+          }
+        }
+      }
+    }
+  } catch (errStock) {
+    console.warn('Ajuste de stock al anular consumo omitido:', errStock);
+  }
+
+  // 7. Notificar actualización en tiempo real
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('club5:actualizar-notificaciones'));
   }
