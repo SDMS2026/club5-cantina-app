@@ -6,6 +6,7 @@
 
 import { formatBs, formatUSD, calcularConversionBs } from './utils';
 import { supabase } from './supabaseClient';
+import { obtenerMontoPagadoConsumo, obtenerSaldoPendienteConsumo } from './clientBalance';
 
 export interface DatosPagoMovilConfig {
   banco: string;
@@ -291,6 +292,94 @@ export function compilarPlantilla(
   });
 }
 
+interface ConsumoParaMensaje {
+  fecha: string;
+  monto_total_usd: number;
+  metodo_pago?: string | null;
+  pagado?: boolean | null;
+  consumo_detalles?: Array<{
+    cantidad: number;
+    precio_unitario_usd: number;
+    productos?: { nombre: string } | null;
+  }> | null;
+}
+
+/**
+ * Construye el texto de detalle de consumos incluyendo abonos parciales por ítem
+ * y el resumen consolidado de abonos cuando el saldo final es menor al total consumido.
+ */
+function construirDetalleConsumosConAbonos(
+  consumos: ConsumoParaMensaje[],
+  totalDeudaUsd: number,
+  modo: 'individual' | 'familiar'
+): { detalleTexto: string; sumaOriginal: number; totalAbonado: number } {
+  const prefijo = modo === 'familiar' ? '  • ' : '';
+
+  const bloques = consumos.map((c, index) => {
+    let fTexto = 'Fecha';
+    try {
+      fTexto = new Date(c.fecha).toLocaleDateString('es-VE', {
+        day: '2-digit',
+        month: 'short',
+      });
+    } catch {
+      fTexto = c.fecha;
+    }
+
+    const montoOriginal = Math.round(Number(c.monto_total_usd || 0) * 100) / 100;
+    const abonadoConsumo = obtenerMontoPagadoConsumo({
+      monto_total_usd: montoOriginal,
+      metodo_pago: c.metodo_pago,
+      pagado: c.pagado,
+    });
+    const pendienteConsumo = obtenerSaldoPendienteConsumo({
+      monto_total_usd: montoOriginal,
+      metodo_pago: c.metodo_pago,
+      pagado: c.pagado,
+    });
+
+    const etiquetaAbono =
+      abonadoConsumo > 0.005
+        ? ` _(Abono parcial: -${formatUSD(abonadoConsumo)} | Resta: ${formatUSD(pendienteConsumo)})_`
+        : '';
+
+    let productosTexto = '';
+    if (c.consumo_detalles && c.consumo_detalles.length > 0) {
+      productosTexto = c.consumo_detalles
+        .map(
+          (d) =>
+            `    - ${d.cantidad}x ${d.productos?.nombre || 'Producto'} (${formatUSD(d.precio_unitario_usd * d.cantidad)})`
+        )
+        .join('\n');
+    } else {
+      productosTexto = '    - Consumo en cantina escolar';
+    }
+
+    return `${prefijo}*Consumo #${index + 1} (${fTexto})* - ${formatUSD(montoOriginal)}${etiquetaAbono}:\n${productosTexto}`;
+  });
+
+  const sumaOriginal =
+    Math.round(consumos.reduce((acc, c) => acc + Number(c.monto_total_usd || 0), 0) * 100) / 100;
+  const totalDeudaRedondeado = Math.round(Number(totalDeudaUsd || 0) * 100) / 100;
+  const totalAbonado = Math.round((sumaOriginal - totalDeudaRedondeado) * 100) / 100;
+
+  let detalleTexto = bloques.join('\n\n');
+
+  if (totalAbonado > 0.005) {
+    if (modo === 'individual') {
+      detalleTexto +=
+        `\n\n*Resumen de Abonos:*` +
+        `\n• Total en consumos: ${formatUSD(sumaOriginal)}` +
+        `\n• Abono parcial realizado: -${formatUSD(totalAbonado)}` +
+        `\n• *Restante por pagar:* ${formatUSD(totalDeudaRedondeado)}`;
+    } else {
+      detalleTexto += `\n\n  _Total consumos: ${formatUSD(sumaOriginal)} | Abono parcial: -${formatUSD(totalAbonado)} | Resta: ${formatUSD(totalDeudaRedondeado)}_`;
+    }
+  }
+
+  return { detalleTexto, sumaOriginal, totalAbonado };
+}
+
 /**
  * Parámetros para generar mensaje de cobro individual
  */
@@ -299,15 +388,7 @@ export interface ParametrosCobroIndividual {
   estudiante: string;
   grado?: string | null;
   esProfesorOPersonal?: boolean;
-  consumos: Array<{
-    fecha: string;
-    monto_total_usd: number;
-    consumo_detalles?: Array<{
-      cantidad: number;
-      precio_unitario_usd: number;
-      productos?: { nombre: string } | null;
-    }> | null;
-  }>;
+  consumos: ConsumoParaMensaje[];
   totalUsd: number;
   totalBs: number;
   tasaBcv: number;
@@ -325,33 +406,11 @@ export function generarMensajeCobroIndividual(params: ParametrosCobroIndividual)
   const rep = params.representante || 'Estimado(a) Representante';
   const gradoTexto = params.grado ? `(${params.grado})` : '';
 
-  const detalleConsumos = params.consumos
-    .map((c, index) => {
-      let fTexto = 'Fecha';
-      try {
-        fTexto = new Date(c.fecha).toLocaleDateString('es-VE', {
-          day: '2-digit',
-          month: 'short',
-        });
-      } catch {
-        fTexto = c.fecha;
-      }
-
-      let productosTexto = '';
-      if (c.consumo_detalles && c.consumo_detalles.length > 0) {
-        productosTexto = c.consumo_detalles
-          .map(
-            (d) =>
-              `    - ${d.cantidad}x ${d.productos?.nombre || 'Producto'} (${formatUSD(d.precio_unitario_usd * d.cantidad)})`
-          )
-          .join('\n');
-      } else {
-        productosTexto = '    - Consumo en cantina escolar';
-      }
-
-      return `*Consumo #${index + 1} (${fTexto})* - ${formatUSD(c.monto_total_usd)}:\n${productosTexto}`;
-    })
-    .join('\n\n');
+  const { detalleTexto: detalleConsumos } = construirDetalleConsumosConAbonos(
+    params.consumos,
+    params.totalUsd,
+    'individual'
+  );
 
   // Si es profesor o personal y no se ha modificado la plantilla radicalmente
   let plantilla = config.plantillas.individual;
@@ -395,15 +454,7 @@ export interface ParametrosCobroFamiliar {
     } | null;
     totalDeudaUsd: number;
     totalDeudaBs: number;
-    consumos: Array<{
-      fecha: string;
-      monto_total_usd: number;
-      consumo_detalles?: Array<{
-        cantidad: number;
-        precio_unitario_usd: number;
-        productos?: { nombre: string } | null;
-      }> | null;
-    }>;
+    consumos: ConsumoParaMensaje[];
   }>;
   tasaBcv: number;
   config?: SistemaConfig;
@@ -419,12 +470,17 @@ export function generarMensajeCobroFamiliar(params: ParametrosCobroFamiliar): st
   const granTotalUsd = params.cuentas.reduce((acc, c) => acc + c.totalDeudaUsd, 0);
   const granTotalBs = calcularConversionBs(granTotalUsd, params.tasaBcv);
 
-  // Resumen claro: - Pedro (3er Año): $4.00, - Sofía (1er Año): $3.50
+  // Resumen claro: - Pedro (3er Año): $4.00, - Sofía (1er Año): $1.51 [Abonado: $1.99]
   const resumenFamiliar = params.cuentas
     .map((c) => {
       const nombre = c.cliente?.nombre_estudiante || 'Estudiante';
       const seccion = c.cliente?.grado_seccion ? `(${c.cliente.grado_seccion})` : '';
-      return `- ${nombre} ${seccion}: ${formatUSD(c.totalDeudaUsd)} (${formatBs(c.totalDeudaBs)})`;
+      const sumaOrig =
+        Math.round(c.consumos.reduce((s, cons) => s + Number(cons.monto_total_usd || 0), 0) * 100) /
+        100;
+      const abonado = Math.round((sumaOrig - c.totalDeudaUsd) * 100) / 100;
+      const abonoTag = abonado > 0.005 ? ` _(Abonado: ${formatUSD(abonado)})_` : '';
+      return `- ${nombre} ${seccion}: ${formatUSD(c.totalDeudaUsd)} (${formatBs(c.totalDeudaBs)})${abonoTag}`;
     })
     .join('\n');
 
@@ -435,33 +491,11 @@ export function generarMensajeCobroFamiliar(params: ParametrosCobroFamiliar): st
       const seccion = c.cliente?.grado_seccion ? `(${c.cliente.grado_seccion})` : '';
       const cantConsumos = c.consumos.length;
 
-      const detalleConsumos = c.consumos
-        .map((cons, index) => {
-          let fTexto = 'Fecha';
-          try {
-            fTexto = new Date(cons.fecha).toLocaleDateString('es-VE', {
-              day: '2-digit',
-              month: 'short',
-            });
-          } catch {
-            fTexto = cons.fecha;
-          }
-
-          let itemsTexto = '';
-          if (cons.consumo_detalles && cons.consumo_detalles.length > 0) {
-            itemsTexto = cons.consumo_detalles
-              .map(
-                (d) =>
-                  `    - ${d.cantidad}x ${d.productos?.nombre || 'Producto'} (${formatUSD(d.precio_unitario_usd * d.cantidad)})`
-              )
-              .join('\n');
-          } else {
-            itemsTexto = '    - Consumo en cantina escolar';
-          }
-
-          return `  • *Consumo #${index + 1} (${fTexto})* - ${formatUSD(cons.monto_total_usd)}:\n${itemsTexto}`;
-        })
-        .join('\n\n');
+      const { detalleTexto: detalleConsumos } = construirDetalleConsumosConAbonos(
+        c.consumos,
+        c.totalDeudaUsd,
+        'familiar'
+      );
 
       return `*${nombre}* ${seccion} - *Total: ${formatUSD(c.totalDeudaUsd)}* (${cantConsumos} ${cantConsumos === 1 ? 'consumo' : 'consumos'}):\n${detalleConsumos}`;
     })
