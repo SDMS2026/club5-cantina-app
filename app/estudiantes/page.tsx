@@ -1155,7 +1155,7 @@ export default function EstudiantesPage() {
   const handleAbrirWhatsApp = (c: Cliente) => {
     const esProf = esProfesorOPersonal(c.grado_seccion);
     const destinatario = esProf
-      ? `Prof./Personal ${c.nombre_estudiante}`
+      ? c.nombre_estudiante || 'Estimado(a) Docente / Personal'
       : c.nombre_representante || 'Estimado(a) Representante';
     const sujeto = esProf
       ? `su cuenta de cantina (${c.grado_seccion})`

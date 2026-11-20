@@ -1246,10 +1246,16 @@ export default function DeudasPage() {
       // Caso de 1 solo estudiante (o profesor/personal)
       if (cuentas.length === 1) {
         const cuenta = cuentas[0];
-        const estudiante = cuenta.cliente?.nombre_estudiante || 'el estudiante';
-        const rep = nombreRepresentante || cuenta.cliente?.nombre_representante || 'Estimado(a) Representante';
-        const grado = cuenta.cliente?.grado_seccion ? `(${cuenta.cliente.grado_seccion})` : '';
         const esProf = esProfesorOPersonal(cuenta.cliente?.grado_seccion);
+        const estudiante =
+          cuenta.cliente?.nombre_estudiante ||
+          (esProf ? 'Estimado(a) Docente / Personal' : 'el estudiante');
+        const rep = esProf
+          ? estudiante
+          : nombreRepresentante ||
+            cuenta.cliente?.nombre_representante ||
+            'Estimado(a) Representante';
+        const grado = cuenta.cliente?.grado_seccion ? `(${cuenta.cliente.grado_seccion})` : '';
 
         return generarMensajeCobroIndividual({
           representante: rep,
@@ -1282,9 +1288,13 @@ export default function DeudasPage() {
     // Teléfono de destino: el del estudiante actual
     const tel = (cuenta.cliente?.telefono_whatsapp || '').trim();
 
-    // Nombre del representante del estudiante
-    let rep = (cuenta.cliente?.nombre_representante || '').trim();
-    if (!rep && grupo.length > 1) {
+    // Si es profesor/personal, el campo nombre_representante guarda su ocupación/área (ej. "Danza"),
+    // por lo que el destinatario del saludo debe ser su nombre real (nombre_estudiante).
+    const esProf = esProfesorOPersonal(cuenta.cliente?.grado_seccion);
+    let rep = esProf
+      ? (cuenta.cliente?.nombre_estudiante || '').trim()
+      : (cuenta.cliente?.nombre_representante || '').trim();
+    if (!rep && !esProf && grupo.length > 1) {
       const otroConRep = grupo.find((g) => g.cliente?.nombre_representante?.trim());
       if (otroConRep) {
         rep = otroConRep.cliente?.nombre_representante?.trim() || '';
@@ -1292,7 +1302,7 @@ export default function DeudasPage() {
     }
 
     if (!rep) {
-      rep = 'Estimado(a) Representante';
+      rep = esProf ? 'Estimado(a) Docente / Personal' : 'Estimado(a) Representante';
     }
 
     setModalWhatsAppFamiliar({

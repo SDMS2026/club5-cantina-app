@@ -403,7 +403,9 @@ export function generarMensajeCobroIndividual(params: ParametrosCobroIndividual)
   const pago = config.pagoMovil;
 
   const estudiante = params.estudiante || 'el estudiante';
-  const rep = params.representante || 'Estimado(a) Representante';
+  const rep = params.esProfesorOPersonal
+    ? params.estudiante || params.representante || 'Estimado(a) Docente / Personal'
+    : params.representante || 'Estimado(a) Representante';
   const gradoTexto = params.grado ? `(${params.grado})` : '';
 
   const { detalleTexto: detalleConsumos } = construirDetalleConsumosConAbonos(
