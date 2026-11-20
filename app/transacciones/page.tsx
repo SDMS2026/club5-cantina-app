@@ -572,6 +572,45 @@ export default function TransaccionesPage() {
     cantidadTotal: 0,
   });
 
+  const calcularMetricasDesdeLista = useCallback(
+    (lista: Array<{ monto_total_usd: number; metodo_pago: string; pagado: boolean }>) => {
+      let totalVentasUsd = 0;
+      let pagadasCajaUsd = 0;
+      let pendientesFiadoUsd = 0;
+      let anuladasTotalUsd = 0;
+      let cantidadAnuladas = 0;
+      let cantidadTotal = 0;
+
+      lista.forEach((t) => {
+        const monto = Number(t.monto_total_usd || 0);
+        cantidadTotal++;
+        const audit = parseConsumoAudit({ metodo_pago: t.metodo_pago, pagado: t.pagado });
+
+        if (audit.esAnulado) {
+          anuladasTotalUsd += monto;
+          cantidadAnuladas++;
+        } else {
+          totalVentasUsd += monto;
+          if (audit.esPendiente) {
+            pendientesFiadoUsd += monto;
+          } else {
+            pagadasCajaUsd += monto;
+          }
+        }
+      });
+
+      setMetricasData({
+        totalVentasUsd,
+        pagadasCajaUsd,
+        pendientesFiadoUsd,
+        anuladasTotalUsd,
+        cantidadAnuladas,
+        cantidadTotal,
+      });
+    },
+    []
+  );
+
   const cargarMetricasResumen = useCallback(async () => {
     try {
       const qBuilder = () => {
@@ -604,50 +643,18 @@ export default function TransaccionesPage() {
         fecha: string;
       }>(qBuilder);
 
-      let totalVentasUsd = 0;
-      let pagadasCajaUsd = 0;
-      let pendientesFiadoUsd = 0;
-      let anuladasTotalUsd = 0;
-      let cantidadAnuladas = 0;
-      let cantidadTotal = 0;
-
-      data.forEach((t) => {
-        const monto = Number(t.monto_total_usd || 0);
-        cantidadTotal++;
-        const audit = parseConsumoAudit({ metodo_pago: t.metodo_pago, pagado: t.pagado });
-
-        if (audit.esAnulado) {
-          anuladasTotalUsd += monto;
-          cantidadAnuladas++;
-        } else {
-          totalVentasUsd += monto;
-          if (audit.esPendiente) {
-            pendientesFiadoUsd += monto;
-          } else {
-            pagadasCajaUsd += monto;
-          }
-        }
-      });
-
-      setMetricasData({
-        totalVentasUsd,
-        pagadasCajaUsd,
-        pendientesFiadoUsd,
-        anuladasTotalUsd,
-        cantidadAnuladas,
-        cantidadTotal,
-      });
+      calcularMetricasDesdeLista(data);
     } catch (err) {
       console.error('Error calculando resumen de métricas:', err);
     }
-  }, [filtroFecha]);
+  }, [filtroFecha, calcularMetricasDesdeLista]);
 
   // Tamaño máximo de transacciones por página adentro de cada día abierto
   const TAMANO_PAGINA_JERARQUIA = 20;
 
   // Cargar transacciones desde Supabase (en lotes completos para agrupar todos los meses y días sin límite de 1000)
-  const cargarTransacciones = useCallback(async () => {
-    setCargandoTransacciones(true);
+  const cargarTransacciones = useCallback(async (silencioso = false) => {
+    if (!silencioso) setCargandoTransacciones(true);
     try {
       const construirQueryConsumos = () => {
         let query = supabase
@@ -816,13 +823,28 @@ export default function TransaccionesPage() {
       }));
 
       setTransacciones(items);
+
+      // Si no hay filtro por método ni búsqueda, ya tenemos la totalidad de consumos del rango:
+      // calcular métricas en memoria al instante (evita reconsultar toda la tabla de consumos)
+      if (!term && filtroMetodo === 'todas') {
+        calcularMetricasDesdeLista(items);
+      }
+
+      // Si es consulta total, también derivar las liquidaciones en memoria en 0ms
+      if (esConsultaTotal) {
+        const liqs = items.filter((d) => {
+          const mp = (d.metodo_pago || '').toLowerCase();
+          return d.pagado === true && !mp.startsWith('anulado');
+        });
+        setLiquidaciones(liqs);
+      }
     } catch (err) {
       console.error('Error inesperado cargando transacciones:', err);
       mostrarNotificacion('error', 'Error al consultar historial.');
     } finally {
-      setCargandoTransacciones(false);
+      if (!silencioso) setCargandoTransacciones(false);
     }
-  }, [filtroFecha, filtroMetodo, busquedaDebounced, mostrarNotificacion]);
+  }, [filtroFecha, filtroMetodo, busquedaDebounced, mostrarNotificacion, calcularMetricasDesdeLista]);
 
   // Inicialización y recarga automática ante cambios de filtros o búsqueda
   useEffect(() => {
@@ -831,8 +853,8 @@ export default function TransaccionesPage() {
   }, [cargarTasa]);
 
   // Cargar historial de liquidaciones y abonos para auditoría contable (en lotes completos sin límite de 1000)
-  const cargarLiquidaciones = useCallback(async () => {
-    setCargandoLiquidaciones(true);
+  const cargarLiquidaciones = useCallback(async (silencioso = false) => {
+    if (!silencioso) setCargandoLiquidaciones(true);
     try {
       const data = await fetchEnLotes<any>(() =>
         supabase
@@ -869,20 +891,32 @@ export default function TransaccionesPage() {
     } catch (e) {
       console.error('Excepción cargando historial de liquidaciones:', e);
     } finally {
-      setCargandoLiquidaciones(false);
+      if (!silencioso) setCargandoLiquidaciones(false);
     }
   }, []);
 
   useEffect(() => {
     cargarTransacciones();
-    cargarMetricasResumen();
-    cargarLiquidaciones();
-  }, [cargarTransacciones, cargarMetricasResumen, cargarLiquidaciones]);
+    // Solo consultar métricas separadas si hay filtro de método o búsqueda activo
+    if (filtroMetodo !== 'todas' || busquedaDebounced.trim() !== '') {
+      cargarMetricasResumen();
+    }
+  }, [cargarTransacciones, cargarMetricasResumen, filtroMetodo, busquedaDebounced]);
+
+  // Cargar liquidaciones solo cuando la pestaña esté activa y no se hayan derivado ya en la carga total
+  useEffect(() => {
+    if (pestanaActiva === 'liquidaciones' && liquidaciones.length === 0) {
+      cargarLiquidaciones();
+    }
+  }, [pestanaActiva, liquidaciones.length, cargarLiquidaciones]);
 
   // Referencias mutables para el canal Realtime sin recrear suscripciones
   const cargarTransaccionesRef = useRef(cargarTransacciones);
   const cargarMetricasRef = useRef(cargarMetricasResumen);
   const cargarLiquidacionesRef = useRef(cargarLiquidaciones);
+  const filtroMetodoRef = useRef(filtroMetodo);
+  const busquedaRef = useRef(busquedaDebounced);
+  const pestanaActivaRef = useRef(pestanaActiva);
 
   useEffect(() => {
     cargarTransaccionesRef.current = cargarTransacciones;
@@ -896,25 +930,46 @@ export default function TransaccionesPage() {
     cargarLiquidacionesRef.current = cargarLiquidaciones;
   }, [cargarLiquidaciones]);
 
-  // Suscripción en tiempo real a la tabla 'consumos' estable (solo 1 suscripción en mount)
+  useEffect(() => {
+    filtroMetodoRef.current = filtroMetodo;
+  }, [filtroMetodo]);
+
+  useEffect(() => {
+    busquedaRef.current = busquedaDebounced;
+  }, [busquedaDebounced]);
+
+  useEffect(() => {
+    pestanaActivaRef.current = pestanaActiva;
+  }, [pestanaActiva]);
+
+  // Suscripción en tiempo real protegida contra ráfagas: ignora pestañas ocultas y aplica debounce amplio (10s)
   useEffect(() => {
     let timerRecarga: NodeJS.Timeout | null = null;
-    const recargarConDebounce = () => {
+    const recargarConDebounce = (esperaMs: number, ignorarSiOculto: boolean) => {
+      if (ignorarSiOculto && typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        return;
+      }
       if (timerRecarga) clearTimeout(timerRecarga);
       timerRecarga = setTimeout(() => {
-        cargarTransaccionesRef.current();
-        cargarMetricasRef.current();
-        cargarLiquidacionesRef.current();
-      }, 600);
+        cargarTransaccionesRef.current(true);
+        if (filtroMetodoRef.current !== 'todas' || busquedaRef.current.trim() !== '') {
+          cargarMetricasRef.current();
+          if (pestanaActivaRef.current === 'liquidaciones') {
+            cargarLiquidacionesRef.current(true);
+          }
+        }
+      }, esperaMs);
     };
 
     const channel = supabase
       .channel('transacciones_realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'consumos' }, recargarConDebounce)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'consumos' }, () =>
+        recargarConDebounce(10000, true)
+      )
       .subscribe();
 
     const handleMiniRecarga = () => {
-      recargarConDebounce();
+      recargarConDebounce(600, false);
     };
 
     window.addEventListener(EVENTO_MINI_RECARGA, handleMiniRecarga);

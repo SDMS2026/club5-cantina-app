@@ -37,7 +37,6 @@ import {
   descontarSaldoCliente,
   ResumenSaldoCliente,
 } from '@/lib/clientBalance';
-import { refrescarNotificacionesGlobales } from '@/components/NotificationsContext';
 import { ejecutarMiniRecarga } from '@/lib/syncUtils';
 
 interface PaymentModalProps {
@@ -450,7 +449,7 @@ export function PaymentModal({
         throw new Error(consumoError?.message || 'Error al crear el registro de consumo en Supabase');
       }
 
-      // 2. Insertar renglones de consumo_detalles
+      // 2 & 3. Insertar renglones de consumo_detalles y descontar saldo en paralelo para mínima latencia
       const detalles = items.map((item) => ({
         consumo_id: consumoData.id,
         producto_id: item.producto.id,
@@ -458,25 +457,26 @@ export function PaymentModal({
         precio_unitario_usd: item.producto.precio_usd,
       }));
 
-      const { error: detallesError } = await supabase
-        .from('consumo_detalles')
-        .insert(detalles);
+      const promesasPostConsumo: Promise<unknown>[] = [
+        Promise.resolve(supabase.from('consumo_detalles').insert(detalles)).then(({ error: detallesError }) => {
+          if (detallesError) {
+            throw new Error(detallesError.message || 'Error al guardar los detalles de la compra');
+          }
+        }),
+      ];
 
-      if (detallesError) {
-        throw new Error(detallesError.message || 'Error al guardar los detalles de la compra');
-      }
-
-      // 3. Descontar del campo clientes.saldo (actualización en tiempo real de la cuenta corriente)
       if (cliente?.id && montoADescontarSaldo > 0) {
-        try {
-          await descontarSaldoCliente({
+        promesasPostConsumo.push(
+          descontarSaldoCliente({
             clienteId: cliente.id,
             montoUsd: montoADescontarSaldo,
-          });
-        } catch (errDescuento) {
-          console.error('Error descontando saldo del cliente:', errDescuento);
-        }
+          }).catch((errDescuento) => {
+            console.error('Error descontando saldo del cliente:', errDescuento);
+          })
+        );
       }
+
+      await Promise.all(promesasPostConsumo);
 
       // 4. Si se marcó guardar vuelto como saldo a favor del cliente
       const vueltoAGuardar = vueltoEfectivoUsd;
@@ -504,10 +504,9 @@ export function PaymentModal({
 
       setConsumoGuardadoId(consumoData.id);
       setExito(true);
-      refrescarNotificacionesGlobales();
       setTimeout(() => {
         onTransaccionExitosa();
-      }, 1600);
+      }, 550);
     } catch (err: unknown) {
       console.error('Error registrando transacción:', err);
       const msg = err instanceof Error ? err.message : 'Error inesperado al conectar con Supabase';

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { Header } from '@/components/Header';
@@ -19,7 +19,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { motion, AnimatePresence } from 'framer-motion';
 import { refrescarNotificacionesGlobales } from '@/components/NotificationsContext';
 import { useModalDragScroll } from '@/lib/useModalDragScroll';
-import { obtenerSaldosTodosClientes, ResumenSaldoCliente } from '@/lib/clientBalance';
+import { ResumenSaldoCliente } from '@/lib/clientBalance';
 import { ejecutarMiniRecarga, EVENTO_MINI_RECARGA } from '@/lib/syncUtils';
 
 const PRODUCTOS_MUESTRA_SEMILLA: Omit<Producto, 'id'>[] = [
@@ -111,9 +111,11 @@ export default function PosPage() {
     }
   }, []);
 
-  // 2. Cargar Clientes y Saldos desde Supabase
-  const cargarClientes = useCallback(async () => {
-    setCargandoClientes(true);
+  const ultimaRecargaPropiaRef = useRef<number>(0);
+
+  // 2. Cargar Clientes y derivar Saldos en una sola consulta desde Supabase
+  const cargarClientes = useCallback(async (silencioso = false) => {
+    if (!silencioso) setCargandoClientes(true);
     try {
       const { data, error } = await supabase
         .from('clientes')
@@ -124,22 +126,34 @@ export default function PosPage() {
       if (error) {
         console.error('Error al obtener clientes de Supabase:', error);
       } else {
-        setClientes(data || []);
-      }
+        const lista = data || [];
+        setClientes(lista);
 
-      // Cargar saldos consolidados
-      const saldos = await obtenerSaldosTodosClientes();
-      setSaldosClientes(saldos);
+        const mapaSaldos: Record<string, ResumenSaldoCliente> = {};
+        for (const c of lista) {
+          const s = Math.round(Number(c.saldo || 0) * 100) / 100;
+          mapaSaldos[c.id] = {
+            clienteId: c.id,
+            saldo: s,
+            deudaTotalUsd: s < 0 ? Math.round(Math.abs(s) * 100) / 100 : 0,
+            saldoAFavorTotalUsd: s > 0 ? s : 0,
+            saldoNetoUsd: s,
+            cantidadConsumosPendientes: s < 0 ? 1 : 0,
+            cantidadAbonos: s > 0 ? 1 : 0,
+          };
+        }
+        setSaldosClientes(mapaSaldos);
+      }
     } catch (err) {
       console.error('Excepción al consultar clientes y saldos:', err);
     } finally {
-      setCargandoClientes(false);
+      if (!silencioso) setCargandoClientes(false);
     }
   }, []);
 
   // 3. Cargar Productos desde Supabase
-  const cargarProductos = useCallback(async () => {
-    setCargandoProductos(true);
+  const cargarProductos = useCallback(async (silencioso = false) => {
+    if (!silencioso) setCargandoProductos(true);
     try {
       const { data, error } = await supabase
         .from('productos')
@@ -155,7 +169,7 @@ export default function PosPage() {
     } catch (err) {
       console.error('Excepción al consultar productos:', err);
     } finally {
-      setCargandoProductos(false);
+      if (!silencioso) setCargandoProductos(false);
     }
   }, []);
 
@@ -166,27 +180,30 @@ export default function PosPage() {
     cargarClientes();
     cargarProductos();
 
-    // Suscripción Realtime con debounce para no disparar múltiples peticiones seguidas
+    // Suscripción Realtime optimizada con debounce para no saturar teléfonos ni bloquear UI
     let timerRecarga: NodeJS.Timeout | null = null;
-    const recargarConDebounce = () => {
+    const recargarConDebounce = (tabla?: string) => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       if (timerRecarga) clearTimeout(timerRecarga);
       timerRecarga = setTimeout(() => {
-        cargarClientes();
-        cargarProductos();
-        obtenerSaldosTodosClientes().then(setSaldosClientes).catch(console.error);
-      }, 600);
+        if (!tabla || tabla === 'clientes') {
+          cargarClientes(true);
+        }
+        if (!tabla || tabla === 'productos') {
+          cargarProductos(true);
+        }
+      }, 2000);
     };
 
     const canalRealtime = supabase
       .channel('pos_realtime_sync')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'productos' }, recargarConDebounce)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, recargarConDebounce)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'consumos' }, recargarConDebounce)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'abonos' }, recargarConDebounce)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'productos' }, () => recargarConDebounce('productos'))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, () => recargarConDebounce('clientes'))
       .subscribe();
 
-    // Sincronización mediante evento global de mini recarga
+    // Sincronización mediante evento global de mini recarga (ignorando el eco propio inmediato)
     const handleMiniRecarga = () => {
+      if (Date.now() - ultimaRecargaPropiaRef.current < 1500) return;
       recargarConDebounce();
     };
 
@@ -277,21 +294,24 @@ export default function PosPage() {
     setTimeout(() => setNotificacion(null), 4000);
   };
 
+  // Sincronización silenciosa y unificada del POS tras registrar ventas, fiados o abonos
+  const sincronizarPosSilencioso = useCallback(() => {
+    ultimaRecargaPropiaRef.current = Date.now();
+    ejecutarMiniRecarga({
+      router,
+      recargarDatosLocales: async () => {
+        await cargarClientes(true);
+      },
+    });
+  }, [router, cargarClientes]);
+
   const handleClienteCreadoPorVoz = (nuevoCliente: Cliente) => {
     setClientes((prev) => {
       const existe = prev.some((c) => c.id === nuevoCliente.id);
       return existe ? prev : [nuevoCliente, ...prev];
     });
     setClienteSeleccionado(nuevoCliente);
-    ejecutarMiniRecarga({
-      router,
-      recargarDatosLocales: async () => {
-        await Promise.all([
-          cargarClientes(),
-          obtenerSaldosTodosClientes().then(setSaldosClientes).catch(console.error),
-        ]);
-      },
-    });
+    sincronizarPosSilencioso();
   };
 
   // Limpiar y resetear el Punto de Venta al 100% para el siguiente pedido
@@ -311,16 +331,7 @@ export default function PosPage() {
       texto: mensaje,
     });
     setTimeout(() => setNotificacion(null), 4500);
-    ejecutarMiniRecarga({
-      router,
-      recargarDatosLocales: async () => {
-        await Promise.all([
-          cargarClientes(),
-          cargarProductos(),
-          obtenerSaldosTodosClientes().then(setSaldosClientes).catch(console.error),
-        ]);
-      },
-    });
+    sincronizarPosSilencioso();
   };
 
   const handleVentaFiadaPorVoz = (mensaje: string) => {
@@ -330,16 +341,7 @@ export default function PosPage() {
       texto: mensaje,
     });
     setTimeout(() => setNotificacion(null), 4500);
-    ejecutarMiniRecarga({
-      router,
-      recargarDatosLocales: async () => {
-        await Promise.all([
-          cargarClientes(),
-          cargarProductos(),
-          obtenerSaldosTodosClientes().then(setSaldosClientes).catch(console.error),
-        ]);
-      },
-    });
+    sincronizarPosSilencioso();
   };
 
   const handleAbonoPorVoz = (mensaje: string) => {
@@ -348,15 +350,7 @@ export default function PosPage() {
       texto: mensaje,
     });
     setTimeout(() => setNotificacion(null), 4500);
-    ejecutarMiniRecarga({
-      router,
-      recargarDatosLocales: async () => {
-        await Promise.all([
-          cargarClientes(),
-          obtenerSaldosTodosClientes().then(setSaldosClientes).catch(console.error),
-        ]);
-      },
-    });
+    sincronizarPosSilencioso();
   };
 
   const handleAlertaPorVoz = (tipo: 'error' | 'advertencia' | 'exito' | 'info', texto: string) => {
@@ -378,16 +372,7 @@ export default function PosPage() {
       setNotificacion(null);
     }, 4000);
 
-    ejecutarMiniRecarga({
-      router,
-      recargarDatosLocales: async () => {
-        await Promise.all([
-          cargarClientes(),
-          cargarProductos(),
-          obtenerSaldosTodosClientes().then(setSaldosClientes).catch(console.error),
-        ]);
-      },
-    });
+    sincronizarPosSilencioso();
   };
 
   // Sembrar datos de prueba iniciales en Supabase si la base de datos está vacía
@@ -576,15 +561,7 @@ export default function PosPage() {
                     texto: `¡"${nuevo.nombre_estudiante}" registrado y asociado a la venta!`,
                   });
                   setTimeout(() => setNotificacion(null), 4000);
-                  ejecutarMiniRecarga({
-                    router,
-                    recargarDatosLocales: async () => {
-                      await Promise.all([
-                        cargarClientes(),
-                        obtenerSaldosTodosClientes().then(setSaldosClientes).catch(console.error),
-                      ]);
-                    },
-                  });
+                  sincronizarPosSilencioso();
                 }}
                 cargando={cargandoClientes}
                 saldosClientes={saldosClientes}
@@ -773,15 +750,7 @@ export default function PosPage() {
                       texto: `¡"${nuevo.nombre_estudiante}" registrado y asociado a la venta!`,
                     });
                     setTimeout(() => setNotificacion(null), 4000);
-                    ejecutarMiniRecarga({
-                      router,
-                      recargarDatosLocales: async () => {
-                        await Promise.all([
-                          cargarClientes(),
-                          obtenerSaldosTodosClientes().then(setSaldosClientes).catch(console.error),
-                        ]);
-                      },
-                    });
+                    sincronizarPosSilencioso();
                   }}
                   cargando={cargandoClientes}
                   saldosClientes={saldosClientes}
@@ -924,15 +893,7 @@ export default function PosPage() {
             texto: mensaje,
           });
           setTimeout(() => setNotificacion(null), 4500);
-          ejecutarMiniRecarga({
-            router,
-            recargarDatosLocales: async () => {
-              await Promise.all([
-                cargarClientes(),
-                obtenerSaldosTodosClientes().then(setSaldosClientes).catch(console.error),
-              ]);
-            },
-          });
+          sincronizarPosSilencioso();
         }}
       />
     </div>

@@ -60,16 +60,10 @@ export async function ejecutarMiniRecarga(options?: {
   // 4. Refrescar notificaciones contables globales
   refrescarNotificacionesGlobales();
 
-  // 5. Mini recarga del Router de Next.js (RSC Payload / Server Cache)
-  if (options?.router) {
-    try {
-      options.router.refresh();
-    } catch (e) {
-      console.warn('Aviso: router.refresh no disponible:', e);
-    }
-  }
+  // Nota: Se omite router.refresh() en páginas cliente SPA para evitar peticiones RSC redundantes en cada pedido.
+  void options?.router;
 
-  // 6. Notificar estado completado
+  // 5. Notificar estado completado
   notificarEstadoSincronizacion({
     estado: 'completado',
     mensaje: 'Base de datos sincronizada',

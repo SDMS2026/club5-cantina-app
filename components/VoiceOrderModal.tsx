@@ -464,13 +464,21 @@ export function VoiceOrderModal({
     setClienteInexistente(null);
 
     try {
-      const res = await fetch('/api/voz-pos', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ texto }),
-      });
+      const controller = new AbortController();
+      const timerVoz = setTimeout(() => controller.abort(), 15000);
+      let res: Response;
+      try {
+        res = await fetch('/api/voz-pos', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ texto }),
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timerVoz);
+      }
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const data: any = await res.json();
@@ -742,81 +750,58 @@ export function VoiceOrderModal({
           metodoFinal = `pago_movil#ref:${referenciaPagoMovil.trim()}`;
         }
 
-        let ventaGuardada = false;
+        // Guardar venta directamente en Supabase (evita doble salto serverless y paraleliza detalles + saldo)
+        const { data: consumo, error: errConsumo } = await supabase
+          .from('consumos')
+          .insert({
+            cliente_id: cliId || null,
+            monto_total_usd: totalUsd,
+            tasa_bcv_historica: tasaBcv,
+            metodo_pago: metodoFinal,
+            pagado: true,
+          })
+          .select('id')
+          .single();
 
-        // Intentar guardar primero a través del endpoint /api/voz-pos
-        try {
-          const resp = await fetch('/api/voz-pos', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              accion: 'guardar_venta',
-              cliente_id: cliId || null,
-              items: itemsConfirmados.map((it) => ({
-                producto_id: it.producto.id,
-                cantidad: it.cantidad,
-                precio_unitario_usd: it.producto.precio_usd,
-              })),
-              monto_total_usd: totalUsd,
-              tasa_bcv: tasaBcv,
-              metodo_pago: metodoFinal,
-              numero_referencia: referenciaPagoMovil.trim() || null,
-              pagado: true,
-            }),
-          });
-
-          if (resp.ok) {
-            ventaGuardada = true;
-          }
-        } catch (apiErr) {
-          console.warn('API /api/voz-pos falló, guardando directo en Supabase:', apiErr);
+        if (errConsumo || !consumo) {
+          throw new Error(errConsumo?.message || 'Error guardando venta en Supabase');
         }
 
-        // Si la API no lo procesó o falló, guardar directo en Supabase
-        if (!ventaGuardada) {
-          const { data: consumo, error: errConsumo } = await supabase
-            .from('consumos')
-            .insert({
-              cliente_id: cliId || null,
-              monto_total_usd: totalUsd,
-              tasa_bcv_historica: tasaBcv,
-              metodo_pago: metodoFinal,
-              pagado: true,
-            })
-            .select()
-            .single();
+        const detalles = itemsConfirmados.map((it) => ({
+          consumo_id: consumo.id,
+          producto_id: it.producto.id,
+          cantidad: it.cantidad,
+          precio_unitario_usd: it.producto.precio_usd,
+        }));
 
-          if (errConsumo || !consumo) {
-            throw new Error(errConsumo?.message || 'Error guardando venta en Supabase');
-          }
-
-          const detalles = itemsConfirmados.map((it) => ({
-            consumo_id: consumo.id,
-            producto_id: it.producto.id,
-            cantidad: it.cantidad,
-            precio_unitario_usd: it.producto.precio_usd,
-          }));
-
-          const { error: errDet } = await supabase.from('consumo_detalles').insert(detalles);
-          if (errDet) {
-            console.error('Error guardando detalles de consumo:', errDet);
-          }
-
-          if (cliId && metodoPagoSugerido === 'saldo_favor') {
-            try {
-              const { data: cliData } = await supabase
-                .from('clientes')
-                .select('saldo')
-                .eq('id', cliId)
-                .single();
-              const saldoActual = Number(cliData?.saldo || 0);
-              const nuevoSaldo = Math.round((saldoActual - totalUsd) * 100) / 100;
-              await supabase.from('clientes').update({ saldo: nuevoSaldo }).eq('id', cliId);
-            } catch (e) {
-              console.error('Error actualizando saldo cliente:', e);
+        const tareasPostVenta: Promise<unknown>[] = [
+          Promise.resolve(supabase.from('consumo_detalles').insert(detalles)).then(({ error: errDet }) => {
+            if (errDet) {
+              console.error('Error guardando detalles de consumo:', errDet);
             }
-          }
+          }),
+        ];
+
+        if (cliId && metodoPagoSugerido === 'saldo_favor') {
+          tareasPostVenta.push(
+            (async () => {
+              try {
+                const { data: cliData } = await supabase
+                  .from('clientes')
+                  .select('saldo')
+                  .eq('id', cliId)
+                  .single();
+                const saldoActual = Number(cliData?.saldo || 0);
+                const nuevoSaldo = Math.round((saldoActual - totalUsd) * 100) / 100;
+                await supabase.from('clientes').update({ saldo: nuevoSaldo }).eq('id', cliId);
+              } catch (e) {
+                console.error('Error actualizando saldo cliente:', e);
+              }
+            })()
+          );
         }
+
+        await Promise.all(tareasPostVenta);
 
         refrescarNotificacionesGlobales();
 
@@ -895,30 +880,31 @@ export function VoiceOrderModal({
           throw new Error(errConsumo?.message || 'Error guardando consumo fiado en Supabase');
         }
 
-        // Insertar detalles
+        // Insertar detalles y descontar de clientes.saldo en paralelo
         const detalles = itemsConfirmados.map((it) => ({
           consumo_id: consumo.id,
           producto_id: it.producto.id,
           cantidad: it.cantidad,
           precio_unitario_usd: it.producto.precio_usd,
         }));
-        await supabase.from('consumo_detalles').insert(detalles);
 
-        // Descontar de clientes.saldo
-        try {
-          const { data: cliData } = await supabase
-            .from('clientes')
-            .select('saldo')
-            .eq('id', cliId)
-            .single();
-          const saldoActual = Number(cliData?.saldo || 0);
-          const nuevoSaldo = Math.round((saldoActual - totalUsd) * 100) / 100;
-          await supabase.from('clientes').update({ saldo: nuevoSaldo }).eq('id', cliId);
-        } catch (e) {
-          console.error('Error actualizando saldo cliente fiado:', e);
-        }
-
-        refrescarNotificacionesGlobales();
+        await Promise.all([
+          supabase.from('consumo_detalles').insert(detalles),
+          (async () => {
+            try {
+              const { data: cliData } = await supabase
+                .from('clientes')
+                .select('saldo')
+                .eq('id', cliId)
+                .single();
+              const saldoActual = Number(cliData?.saldo || 0);
+              const nuevoSaldo = Math.round((saldoActual - totalUsd) * 100) / 100;
+              await supabase.from('clientes').update({ saldo: nuevoSaldo }).eq('id', cliId);
+            } catch (e) {
+              console.error('Error actualizando saldo cliente fiado:', e);
+            }
+          })(),
+        ]);
 
         const nombreCli = clienteObj?.nombre_estudiante || 'el cliente';
         if (onVentaFiadaExitosa) {

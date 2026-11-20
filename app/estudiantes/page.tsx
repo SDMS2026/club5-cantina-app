@@ -558,23 +558,26 @@ export default function EstudiantesPage() {
   // Sincronización en tiempo real con Supabase estable (solo 1 suscripción en mount)
   useEffect(() => {
     let timerRecarga: NodeJS.Timeout | null = null;
-    const recargarConDebounce = () => {
+    const recargarConDebounce = (esperaMs = 2500, ignorarOculto = true) => {
+      if (ignorarOculto && typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        return;
+      }
       if (timerRecarga) clearTimeout(timerRecarga);
       timerRecarga = setTimeout(() => {
         cargarDatosRef.current(paginaActualRef.current, false);
         cargarMetricasRef.current();
-      }, 600);
+      }, esperaMs);
     };
 
     const canalRealtime = supabase
       .channel('estudiantes_realtime_sync')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, recargarConDebounce)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'consumos' }, recargarConDebounce)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'abonos' }, recargarConDebounce)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, () =>
+        recargarConDebounce(2500, true)
+      )
       .subscribe();
 
     const handleMiniRecarga = () => {
-      recargarConDebounce();
+      recargarConDebounce(600, false);
     };
 
     window.addEventListener(EVENTO_MINI_RECARGA, handleMiniRecarga);

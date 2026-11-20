@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -47,7 +47,7 @@ import {
 } from 'lucide-react';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { obtenerTasaBCV, TASA_BCV_FALLBACK_DEFAULT } from '@/lib/dolarApi';
-import { supabase } from '@/lib/supabaseClient';
+import { supabase, fetchEnLotes } from '@/lib/supabaseClient';
 import {
   formatUSD,
   formatBs,
@@ -66,7 +66,6 @@ import { useSidebar } from '@/components/SidebarContext';
 import { useModalDragScroll } from '@/lib/useModalDragScroll';
 import { useDraggableScroll } from '@/lib/useDraggableScroll';
 import {
-  obtenerSaldosTodosClientes,
   procesarAbonoCliente,
   obtenerSaldoPendienteConsumo,
   obtenerMontoPagadoConsumo,
@@ -334,9 +333,30 @@ export default function DeudasPage() {
       !modalAnular.procesando && setModalAnular((prev) => ({ ...prev, abierto: false })),
   });
 
+  // Modal selector cuando el estudiante tiene múltiples consumos y se pulsa "Anular Venta" directo en su tarjeta
+  const [modalElegirConsumoAnular, setModalElegirConsumoAnular] = useState<{
+    abierto: boolean;
+    cuenta: CuentaEstudianteAgrupada | null;
+  }>({
+    abierto: false,
+    cuenta: null,
+  });
+
+  const dragScrollElegirAnular = useModalDragScroll({
+    isOpen: modalElegirConsumoAnular.abierto,
+    onDismiss: () => setModalElegirConsumoAnular((prev) => ({ ...prev, abierto: false })),
+  });
+
   // Pestaña activa: 'pendientes' (Cuentas por cobrar) o 'pagados' (Solventados / Pagados recientes)
   const [pestanaActiva, setPestanaActiva] = useState<'pendientes' | 'pagados'>('pendientes');
   const [consumosPagados, setConsumosPagados] = useState<DeudaRegistro[]>([]);
+  const [cargandoPagados, setCargandoPagados] = useState<boolean>(false);
+  const pagadosCargadosRef = useRef<boolean>(false);
+  const pestanaActivaRef = useRef(pestanaActiva);
+
+  useEffect(() => {
+    pestanaActivaRef.current = pestanaActiva;
+  }, [pestanaActiva]);
 
   // Notificación toast
   const [notificacion, setNotificacion] = useState<{ tipo: 'exito' | 'info'; texto: string } | null>(null);
@@ -371,12 +391,71 @@ export default function DeudasPage() {
     }
   }, []);
 
-  // Cargar Deudas y Saldos desde Supabase
-  const cargarDeudas = useCallback(async () => {
-    setCargandoDeudas(true);
-    try {
-      const [{ data, error }, saldos, { data: clientesData }, { data: dataPagados }] = await Promise.all([
-        supabase
+  // Helper: adjunta consumo_detalles de forma plana por lotes de 150 IDs (evita nested joins lentos de 3+ segundos en Postgres)
+  const adjuntarDetallesAConsumos = useCallback(async (consumosBase: any[]): Promise<DeudaRegistro[]> => {
+    const ids = consumosBase.map((c) => c.id).filter(Boolean);
+    const mapaDetalles = new Map<string, ConsumoDetalleExtendido[]>();
+
+    if (ids.length > 0) {
+      const CHUNK = 150;
+      const chunks: string[][] = [];
+      for (let i = 0; i < ids.length; i += CHUNK) {
+        chunks.push(ids.slice(i, i + CHUNK));
+      }
+
+      const resultados = await Promise.all(
+        chunks.map((chunkIds) =>
+          supabase
+            .from('consumo_detalles')
+            .select(`
+              id,
+              consumo_id,
+              cantidad,
+              precio_unitario_usd,
+              productos (
+                id,
+                nombre,
+                imagen_url,
+                precio_usd,
+                activo
+              )
+            `)
+            .in('consumo_id', chunkIds)
+        )
+      );
+
+      for (const res of resultados) {
+        if (res.error || !res.data) continue;
+        for (const det of res.data as any[]) {
+          if (!det.consumo_id) continue;
+          let arr = mapaDetalles.get(det.consumo_id);
+          if (!arr) {
+            arr = [];
+            mapaDetalles.set(det.consumo_id, arr);
+          }
+          arr.push(det);
+        }
+      }
+    }
+
+    return consumosBase.map((d: any) => {
+      const cli = Array.isArray(d.clientes) ? d.clientes[0] || null : d.clientes || null;
+      return {
+        ...d,
+        clientes: cli,
+        monto_total_usd: Number(d.monto_total_usd) || 0,
+        fecha: d.fecha || new Date().toISOString(),
+        consumo_detalles: mapaDetalles.get(d.id) || [],
+      };
+    });
+  }, []);
+
+  // Cargar últimos 100 consumos pagados bajo demanda (solo al abrir pestaña 'pagados')
+  const cargarConsumosPagados = useCallback(
+    async (silencioso = false) => {
+      if (!silencioso) setCargandoPagados(true);
+      try {
+        const { data: dataPagados, error: errPag } = await supabase
           .from('consumos')
           .select(`
             id,
@@ -393,126 +472,135 @@ export default function DeudasPage() {
               nombre_representante,
               telefono_whatsapp,
               saldo
-            ),
-            consumo_detalles (
-              id,
-              cantidad,
-              precio_unitario_usd,
-              productos (
-                id,
-                nombre,
-                imagen_url,
-                precio_usd,
-                activo
-              )
-            )
-          `)
-          .eq('pagado', false)
-          .order('fecha', { ascending: false }),
-        obtenerSaldosTodosClientes(),
-        supabase.from('clientes').select('*').order('nombre_estudiante', { ascending: true }),
-        supabase
-          .from('consumos')
-          .select(`
-            id,
-            cliente_id,
-            monto_total_usd,
-            tasa_bcv_historica,
-            fecha,
-            pagado,
-            metodo_pago,
-            clientes (
-              id,
-              nombre_estudiante,
-              grado_seccion,
-              nombre_representante,
-              telefono_whatsapp,
-              saldo
-            ),
-            consumo_detalles (
-              id,
-              cantidad,
-              precio_unitario_usd,
-              productos (
-                id,
-                nombre,
-                imagen_url,
-                precio_usd,
-                activo
-              )
             )
           `)
           .eq('pagado', true)
           .not('cliente_id', 'is', null)
+          .not('metodo_pago', 'ilike', 'anulado%')
           .order('fecha', { ascending: false })
-          .limit(100),
-      ]);
+          .limit(100);
 
-      if (error) {
-        console.error('Error al consultar deudas en Supabase:', error);
-        setDeudas([]);
-      } else {
-        const registrosNormalizados: DeudaRegistro[] = (data || []).map((d: any) => {
-          const cli = Array.isArray(d.clientes) ? d.clientes[0] || null : d.clientes || null;
-          return {
-            ...d,
-            clientes: cli,
-            monto_total_usd: Number(d.monto_total_usd) || 0,
-            fecha: d.fecha || new Date().toISOString(),
-            consumo_detalles: Array.isArray(d.consumo_detalles) ? d.consumo_detalles : [],
-          };
-        });
+        if (errPag) {
+          console.error('Error consultando consumos pagados:', errPag);
+        } else {
+          const normalizados = await adjuntarDetallesAConsumos(dataPagados || []);
+          setConsumosPagados(normalizados);
+          pagadosCargadosRef.current = true;
+        }
+      } catch (e) {
+        console.error('Excepción cargando consumos pagados:', e);
+      } finally {
+        if (!silencioso) setCargandoPagados(false);
+      }
+    },
+    [adjuntarDetallesAConsumos]
+  );
+
+  // Cargar Deudas y Saldos desde Supabase (en paralelo, sin nested joins pesados ni consultas duplicadas a clientes)
+  const cargarDeudas = useCallback(
+    async (silencioso = false) => {
+      if (!silencioso) setCargandoDeudas(true);
+      try {
+        const [pendientesRaw, { data: clientesData }] = await Promise.all([
+          fetchEnLotes<any>(() =>
+            supabase
+              .from('consumos')
+              .select(`
+                id,
+                cliente_id,
+                monto_total_usd,
+                tasa_bcv_historica,
+                fecha,
+                pagado,
+                metodo_pago,
+                clientes (
+                  id,
+                  nombre_estudiante,
+                  grado_seccion,
+                  nombre_representante,
+                  telefono_whatsapp,
+                  saldo
+                )
+              `)
+              .eq('pagado', false)
+              .order('fecha', { ascending: false })
+          ),
+          supabase.from('clientes').select('*').order('nombre_estudiante', { ascending: true }).limit(5000),
+        ]);
+
+        const registrosNormalizados = await adjuntarDetallesAConsumos(pendientesRaw || []);
         setDeudas(registrosNormalizados);
-      }
 
-      if (dataPagados) {
-        const pagadosNormalizados: DeudaRegistro[] = dataPagados
-          .filter((d: any) => !d.metodo_pago?.toLowerCase().startsWith('anulado'))
-          .map((d: any) => {
-            const cli = Array.isArray(d.clientes) ? d.clientes[0] || null : d.clientes || null;
-            return {
-              ...d,
-              clientes: cli,
-              monto_total_usd: Number(d.monto_total_usd) || 0,
-              fecha: d.fecha || new Date().toISOString(),
-              consumo_detalles: Array.isArray(d.consumo_detalles) ? d.consumo_detalles : [],
-            };
-          });
-        setConsumosPagados(pagadosNormalizados);
-      }
+        const listaClientes = Array.isArray(clientesData) ? clientesData : [];
+        setTodosLosClientes(listaClientes);
 
-      setSaldosClientes(saldos || {});
-      setTodosLosClientes(Array.isArray(clientesData) ? clientesData : []);
-    } catch (e) {
-      console.error('Excepción cargando consumos pendientes y saldos:', e);
-      setDeudas([]);
-    } finally {
-      setCargandoDeudas(false);
+        // Derivar saldosClientes en memoria directamente desde clientesData
+        const mapaSaldos: Record<string, ResumenSaldoCliente> = {};
+        for (const c of listaClientes) {
+          const s = Math.round(Number(c.saldo || 0) * 100) / 100;
+          mapaSaldos[c.id] = {
+            clienteId: c.id,
+            saldo: s,
+            deudaTotalUsd: s < 0 ? Math.round(Math.abs(s) * 100) / 100 : 0,
+            saldoAFavorTotalUsd: s > 0 ? s : 0,
+            saldoNetoUsd: s,
+            cantidadConsumosPendientes: s < 0 ? 1 : 0,
+            cantidadAbonos: s > 0 ? 1 : 0,
+          };
+        }
+        setSaldosClientes(mapaSaldos);
+
+        if (pestanaActivaRef.current === 'pagados') {
+          await cargarConsumosPagados(true);
+        } else {
+          pagadosCargadosRef.current = false;
+        }
+      } catch (e) {
+        console.error('Excepción cargando consumos pendientes y saldos:', e);
+        if (!silencioso) setDeudas([]);
+      } finally {
+        if (!silencioso) setCargandoDeudas(false);
+      }
+    },
+    [adjuntarDetallesAConsumos, cargarConsumosPagados]
+  );
+
+  // Cargar consumos pagados bajo demanda cuando el usuario cambia a la pestaña 'pagados'
+  useEffect(() => {
+    if (pestanaActiva === 'pagados' && !pagadosCargadosRef.current) {
+      cargarConsumosPagados();
     }
-  }, []);
+  }, [pestanaActiva, cargarConsumosPagados]);
 
   useEffect(() => {
     setMontado(true);
     cargarTasa();
     cargarDeudas();
 
-    // Sincronización en tiempo real con Supabase con debounce protector
+    // Sincronización en tiempo real silenciosa con debounce de 2.5s (ignora pestañas en segundo plano)
     let timerRecarga: NodeJS.Timeout | null = null;
-    const recargarConDebounce = () => {
+    const recargarConDebounce = (esperaMs = 2500, ignorarOculto = true) => {
+      if (ignorarOculto && typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        return;
+      }
       if (timerRecarga) clearTimeout(timerRecarga);
       timerRecarga = setTimeout(() => {
-        cargarDeudas();
-      }, 600);
+        cargarDeudas(true);
+      }, esperaMs);
     };
 
     const canalRealtime = supabase
       .channel('deudas_realtime_sync')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'consumos' }, recargarConDebounce)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, recargarConDebounce)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'consumos' }, () =>
+        recargarConDebounce(2500, true)
+      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, () =>
+        recargarConDebounce(2500, true)
+      )
       .subscribe();
 
     const handleMiniRecarga = () => {
-      recargarConDebounce();
+      recargarConDebounce(600, false);
     };
 
     window.addEventListener(EVENTO_MINI_RECARGA, handleMiniRecarga);
@@ -1680,7 +1768,7 @@ export default function DeudasPage() {
             {/* Botón Refrescar */}
             <button
               type="button"
-              onClick={cargarDeudas}
+              onClick={() => cargarDeudas(false)}
               disabled={cargandoDeudas}
               className="flex items-center gap-1.5 shrink-0 rounded-2xl border border-gray-200/80 bg-white px-3 py-2 text-xs font-semibold text-gray-700 shadow-2xs hover:bg-gray-50 transition disabled:opacity-60"
               title="Recargar deudas"
@@ -1691,7 +1779,7 @@ export default function DeudasPage() {
         </div>
 
         {/* Listado de Cuentas Consolidadas por Estudiante o Consumos Pagados */}
-        {cargandoDeudas ? (
+        {cargandoDeudas || (pestanaActiva === 'pagados' && cargandoPagados) ? (
           <div className="space-y-3">
             {[1, 2, 3].map((n) => (
               <div
@@ -2041,43 +2129,51 @@ export default function DeudasPage() {
                             <span>{cuenta.consumos.length === 1 ? `Pagar ${formatUSD(cuenta.totalDeudaUsd)}` : 'Liquidar Total'}</span>
                           </button>
 
-                          {/* Si tiene exactamente 1 consumo, botones directos de acción rápida */}
+                          {/* Si tiene exactamente 1 consumo, mostrar también Editar Abono directo */}
                           {cuenta.consumos.length === 1 && (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setModalEditarAbono({
-                                    abierto: true,
-                                    consumo: cuenta.consumos[0],
-                                    cliente: cuenta.cliente || null,
-                                  })
-                                }
-                                className="flex items-center gap-1 rounded-2xl border border-indigo-200 dark:border-indigo-900 bg-indigo-50 dark:bg-indigo-950/40 px-3 py-2 text-xs font-bold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 transition active:scale-95 shadow-2xs"
-                                title="Modificar o revertir abono de este consumo"
-                              >
-                                <Coins className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
-                                <span>Editar Abono</span>
-                              </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setModalEditarAbono({
+                                  abierto: true,
+                                  consumo: cuenta.consumos[0],
+                                  cliente: cuenta.cliente || null,
+                                })
+                              }
+                              className="flex items-center gap-1 rounded-2xl border border-indigo-200 dark:border-indigo-900 bg-indigo-50 dark:bg-indigo-950/40 px-3 py-2 text-xs font-bold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 transition active:scale-95 shadow-2xs"
+                              title="Modificar o revertir abono de este consumo"
+                            >
+                              <Coins className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
+                              <span>Editar Abono</span>
+                            </button>
+                          )}
 
-                              <button
-                                type="button"
-                                onClick={() =>
+                          {/* Botón Anular Venta siempre visible en TODAS las tarjetas (1 o múltiples consumos) */}
+                          {cuenta.consumos.length >= 1 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (cuenta.consumos.length === 1) {
                                   setModalAnular({
                                     abierto: true,
                                     consumo: cuenta.consumos[0],
                                     cliente: cuenta.cliente || null,
                                     procesando: false,
                                     error: null,
-                                  })
+                                  });
+                                } else {
+                                  setModalElegirConsumoAnular({
+                                    abierto: true,
+                                    cuenta,
+                                  });
                                 }
-                                className="flex items-center gap-1 rounded-2xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-xs font-bold text-rose-700 dark:text-rose-300 hover:bg-rose-100 transition active:scale-95 shadow-2xs"
-                                title="Anular venta y cancelar consumo"
-                              >
-                                <RotateCcw className="h-3.5 w-3.5 text-rose-600 dark:text-rose-400" />
-                                <span>Anular Venta</span>
-                              </button>
-                            </>
+                              }}
+                              className="flex items-center gap-1 rounded-2xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-xs font-bold text-rose-700 dark:text-rose-300 hover:bg-rose-100 transition active:scale-95 shadow-2xs"
+                              title="Anular venta y cancelar consumo"
+                            >
+                              <RotateCcw className="h-3.5 w-3.5 text-rose-600 dark:text-rose-400" />
+                              <span>Anular Venta</span>
+                            </button>
                           )}
                         </div>
                       </div>
@@ -3467,6 +3563,114 @@ export default function DeudasPage() {
         tasaBcv={tasaBcv}
         onExito={handleExitoReversionPago}
       />
+
+      {/* Modal Selector de Consumo a Anular (cuando el alumno tiene múltiples consumos) */}
+      <Dialog.Root
+        open={modalElegirConsumoAnular.abierto}
+        onOpenChange={(abierto) =>
+          setModalElegirConsumoAnular((prev) => ({
+            ...prev,
+            abierto,
+            ...(!abierto ? { cuenta: null } : {}),
+          }))
+        }
+      >
+        <Dialog.Portal>
+          <Dialog.Overlay
+            {...dragScrollElegirAnular.overlayProps}
+            className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs transition-opacity animate-in fade-in"
+          />
+          <Dialog.Content
+            style={dragScrollElegirAnular.style}
+            {...dragScrollElegirAnular.dragProps}
+            className="fixed inset-x-0 bottom-0 z-50 max-h-[85dvh] overflow-y-auto overscroll-contain touch-scroll-ios rounded-t-3xl sm:rounded-3xl border-t sm:border border-gray-200/90 dark:border-slate-800 bg-white dark:bg-[#0D111A] p-4 sm:p-6 pb-28 sm:pb-6 shadow-2xl outline-none duration-300 animate-in slide-in-from-bottom sm:slide-in-from-bottom-0 sm:fade-in-0 sm:zoom-in-95 sm:inset-auto sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:w-[95vw] sm:max-w-md cursor-grab active:cursor-grabbing"
+          >
+            <div className="mx-auto mb-3 -mt-1 flex h-6 w-full cursor-grab active:cursor-grabbing items-center justify-center sm:hidden touch-none">
+              <div className="h-1.5 w-12 rounded-full bg-gray-300 dark:bg-slate-700" />
+            </div>
+
+            <div className="flex items-start justify-between gap-3 mb-4">
+              <div>
+                <Dialog.Title className="text-base font-bold text-gray-900 dark:text-slate-100">
+                  ¿Cuál consumo deseas anular?
+                </Dialog.Title>
+                <Dialog.Description className="text-xs text-gray-500 dark:text-slate-400">
+                  {modalElegirConsumoAnular.cuenta?.cliente?.nombre_estudiante || 'Estudiante'} tiene{' '}
+                  {modalElegirConsumoAnular.cuenta?.consumos.length || 0} consumos sin liquidar.
+                </Dialog.Description>
+              </div>
+              <button
+                type="button"
+                onClick={() => setModalElegirConsumoAnular({ abierto: false, cuenta: null })}
+                className="rounded-xl p-1.5 text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-800 transition"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-2.5">
+              {(modalElegirConsumoAnular.cuenta?.consumos || []).map((cons) => {
+                let fechaConsumoTxt = cons.fecha;
+                try {
+                  fechaConsumoTxt = new Date(cons.fecha).toLocaleDateString('es-VE', {
+                    day: '2-digit',
+                    month: 'short',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  });
+                } catch {}
+                const saldoPend = obtenerSaldoPendienteConsumo(cons);
+                return (
+                  <div
+                    key={cons.id}
+                    className="rounded-2xl border border-gray-200/80 dark:border-slate-800 bg-gray-50/70 dark:bg-[#111726] p-3 flex items-center justify-between gap-3"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[11px] text-gray-500 dark:text-slate-400 font-medium">
+                        {fechaConsumoTxt}
+                      </div>
+                      <div className="text-xs font-bold text-gray-900 dark:text-slate-100 truncate mt-0.5">
+                        {cons.consumo_detalles && cons.consumo_detalles.length > 0
+                          ? cons.consumo_detalles
+                              .map((d: any) => `${d.cantidad}x ${d.productos?.nombre || 'Producto'}`)
+                              .join(', ')
+                          : 'Consumo en cantina'}
+                      </div>
+                      <div className="text-xs font-mono font-bold text-rose-700 dark:text-rose-400 mt-0.5">
+                        {formatUSD(cons.monto_total_usd)}
+                        {saldoPend < cons.monto_total_usd && (
+                          <span className="text-[10px] font-normal text-gray-500 ml-1.5">
+                            (Pendiente: {formatUSD(saldoPend)})
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const cli = modalElegirConsumoAnular.cuenta?.cliente || null;
+                        setModalElegirConsumoAnular({ abierto: false, cuenta: null });
+                        setModalAnular({
+                          abierto: true,
+                          consumo: cons,
+                          cliente: cli,
+                          procesando: false,
+                          error: null,
+                        });
+                      }}
+                      className="flex items-center gap-1 rounded-xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/50 px-3 py-2 text-xs font-bold text-rose-700 dark:text-rose-300 hover:bg-rose-100 transition shrink-0 active:scale-95"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      <span>Anular</span>
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
 
       {/* Modal Confirmar Anulación de Venta (Radix UI Dialog) */}
       <Dialog.Root

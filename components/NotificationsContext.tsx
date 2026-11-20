@@ -6,7 +6,6 @@ import { supabase } from '@/lib/supabaseClient';
 import { obtenerTasaBCV, TASA_BCV_FALLBACK_DEFAULT } from '@/lib/dolarApi';
 import { calcularConversionBs, formatUSD } from '@/lib/utils';
 import { ProveedorCuenta } from '@/types/pos';
-import { obtenerSaldosTodosClientes } from '@/lib/clientBalance';
 
 export interface NotificacionItem {
   id: string;
@@ -99,28 +98,34 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
 
   const cargarDatos = useCallback(async (forzar = false) => {
     const ahora = Date.now();
-    // Prevenir peticiones duplicadas en menos de 4 segundos salvo refresco forzado
-    if (!forzar && (ahora - ultimoFetchRef.current < 4000 || ejecutandoFetchRef.current)) {
+    // Prevenir peticiones duplicadas en menos de 30 segundos salvo refresco forzado
+    if (!forzar && (ahora - ultimoFetchRef.current < 30000 || ejecutandoFetchRef.current)) {
       return;
     }
     ejecutandoFetchRef.current = true;
     ultimoFetchRef.current = ahora;
 
     try {
-      // 1. Obtener Tasa BCV
-      let tasaActual = TASA_BCV_FALLBACK_DEFAULT;
-      try {
-        const tasa = await obtenerTasaBCV();
-        if (tasa && tasa > 0) tasaActual = tasa;
-      } catch (e) {
-        console.error('Error al obtener tasa BCV para notificaciones:', e);
-      }
+      // Ejecutar en paralelo Tasa BCV, Cuentas por Pagar y Clientes con Deuda
+      const [tasaRes, provRes, cliRes] = await Promise.all([
+        obtenerTasaBCV().catch((e) => {
+          console.error('Error al obtener tasa BCV para notificaciones:', e);
+          return TASA_BCV_FALLBACK_DEFAULT;
+        }),
+        supabase
+          .from('proveedores_cuentas')
+          .select('id, nombre_proveedor, concepto_mercancia, monto_usd, pagado, fecha_vencimiento_pago')
+          .order('fecha_vencimiento_pago', { ascending: true }),
+        supabase
+          .from('clientes')
+          .select('id, nombre_estudiante, grado_seccion, nombre_representante, saldo')
+          .lt('saldo', 0)
+          .order('saldo', { ascending: true }),
+      ]);
 
-      // 2. Obtener Cuentas por Pagar a Proveedores (columnas estrictas, sin payload innecesario)
-      const { data: cuentasData, error: cuentasErr } = await supabase
-        .from('proveedores_cuentas')
-        .select('id, nombre_proveedor, concepto_mercancia, monto_usd, pagado, fecha_vencimiento_pago')
-        .order('fecha_vencimiento_pago', { ascending: true });
+      const tasaActual = tasaRes && tasaRes > 0 ? tasaRes : TASA_BCV_FALLBACK_DEFAULT;
+      const { data: cuentasData, error: cuentasErr } = provRes;
+      const { data: clientesConDeudaData, error: clientesErr } = cliRes;
 
       if (cuentasErr) {
         console.error('Error al cargar cuentas de proveedores en notificaciones:', cuentasErr);
@@ -205,13 +210,6 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
 
       const totalPendienteBsProv = calcularConversionBs(totalPendienteUsdProv, tasaActual);
 
-      // 3. Obtener Cuentas por Cobrar directamente de la cuenta corriente unificada (clientes.saldo < 0)
-      const { data: clientesConDeudaData, error: clientesErr } = await supabase
-        .from('clientes')
-        .select('id, nombre_estudiante, grado_seccion, nombre_representante, saldo')
-        .lt('saldo', 0)
-        .order('saldo', { ascending: true });
-
       if (clientesErr) {
         console.error('Error al cargar clientes con saldo deudor en notificaciones:', clientesErr);
       }
@@ -282,28 +280,30 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
   // 2. Suscripción a eventos locales y Realtime optimizado con debouncing (SIN polling continuo)
   useEffect(() => {
     let debounceTimer: NodeJS.Timeout | null = null;
-    const triggerDebounced = () => {
+    const triggerDebounced = (ignorarOculto = false) => {
+      if (ignorarOculto && typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        return;
+      }
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
         cargarDatos(true);
-      }, 1000);
+      }, 4000);
     };
 
     // Suscripción al evento personalizado local emitido tras acciones contables
     const handleEvento = () => {
-      triggerDebounced();
+      triggerDebounced(false);
     };
 
     if (typeof window !== 'undefined') {
       window.addEventListener(EVENTO_ACTUALIZAR_NOTIFICACIONES, handleEvento);
     }
 
-    // Sincronización Realtime con Supabase protegida con debounce para no saturar con múltiples eventos
+    // Sincronización Realtime protegida con debounce de 4s solo para cuentas de proveedores y saldos de clientes
     const canalRealtime = supabase
       .channel('notificaciones_realtime_sync')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'proveedores_cuentas' }, triggerDebounced)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'consumos' }, triggerDebounced)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, triggerDebounced)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'proveedores_cuentas' }, () => triggerDebounced(true))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, () => triggerDebounced(true))
       .subscribe();
 
     return () => {

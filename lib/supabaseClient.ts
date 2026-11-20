@@ -17,10 +17,100 @@ function parseBrowserCookies(): { name: string; value: string }[] {
   if (typeof document === 'undefined') return [];
   const cookieString = document.cookie;
   if (!cookieString) return [];
-  return cookieString.split('; ').map((c) => {
-    const [name, ...val] = c.split('=');
-    return { name, value: val.join('=') };
-  });
+  return cookieString
+    .split('; ')
+    .filter(Boolean)
+    .map((c) => {
+      const idx = c.indexOf('=');
+      if (idx === -1) return { name: c, value: '' };
+      return { name: c.slice(0, idx), value: c.slice(idx + 1) };
+    });
+}
+
+let cookiesRespaldoRestauradas = false;
+
+function restaurarCookiesDesdeRespaldoSiFaltan() {
+  if (cookiesRespaldoRestauradas || typeof window === 'undefined') return;
+  cookiesRespaldoRestauradas = true;
+  try {
+    const existentes = new Set(parseBrowserCookies().map((c) => c.name));
+    const maxAge = 60 * 60 * 24 * 365;
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('sb_backup_')) {
+        const cookieName = key.replace('sb_backup_', '');
+        if (!existentes.has(cookieName)) {
+          const val = localStorage.getItem(key);
+          if (val) {
+            const secureFlag = window.location.protocol === 'https:' ? '; Secure' : '';
+            document.cookie = `${cookieName}=${val}; path=/; max-age=${maxAge}; SameSite=Lax${secureFlag}`;
+          }
+        }
+      }
+    }
+  } catch {
+    // Silenciar errores de acceso a almacenamiento
+  }
+}
+
+/**
+ * Fetch resiliente para móviles (especialmente iOS Safari):
+ * - Aplica un timeout máximo de 20s para evitar cuelgues de 4-5 minutos en sockets colgados.
+ * - Reintenta 1 vez peticiones de solo lectura (GET/HEAD) si Safari cierra un socket keep-alive inactivo.
+ */
+async function fetchConTimeoutSupabase(
+  input: RequestInfo | URL,
+  init?: RequestInit
+): Promise<Response> {
+  const TIMEOUT_MS = 20000;
+  const method = (init?.method || 'GET').toUpperCase();
+  const esLectura = method === 'GET' || method === 'HEAD';
+
+  const ejecutarFetch = async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    const externalSignal = init?.signal;
+
+    const onExternalAbort = () => controller.abort();
+    if (externalSignal) {
+      if (externalSignal.aborted) {
+        clearTimeout(timer);
+        controller.abort();
+      } else {
+        externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+      }
+    }
+
+    try {
+      return await fetch(input, {
+        ...init,
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+      if (externalSignal) {
+        externalSignal.removeEventListener('abort', onExternalAbort);
+      }
+    }
+  };
+
+  try {
+    return await ejecutarFetch();
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : '';
+    const esErrorRedTransitorio =
+      esLectura &&
+      !init?.signal?.aborted &&
+      (msg.includes('Load failed') ||
+        msg.includes('Failed to fetch') ||
+        msg.includes('NetworkError') ||
+        (err instanceof Error && err.name === 'AbortError'));
+
+    if (esErrorRedTransitorio) {
+      return await ejecutarFetch();
+    }
+    throw err;
+  }
 }
 
 /**
@@ -31,38 +121,13 @@ function parseBrowserCookies(): { name: string; value: string }[] {
 export const supabase =
   typeof window !== 'undefined'
     ? createBrowserClient(supabaseUrl, supabaseAnonKey, {
+        global: {
+          fetch: fetchConTimeoutSupabase,
+        },
         cookies: {
           getAll() {
-            const browserCookies = parseBrowserCookies();
-            const cookieMap = new Map<string, string>();
-            browserCookies.forEach((c) => cookieMap.set(c.name, c.value));
-
-            // Respaldo resiliente para iOS Safari: si las cookies fueron purgadas en segundo plano,
-            // restaurarlas inmediatamente desde localStorage para no cerrar la sesión.
-            try {
-              for (let i = 0; i < localStorage.length; i++) {
-                const key = localStorage.key(i);
-                if (key && key.startsWith('sb_backup_')) {
-                  const cookieName = key.replace('sb_backup_', '');
-                  if (!cookieMap.has(cookieName)) {
-                    const val = localStorage.getItem(key);
-                    if (val) {
-                      cookieMap.set(cookieName, val);
-                      // Restaurar también en document.cookie
-                      const maxAge = 60 * 60 * 24 * 365; // 1 año
-                      document.cookie = `${cookieName}=${val}; path=/; max-age=${maxAge}; SameSite=Lax`;
-                    }
-                  }
-                }
-              }
-            } catch (e) {
-              // Silenciar errores de acceso a almacenamiento
-            }
-
-            return Array.from(cookieMap.entries()).map(([name, value]) => ({
-              name,
-              value,
-            }));
+            restaurarCookiesDesdeRespaldoSiFaltan();
+            return parseBrowserCookies();
           },
           setAll(cookiesToSet) {
             const mantenerSesion =
